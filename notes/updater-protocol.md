@@ -1666,6 +1666,12 @@ plaintext is the same in all six, which its identical position and run length
 makes likely, then the six images are encrypted under different keys or
 otherwise separated. `[G]` as to mechanism.
 
+**This is not in conflict with §8.5's "the key is unchanged across the release
+history", and the two are easy to misread as contradictory.** They are
+statements on different axes: *across resource names* the filler ciphertext
+always differs, *across releases of one name* it never does. §8.5a tabulates
+both at once and turns the pair into the wrong-image guard.
+
 ### What follows for us
 - The bytes are opaque to the host and stay opaque. §1.3.
 - The device decrypts. We never need to.
