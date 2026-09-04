@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(analyzeHeadless *)",
+      "Bash(ghidraRun *)",
+      "Bash(pyghidraRun *)",
+      "Bash(/opt/homebrew/opt/ghidra/libexec/support/*)",
+      "Bash(/opt/homebrew/Cellar/ghidra/*)",
+      "Bash(brew info ghidra*)",
+      "Bash(brew install ghidra*)",
+      "Bash(brew list ghidra*)",
+      "Bash(brew --prefix ghidra*)",
+      "Bash(rabin2 *)",
+      "Bash(radare2 *)",
+      "Bash(r2 *)",
+      "Bash(radiff2 *)",
+      "Bash(rafind2 *)",
+      "Bash(rasm2 *)",
+      "Bash(rax2 *)",
+      "Bash(objdump *)",
+      "Bash(nm *)",
+      "Bash(strings *)",
+      "Bash(xxd *)",
+      "Bash(hexdump *)",
+      "Bash(od *)",
+      "Bash(cmp *)",
+      "Bash(file *)",
+      "Bash(shasum *)",
+      "Bash(sha256sum *)",
+      "Bash(md5 *)",
+      "Bash(java *)",
+      "Bash(jq *)",
+      "Bash(python3 *)"
+    ]
+  }
+}

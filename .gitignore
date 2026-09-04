@@ -1,0 +1,41 @@
+# Vendor binaries. Endgame Gear's proprietary Windows software, kept local and
+# never published. SHA-256 of every build analysed is pinned in notes/binaries.md.
+*.exe
+old-config-executables/
+old-firmware-executables/
+files/
+
+# Ghidra projects and extraction output
+*.gpr
+*.rep/
+*.lock
+ghidra_projects/
+*.jsonl
+
+# Extracted firmware images
+*.bin
+*.hex
+
+# Build output
+build/
+.build/
+cmake-build-*/
+compile_commands.json
+*.o
+*.a
+*.dSYM/
+.cache/
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local overrides
+.claude/settings.local.json
