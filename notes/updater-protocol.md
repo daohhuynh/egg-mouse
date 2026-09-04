@@ -432,6 +432,54 @@ out to small builders, and its dialog member offsets differ (`+0x25c` block
 count, `+0x25a60` checksum, `+0x25a7c` resource cursor, versus A's `+0x21c`,
 `+0x25a20`, `+0x25a3c`). Those are layout, not protocol.
 
+## 5.8 Function correspondence between the two code bases
+
+For the three builds sharing a `.text` (1.06, 1.07, 1.10) every function is at
+the same address and is byte-identical, so "how it differs across versions" has
+one answer for all of them: **it does not** [D].
+
+Against 1.04 the mapping is below. It was established from cited evidence — the
+imported APIs each function calls, the literal strings it references, and the
+call-site argument patterns — not from a similarity score.
+
+| role | 1.06/1.07/1.10 | 1.04 | evidence |
+| --- | --- | --- | --- |
+| HID enumeration, identity match | `0x00401000` | `0x00401bc0` | both are the sole caller of `HidD_GetHidGuid`/`GetAttributes`/`HidP_GetCaps`/`SetupDiEnumDeviceInterfaces` in their binary |
+| `HidD_SetFeature` wrapper + retry | `0x004012a0` | `0x00401e30` | sole `HidD_SetFeature` caller in each |
+| `HidD_GetFeature` wrapper + retry | `0x00401330` | `0x00401ed0` | sole `HidD_GetFeature` caller in each |
+| read `bcdDevice`, format version | `0x004011f0` | `0x00401d80` | both called once, from the Update handler, before `L"Mouse firmware current version %.2f"` |
+| MFC resource-string helper | `0x004023f0` | `0x00401fc0` | `LoadResource`+`LockResource`+`SizeofResource`, no `FWFILE` |
+| **load `FWFILE` 140, split, checksum** | `0x00403200` | `0x00404330` | `FindResourceW(NULL,0x8c,L"FWFILE")` and `L"Loading firmware file failed"` in both |
+| whole-image checksum over blocks | `0x00403580` | inlined into `0x00404330` | 1.04 folds the sum loop into the loader (`0x4044xx`) |
+| **Update button handler** | `0x004033b0` | `0x004044f0` | `L"Read firmware file failed"`, `L"Mouse firmware current version %.2f"`, `L"Device not found"` in both |
+| find device / decide mode 1 vs 2 | `0x00403600` | **inlined** into `0x004044f0` | 1.04's PID literals `0x1978` at `0x4045b6`, `0x4045e1`, `0x40461d` and `0x1977` at `0x404686` all sit inside `0x004044f0` |
+| **enter bootloader** | `0x00403750` | `0x00404760` | `L"send bldr request failed"`, `L"Open bldr device request failed"`; PID `0x1977` at `0x404830`, `0x404862`, `0x4048a3` |
+| **flash driver** | `0x00403960` | `0x00404980` | `L"send bldr start request failed"`, `L"send firmware block data..."`, `L"send block data request failed"`, `L"get all check sum error"`, `L"send bldr complete request failed"`, `L"Update Succeed…"`, `L"Update failed, try again"` — all seven in both |
+| bootloader-start command builder | `0x00401890` | **inlined** into `0x00404980` | 1.04 builds `A0 03` at `0x404a34`–`0x404a54` |
+| **write one block** | `0x00401980` | `0x00402a90` | called from the block loop with `ECX = i+0x34`, `EDX = data`, stack `0xA1` — `0x404b82`–`0x404b98` |
+| **verify and repair one block** | `0x00401c90` | `0x00402c00` | called next with `CL = i+0x34`, `EDX = data` — `0x404bc3`–`0x404bd5` |
+| read one block back | `0x00401ad0` | inlined into `0x00402c00` | 1.04's `movw $0x7a0` sits inside it |
+| whole-image checksum query | `0x00401bb0` | **inlined** into `0x00404980` | `movw $0x8a1` + `movb $0x34` at `0x404c68`–`0x404c73` |
+| worker thread trampolines | `0x00402f00`, `0x00402f10` | `0x00404140`, `0x00404150` | both are 15-byte `AfxBeginThread` targets calling straight into the two drivers |
+
+**The pattern of difference is inlining, not protocol.** 1.04 folds five of the
+small builders into its two big drivers, which is why its flash driver is 1,728
+bytes against 1,386. Every command byte, retry bound and sleep survives the
+change unaltered (§5.7).
+
+Dialog member offsets differ and are the other systematic difference:
+
+| meaning | A (1.06/1.07/1.10) | B (1.04) |
+| --- | --- | --- |
+| block count | `+0x21c` | `+0x25c` |
+| block buffer base | `+0x220` | `+0x260` |
+| whole-image checksum | `+0x25a20` | `+0x25a60` |
+| progress value | `+0x25a24` | `+0x25a64` |
+| busy flag | `+0x25a38` | `+0x25a78` |
+| resource read cursor | `+0x25a3c` | `+0x25a7c` |
+| status label `CWnd` | `+0x1a4` | `+0x1d8` |
+| action button `CWnd` | `+0x130` | `+0x158` |
+
 ## 6. Not yet derived — do not guess
 
 Resolved since the first draft, by disassembly: the register-passed arguments of
