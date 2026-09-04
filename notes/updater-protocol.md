@@ -1319,13 +1319,30 @@ and — as importantly — **what has not**.
 | every DARK byte belongs to a known function | 6.2.2 | per-function re-disassembly (`darkclass.py`) |
 | `0x5c69a8` is the device-path `CString` | 6.2.4 | read at `0x401000` and `0x401d20`–`0x401d36` |
 | the repair-loop defect (we deviate from it) | 5.6 | re-read `0x401c90`–`0x401e61`; the `-0x424` slot proven single-assignment by scanning the body for its displacement |
+| the four resource APIs are `FindResourceW` / `SizeofResource` / `LoadResource` / `LockResource` | 4, 8.3 | resolved from the **import table**, the loader-authoritative source, not from Ghidra's slot names: `0x51b230` `0x51b220` `0x51b228` `0x51b224` |
+| the load path performs no transform | 8.3 | re-read `0x403200`–`0x403313`: `shrl $0xa` → `obj+0x21c`, `LockResource` → `obj+0x25a3c`, `movl $0x1,%ebx` as the copy stride, then four `movzbl`/`movb`/`addl %ebx` groups per iteration into `obj+0x220` |
+| the checksum is a plain 32-bit additive sum | 8.4 | re-read `0x403580`–`0x4035f4`: four accumulators, `movzbl` at `+(-1,0,1,2)`, `addl $0x4`, `cmpl $0x400`, partials summed at `0x4035d8`, `addl $0x400` per chunk |
+| §4's entropy, §8.1's census, §8.5's chunk structure | 4, 8.1, 8.5 | resource tree re-walked from the PE data directory by a second parser: all `FWFILE` are 66560 = 65×1024 remainder 0, H 7.941–7.952; 140 has 31 distinct chunks of 65 with exactly one repeat run, chunks **29–63**, `cefe77fb6c23f0d4…`, byte-identical in all four updaters; 133/135/137 frozen, 140/142 change every release, 143 only in 1.10 |
 
 **Not re-derived, and still resting on their original derivation:**
 
 - §3.7b's response byte offsets beyond those named above.
-- §4's `FWFILE` entropy figures and the load path in §8.3–§8.5 (read once,
-  carefully, but not re-derived by a second route).
-- The XM1r file in its entirety; it is analogy, not evidence (§1 there).
+- The XM1r file — substantially re-derived 2026-09-04 (`notes/xm1r-flasher.md`
+  §3.1, §3.2a, §5.1, and the §6.9 correction), but it is analogy, not evidence
+  (§1 there), so it is not held to this standard and nothing in it may inform an
+  OP1 byte.
+
+**A parser trap found while doing this, recorded because it produced a
+convincing wrong answer for several minutes.** Resource-directory strings are
+**length-prefixed and NOT NUL-terminated** (`IMAGE_RESOURCE_DIR_STRING_U`: a
+`WORD` count then that many UTF-16 code units). A throwaway re-walk that scanned
+for a NUL ran off the end of `FWFILE` into the next string, produced the type
+name `"FWFILE\x11AFX_DIALOG_LAYOUT"`, and therefore reported that **updater 1.04
+has no `FWFILE` resources at all** — which would have contradicted §8.1 and
+§8.5's cross-version claim. The checked-in tooling is correct
+(`filemap.py:resname`, `rsrc.py:walk` both use the length prefix); it was the
+second parser that was wrong. The general point is the one §6.3 keeps making: a
+negative result is a claim about the method first and the binary second.
 
 The distinction is the point. A note that says everything is verified is
 indistinguishable from a note that has not checked, so the second list has to
