@@ -1302,6 +1302,8 @@ has a blind spot it is named rather than left implied.
 | device-touching functions among the 474 bodies unique to fw110 | 474 read bodies | **10, all already documented** | Independent readers, verified against the bytes; plus the mechanical scan of §9 agreeing. |
 | invented call targets in the reading pass | 4,686 reported targets | **1** (0.02%) | Every reported target checked against the function's own disassembly. |
 | invented import references in the reading pass | 876 reported slots | **0** | Same check. |
+| **any network capability at all** | all 9 binaries — import table, delay-import table, and every DLL-name string in ASCII and both UTF-16 phases | **0** | Three routes. No binary imports or delay-imports `wininet`, `winhttp`, `ws2_32`, `wsock32`, `urlmon`, `httpapi`, `iphlpapi`, `netapi32`, `mswsock`, `dnsapi` or `rasapi32`; and none of those names occurs as a *string* either, so there is no name for `LoadLibrary` to take. The only `.dll` string in any binary that is not an imported DLL is cfg107/cfg100's `hid.dll`, already documented in `config-protocol.md` §2. **Blind spot:** a DLL name assembled at runtime from pieces, and COM-brokered networking — for the latter, no `WinHttp`/`XMLHTTP`/`MSXML`/`ServerXMLHTTP` ProgID string exists in any binary either. |
+| a URL of any kind | all 9 binaries, ASCII and UTF-16 | **0 outside the manifest** | The only `http://` strings are `http://schemas.microsoft.com/SMI/2005/WindowsSettings` in the embedded application manifest. The only `connect` hits are MFC's shell-restriction name table (`NoNetConnect`/`Disconnect`). |
 
 Two of these were **not** zero when first computed, and both changed because the
 method was wrong rather than because the binary was:
@@ -1312,6 +1314,15 @@ method was wrong rather than because the binary was:
   exhaustive over the wrong set (§9.3).
 
 Which is the argument for writing the scope next to every zero.
+
+**The two network rows are worth stating as a positive**, because they bound
+something our own tools must not quietly exceed: **Endgame's config tool and
+firmware updater are entirely offline programs.** They do not check for updates,
+do not fetch a firmware image, and do not report anything. Every firmware image
+they can install is compiled into the executable (§8), which is why §1.4 of
+`CLAUDE.md` is implementable at all — there is no download path to have to
+reproduce, and a version of our tool that acquired one would be doing something
+the vendor's never did.
 
 ## 6.4 Re-derivation log — which claims were re-proven, and how
 
