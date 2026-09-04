@@ -611,6 +611,14 @@ Dialog member offsets differ and are the other systematic difference:
 
 ## 6. Not yet derived — do not guess
 
+**One item moved out of this section on 2026-09-03.** Whether the config tool
+shares this transport is no longer open: it does. Configuration tool v1.07 uses
+the same two feature report IDs at the same two lengths, the same byte-1
+framing, the same 1024-byte payload at `+0x10`, the same five `GetLastError`
+retry codes and the same `resp[1]` status convention. Derived in
+`notes/config-protocol.md` §1. The command *numbers* are disjoint and must not
+be read across.
+
 Resolved since the first draft, by disassembly: the register-passed arguments of
 `FUN_00401890`, `FUN_00401980`, `FUN_00401ad0` and `FUN_00401c90`, and the block
 index. See §3. The first draft of this file, written from the decompiler alone,
