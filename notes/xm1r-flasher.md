@@ -68,13 +68,25 @@ updater never gates on version. This one does. Do not generalise either way.
 
 ## 2. The complete UI surface  [D-X]
 
-> **CORRECTION 2026-09-04.** There are **eleven** `TEXTFILE` resources, not one:
-> names **4000–4010**. 4000 is 4,844 bytes; 4001–4010 are 4,720 bytes each.
-> Found by the exhaustive resource walk in `Tools/ghidra-export/filemap.py`,
-> whose whole-file partition closes to zero residue, so the count is complete
-> rather than "what was noticed". Only 4000 has been read. The other ten are
-> **unread** — near-identical sizes suggest translations of the same text, but
-> that is `[G]` and they have not been opened. Recorded as an open item.
+> **CORRECTION 2026-09-04, and now RESOLVED.** There are **eleven** `TEXTFILE`
+> resources, not one: names **4000–4010**, found by the exhaustive resource walk
+> in `Tools/ghidra-export/filemap.py`, whose whole-file partition closes to zero
+> residue — so the count is complete, not "what was noticed".
+>
+> All eleven have now been read, and there are only **two distinct contents**:
+> **4001–4010 are byte-identical to one another** (SHA-256 `521de15e…`, 4,720 B,
+> 32 lines each), and 4000 (4,844 B) differs from them in **exactly one line** —
+> its `<END_OF_FILE>` marker carries the copyright suffix quoted in §1. Ten
+> identical copies of a UI string table is what an unfilled template slot looks
+> like in a toolkit that expects one per supported product.
+>
+> Mechanical corroboration of §1's third-party claim while checking this:
+> `Ruling` appears in `XM1r_Flash_Upgrade_1.9.46.exe` in both ASCII and UTF-16,
+> and in **none of the eight Endgame binaries** in either encoding. So the two
+> code bases share no toolkit lineage, and the practical consequence is worth
+> stating plainly: **everything in this file is analogy, never evidence, about
+> the OP1 protocol.** A second vendor's flasher shows what a flasher *can* look
+> like; it says nothing about what Endgame's does.
 
 `TEXTFILE` resource **4000**, lang 1033, 4,844 bytes, UTF-16LE. Resources
 4001–4010 are all byte-identical to each other (`521de15e…`) and differ from
