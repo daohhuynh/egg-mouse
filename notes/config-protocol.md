@@ -4,9 +4,14 @@ Derived independently from the vendor `.exe` files, statically. Nothing here has
 touched hardware: there is **no `[O]` in this file**. Provenance tags per
 `CLAUDE.md` §1.2.
 
-Scope so far: **configuration tool v1.07 only** (`cfg107`). The other three
-(1.04, 1.01, 1.00) are not yet read; nothing here should be assumed to hold for
-them until it is checked.
+Scope: **all four configuration tools** — cfg107, cfg104, cfg101, cfg100. Claims
+state which binaries they were checked against. cfg100 is a **separate code
+base** (11,071 functions vs ~9,500) and is the cross-check on the other three,
+the way fw104 is for the updaters.
+
+**Corrections applied 2026-09-04 are marked inline.** Two mattered: §2 undercounted
+the device-facing surface by missing dynamically resolved HID entry points, and a
+retracted section was left standing as live prose. Both are fixed below.
 
 ## 1. The headline: config and flasher share one transport [D]
 
@@ -36,23 +41,68 @@ as `CLAUDE.md` §3 hoped but did not assume, and proving the transport once in
 `0x06`, `0x07`, `0x08`, `0x09`, `0x13`, `0x3A`; cfg107's four send sites use
 `0x02`, `0x11`, `0x12`, `0x13`. Do not read across.
 
-## 2. Device-facing surface is nine references [D]
+## 2. Device-facing surface — 13 functions, not 9 references [D]
 
-Exhaustive 4-byte-literal scan of cfg107's `.text` (VA `0x401000`–`0x52c600`,
-1,226,240 bytes) for each HID import's IAT slot:
+> **CORRECTED 2026-09-04.** This section previously said "nine references" and
+> listed only IAT-slot users. That was an undercount with a specific cause: the
+> config tools resolve eleven HID entry points through `GetProcAddress` and call
+> them via `.data` slots, which no IAT scan can see. Full account of the error
+> and the corrected method: `notes/updater-protocol.md` §9.3.
 
-| import | IAT slot | referencing sites |
-| --- | --- | --- |
-| `HidD_SetFeature` | `0x0052d1dc` | `0x403887`, `0x4038de` — both inside one wrapper |
-| `HidD_GetFeature` | `0x0052d1d8` | `0x403957`, `0x4039a4`, `0x403a42`, `0x403a56`, `0x40428e` |
-| `HidP_GetCaps` | `0x0052d1d0` | `0x403773` |
-| `HidD_GetAttributes` | `0x0052d1e0` | `0x0052d1e0` → `0x403724` |
+**Two ways in, and both must be scanned.**
 
-All nine lie in `[0x403724, 0x40428e]`. Device handle global is `0x0057f338`.
+*Statically imported*, 15 `HidD_*`/`HidP_*`/`SetupDi*` entries. The
+protocol-relevant slots in cfg107:
 
-**Caveat, stated rather than glossed:** this bounds where HID *calls* are, which
-is what matters for the wire format. It does not yet bound where the settings
-data is built — that is upstream of these sites and is not yet read.
+| import | IAT slot |
+| --- | --- |
+| `HidD_SetFeature` | `0x0052d1dc` |
+| `HidD_GetFeature` | `0x0052d1d8` |
+| `HidP_GetCaps` | `0x0052d1d0` |
+| `HidD_GetAttributes` | `0x0052d1e0` |
+
+*Dynamically resolved*, 11 more. cfg107's resolver at **`0x004027d0`** calls
+`LoadLibraryA("hid.dll")` (string `0x5568dc`, import `*0x52d258`), stores the
+module handle to `0x57f330`, then `GetProcAddress` (`*0x52d250`) eleven times
+into `0x57f160`–`0x57f188`:
+
+```
+HidD_GetPreparsedData      -> 0x57f160     HidD_GetIndexedString  -> 0x57f164
+HidD_SetNumInputBuffers    -> 0x57f168     HidD_GetAttributes     -> 0x57f16c
+HidD_GetManufacturerString -> 0x57f170     HidD_SetFeature        -> 0x57f174
+HidD_GetSerialNumberString -> 0x57f178     HidD_FreePreparsedData -> 0x57f17c
+HidD_GetFeature            -> 0x57f180     HidP_GetCaps           -> 0x57f184
+HidD_GetProductString      -> 0x57f188
+```
+
+cfg100 does the same from `0x004038a0`, handle `0x5dcb70`, slots
+`0x5dcb74`–`0x5dcb9c` — same eleven names, different encoding (`pushl <mem>`
+rather than `pushl %eax` for the handle).
+
+**The proof that this matters:** hidapi's `hid_send_feature_report` at
+`0x00403320` executes `ff 15 74 f1 57 00` = `calll *0x57f174` at `0x403333`.
+That is a `HidD_SetFeature` call which references **no IAT slot at all**.
+
+**The corrected seed set is 13 functions** for every config version — the union
+of static-IAT users and dynamic-slot users:
+
+```
+cfg107  0x4027d0 0x402980 0x402f60 0x403320 0x403420 0x403460 0x4034a0
+        0x4034e0 0x403550 0x4035f0 0x403850 0x403920 0x404180
+cfg100  0x4038a0 0x403a30 0x403fe0 0x404590 0x404770 0x404800 0x404890
+        0x404920 0x4049c0 0x404a50 0x404ce0 0x404db0 0x405660
+```
+
+Device handle global: cfg107 `0x0057f338`.
+
+**Method, and its blind spot.** Exhaustive 4-byte scan of the whole `.text` for
+every static IAT slot *and* every dynamic slot address; dynamic slots are found
+by locating each HID API name string whose address is pushed in `.text` and
+taking the following `a3` (`mov %eax,<abs>`) store. Keying on the name string
+rather than an instruction shape is load-bearing — a shape-matched regex found
+only 1 of cfg100's 11. **Blind spot:** a slot loaded into a register and called
+indirectly without the slot address appearing as a literal would still be
+missed. No such case is known here; that is not the same as none existing.
 
 ## 3. The send wrapper — `0x00403850` [D]
 
@@ -88,18 +138,17 @@ inform a write. The `0xA0 0x11` payload size and offset are `[D]`; calling it
 "the settings blob" would be a guess, and the obvious guess is exactly the kind
 this project is trying not to make.
 
-## 5. `A1 13` is sent by both tools — a lead, not a conclusion
+## 5. `A1 13` is FACTORY RESET — resolved [D]
 
-`notes/updater-protocol.md` §3 records `0xA1 0x13` as the updater's post-success
-command and tags its meaning `[G]` because the updater does nothing with the
-reply. cfg107 sends the same `0xA1 0x13`, 64 bytes, at `0x40479f`.
+> **RESOLVED 2026-09-04.** This section previously called `A1 13` "a lead, not a
+> conclusion" and said the next step was to read `0x00404770`'s caller. That was
+> the right next step and it settled the question. Full derivation in §7 below.
 
-That is a genuine lead: two independent call sites in two different tools, and
-cfg107's surrounding code may constrain the meaning in a way the updater's
-cannot. **It is not yet a finding.** Same report ID and command byte in a shared
-transport is strong, but a device is free to overload a command by context, and
-`[G]` + `[G]` is not `[D]`. Reading `0x00404770`'s caller and what it does with
-the result is the next step.
+`A1 13` is the command behind the config tool's **Factory Reset** button
+(dialog 102, control 1039). It is a device-side reset: the host sends 64 bytes
+with no payload and the device restores its own defaults. The updater sends the
+byte-identical frame after a successful flash, which is why a firmware update
+resets settings (`notes/updater-protocol.md` §5.4a).
 
 ## 6. Not yet derived
 - Whether cfg107 ever looks for the bootloader PID `0x1977`. Literal scan finds
@@ -107,20 +156,20 @@ the result is the next step.
   is suggestive of a config tool with no bootloader awareness, but a 2-byte
   immediate or a computed value would not show up that way, so this is **not**
   established. It is a scan result, not a proof.
-- The four `HidD_GetFeature` sites at `0x403957`–`0x403a56`: their wrappers,
-  lengths, and polling behaviour.
-- Everything upstream: how the settings structure is built, validated, and
-  displayed. This is where factory reset (§4.1) will be, and §4.1 requires it
-  working before any other config write.
-- Config tools 1.04, 1.01, 1.00.
+- The 1024-byte settings blob's field layout, and which UI control writes which
+  offset. Lead: `0x413db0` writes the host-side defaults as inline immediates
+  including `0x190/0x320/0x640/0xc80` = 400/800/1600/3200.
+- What `A1 02`'s returned dwords mean (§7.3).
+- The three top-level handlers `0x412fb0`, `0x413600`, `0x414010`.
+- Validation and clamping applied before an `A0 11` write.
 
-## 2. The complete command set, and the absence of a factory reset  [D]
+## 7. The complete command set, and what each command is  [D]
 
 Work-plan item 7. `CLAUDE.md` §4.1 requires factory reset to be implemented and
 confirmed **before any other write path**, on the grounds that it is the undo for
 bad config state. That requirement rests on a premise this section tests.
 
-### 2.1 The command set is four, and it is complete
+### 7.1 The command set is four, and it is complete
 
 Commands are built as a 32-bit immediate stored to a stack slot — `movl
 $0x12a1, -0x50(%ebp)` — **not** as `push imm32`. (Worth stating because a scan
@@ -181,9 +230,9 @@ found none in cfg107; that is corroboration, not proof, and is recorded as such.
 > post-success `A1 13` (`notes/updater-protocol.md` §5.4 step 7) is the same
 > command, which is why it is sent after a flash.
 
-This corroborates §1's set as complete rather than merely as what was found.
+This corroborates §4's set as complete rather than merely as what was found.
 
-### 2.2 Read is a request plus a large GetFeature  [D]
+### 7.2 Read is a request plus a large GetFeature  [D]
 
 `FUN_00403b20` is the read path:
 ```
@@ -198,10 +247,10 @@ This corroborates §1's set as complete rather than merely as what was found.
 ```
 So the settings round trip is **`A1 12` (64 bytes out) → `0xA0` GetFeature (1041
 bytes in, 1024 bytes of payload)**, and the write is `A0 11` with 1024 bytes at
-`+0x10` (§1). Read and write are exact mirrors, which is what read-modify-write
+`+0x10` (§4). Read and write are exact mirrors, which is what read-modify-write
 needs.
 
-### 2.2a `A1 02` is a small query, not a blob read  [D]
+### 7.3 `A1 02` is a small query, not a blob read  [D]
 
 `FUN_004045e0`:
 ```
@@ -222,7 +271,7 @@ on `0xA1` is answered on `0xA0` when the payload is large and on `0xA1` when it
 is small — i.e. the report id tracks the transfer size, not the direction. Worth
 knowing before assuming a request/response pair shares a report id.
 
-### 2.4 `A1 13` IS the factory reset, and it is a device command  [D]
+### 7.4 `A1 13` IS the factory reset, and it is a device command  [D]
 
 The main dialog (DIALOGEX resource **102**) has 8 controls, two of which matter:
 
@@ -261,7 +310,7 @@ sends it. It carries no payload beyond the report id and command byte.
 defaults; the host sends 64 bytes and then re-syncs its local copies. No
 host-composed defaults blob is involved anywhere.
 
-### 2.5 The retracted recommendation
+### 7.5 The retracted recommendation
 
 **RETRACTED.** An earlier §2.3 argued that no factory-reset command existed, that
 any vendor reset must therefore be an `A0 11` write of a host-composed blob, and
@@ -282,31 +331,5 @@ what the UI actually offers. A conclusion about what software cannot do should
 never rest only on what its command encoder looks like.
 
 The second, more dangerous cause was trusting the exported `callers` field, which
-said `0x00404720` was uncalled. That field is now known unreliable (§2.1
+said `0x00404720` was uncalled. That field is now known unreliable (§7.1
 correction) and an audit of every claim depending on it is under way.
-
-**No config tool version contains a command that resets the device.** The set is
-four commands; two are reads, one is the settings write, one is dead. Nothing
-else reaches the device.
-
-So if the vendor's software offers a "reset to defaults" at all, it is
-implemented as **an ordinary `A0 11` write of a default blob composed on the
-host** — the same write path as any other setting, not an independent undo.
-
-That has a direct consequence for `CLAUDE.md` §4.1's ordering rule:
-
-- Factory reset **cannot** be "implemented and confirmed working before any
-  other write path", because it *is* the other write path. Sequencing it first
-  buys nothing that the first `A0 11` does not already risk.
-- Worse, a host-composed default blob would be **`[G]` in every byte we did not
-  read off the device**, and §1.3 forbids writing those.
-
-**The undo that actually exists is the one §4.1 already requires for a different
-reason: save a known-good blob on first connect and write it back.** That is
-strictly better than a factory reset here — the bytes are `[O]`, read from this
-device, rather than guessed defaults — and it needs no command we do not have.
-
-Recommended amendment to §4.1, for the owner to accept or reject: replace "implement
-factory reset first" with "capture and verify a known-good blob first, and
-implement restore-from-blob before any other write path". The intent of the rule
-is preserved; the mechanism it names does not exist.
