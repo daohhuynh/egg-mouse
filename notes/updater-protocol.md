@@ -850,6 +850,45 @@ For fw110 the largest classes are `.text` 1,153,969 (54.09%), `.rdata` 268,113
 (12.57%), `.reloc` blocks 105,332 (4.94%), the six `FWFILE` blobs 399,360
 (18.72% together), section padding 61,969, `.data` 23,169.
 
+### 6.2.2 The DARK residue is fully accounted for [D]
+
+`gapscan.py` partitions `.text` into KNOWN/CALLED/PTR/PAD/DARK, where DARK means
+"nothing accounts for these bytes". It is small — 1,195 bytes in 158 runs for
+fw110, 0.10% — but it was the only part of any code section with no evidence
+attached, so it is precisely where something unknown could sit. `darkclass.py`
+settles it.
+
+| | fw110 | fw104 | cfg107 | cfg104 | cfg101 | cfg100 |
+|---|---|---|---|---|---|---|
+| DARK runs | 158 | 168 | 183 | 164 | 162 | 176 |
+| past a function's declared end | 122 | 143 | 148 | 131 | 129 | 147 |
+| interior bytes of a real instruction | 36 | 25 | 35 | 33 | 33 | 29 |
+| **unexplained** | **0** | **0** | **0** | **0** | **0** | **0** |
+
+**Every DARK byte in every binary belongs to a function Ghidra already knows
+about.** Around 80% lie past the function's declared end — the same short-extent
+defect `microread.py` measures directly, 29–71 functions per binary whose final
+instruction overshoots Ghidra's `size` by 1–5 bytes. The rest are interior bytes
+of a real instruction. Nothing is code Ghidra missed entirely.
+
+**Method note, because the first two attempts at this got it wrong and the way
+they were wrong is the point.** Judging the runs against a single linear
+disassembly of all of `.text` gave 12 "independent" runs for fw110, then 7. Both
+numbers were artefacts. A linear sweep **desyncs on data islands and the desync
+is silent**: fw110 `0x40b6a0` holds an eleven-entry switch jump table, and the
+sweep runs straight through it and comes out of phase, so the real MSVC prologue
+at `0x40b6cc` (`8b ff` `55` `8b ec` = `movl %edi,%edi; pushl %ebp; movl
+%esp,%ebp`) looks like it starts mid-instruction. On that evidence I was about to
+record 19–42 "Ghidra function starts that are not instruction boundaries" per
+binary as a finding about Ghidra. **It is a finding about the sweep.** Ghidra is
+right at `0x40b6cc`; the sweep is not.
+
+The fix is to re-disassemble from each function's **own start**, which resyncs by
+construction. That is what `darkclass.py` and `microread.py` both do, and it
+takes the residue to zero. The general rule, which now has two independent
+confirmations: `dis.sh` over a wide range is a finding-aid, and its output must
+never decide a boundary question.
+
 ### 6.2.1 `FWFILE` is a STRING-typed resource, and the config tools have none [D]
 
 The resource type is the string `L"FWFILE"`; the six names are integers. Read
