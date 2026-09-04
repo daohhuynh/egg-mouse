@@ -1324,6 +1324,14 @@ they can install is compiled into the executable (§8), which is why §1.4 of
 reproduce, and a version of our tool that acquired one would be doing something
 the vendor's never did.
 
+*Thread closed, so it is not re-chased:* the lead that prompted this check was a
+reader's summary of fw104 `0x0040845a` — "builds a request string tagged with a
+fresh identifier, `CoCreateGuid`". It is benign and dead. `*0x56e970` is
+`ole32!CoCreateGuid`, the 16 bytes at `0x59bc90` it copies in first are an
+all-zero GUID template, the rest of the body formats the result field by field,
+and the function has **no callers at all**. A GUID generator is not a network
+client, and this one is not even reachable.
+
 ## 6.4 Re-derivation log — which claims were re-proven, and how
 
 `CLAUDE.md` §7 requires this analysis to stand on its own, and §1.2b requires
