@@ -200,6 +200,62 @@ resetting the sequence looks like a session/handshake open and the four in case 
 look like locally-handled pseudo-commands, but neither is derived, and this is a
 different product's device besides.
 
+## 4.1 Command `0x13` is an unlock handshake carrying a 32-byte key  [D-X]
+
+Derived from `0x006450c0`, the device-matching function (1,620 bytes,
+`0x6450c0`–`0x645714`). It walks the enumerated device list — stride `0xa8`,
+index `-0x18(%ebp)`, bound `-0x14(%ebp)` (`0x645279`–`0x645293`) — and for each
+device calls the path matcher `0x00649730(device->path, <hardware-id string>)`.
+
+On a match it calls the transport `0x00644730` with **command `0x13`** and a
+**33-byte (`0x21`) payload that is a 32-character ASCII key**:
+
+```
+0x645409  pushl $0x0            ; arg5 sleep
+0x64540b  pushl $0x21           ; arg4 payload length = 33
+0x64540d  pushl $0x6b9e2c       ; arg3 payload  -> "MCIQFIFEDLH9F4AECX916PBD5P3A3078"
+0x645412  pushl $0x13           ; arg2 command
+0x64541d  pushl obj+0x2dc       ; arg1 device object
+0x645421  calll 0x644730
+```
+
+Three keys, selected by which hardware ID matched:
+
+| key (32 ASCII chars) | at | matched hardware IDs | flag set |
+| --- | --- | --- | --- |
+| `MCIQFIFEDLH9F4AECX916PBD5P3A3078` | `0x6b9e2c` | `vid_3367&pid_2003` | `obj+0x38c = 1` (`0x6453ff`) |
+| `GEGJGYIKDCGBE9DWDKB27EAA7K9Z5J1P` | `0x6b9eb0` | `vid_24f0&pid_2020`, `vid_22d4&pid_1804`, `vid_3367&pid_1903`, `vid_3367&pid_1905` | `obj+0x388 = 1` (`0x64548d`) |
+| `IOUIOGFTRBVGFRIOWEFHZXKLKLERSDFP` | `0x6b9ed4` | fallback, no ID matched | `obj+0x390 = 1` (`0x6454bc`) |
+
+The three send sites are `0x645421`, `0x6454af`, `0x6454de`; the key strings are
+each referenced exactly once in the whole `.text`, all inside this function
+(verified by 4-byte literal scan).
+
+**This joins up with §4's dispatch table.** Command `0x13` is the *only* command
+in dispatch case 2, whose handler at `0x6448b1` zeroes the sequence counter
+`obj+0xd4`. So `0x13` opens a session: it resets the sequence and presents a
+per-product-family key.
+
+`[G]` — and it stays `[G]` — whether the device *validates* the key, and what it
+does if the key is wrong. Nothing in the tool reveals that.
+
+### Why this matters beyond the XM1r
+Two transferable points, neither of which licenses an OP1 byte:
+
+1. **A vendor flasher can require an unlock token before it will do anything.**
+   This is not derivable by guessing; it needed the binary. The OP1 updater's
+   `A1 3A` command carries a 3-byte `5A A5 32` (`notes/updater-protocol.md` §3),
+   which is the same *idea* at a much smaller scale. That is a reason to be
+   confident those three bytes are a deliberate magic rather than incidental —
+   but the OP1 finding stands on its own `[D]` evidence and gains nothing from
+   here.
+2. **This binary matches the connected device against a runtime list of five
+   hardware IDs from three different USB vendors** (`0x6452bf`–`0x645353`, each
+   gated on `obj+0x384`). It is precisely the pattern `CLAUDE.md` §1.4 forbids
+   in our code: identity and image selection must be compile-time constants,
+   never a search over a list. Here is a shipping vendor flasher that does the
+   forbidden thing, and it flashes firmware.
+
 ## 5. Firmware image location  [D-X]
 
 **Not in the resource tree.** The resource directory holds only bitmaps, icons,
@@ -231,7 +287,7 @@ Flagged per §0: this is explanation after the fact, not prediction.
 | Never failed, no retry | untestable from the binary |
 
 ## 7. Not yet derived
-- The 45 commands' meanings, and which are used by the flash sequence.
+- The 45 commands' meanings beyond `0x13` (§4.1), and which the flash sequence uses.
 - The firmware image's exact location, size, and whether it is encrypted.
 - The three-component version decode.
 - The runtime CRC-16 table generator and its polynomial.
