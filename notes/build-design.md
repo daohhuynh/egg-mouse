@@ -18,16 +18,22 @@ the parts it needs are `[D]`:
 
 | we know | from |
 |---|---|
-| the seven updater commands and their byte layouts | `updater-protocol.md` §3, §3.7a |
-| that seven is *all* of them, over the whole `.text`, by two independent methods | §3.7a |
-| the two feature-report lengths, `0x411` and `0x40` | §2, §3 |
-| the response convention: `resp[1]`, `0x01` ready, `0x04` busy | §2 |
-| the busy-poll shape: +100 ms per pass, 2000 ms budget | §2 |
-| the transport retry set `0x15 0x17 0x1D 0x57 0x65B`, 4 attempts, 50 ms | §2 |
-| block numbering and the `0x34` base | §3.8 |
-| the device-selection predicate | `config-protocol.md` §3a |
-| that exactly 14 functions can reach the device, all read | §9 |
-| that the config tools cannot flash (no `FWFILE` at all) | §6.2.1 |
+Every row states the binary it was derived from. A number without its scope is
+the failure mode `CLAUDE.md` §6 names, and this table is where it would do the
+most damage.
+
+| we know | scope — which binary | from |
+|---|---|---|
+| the seven updater commands and their byte layouts | updater 1.10, confirmed in 1.04 | `updater-protocol.md` §3, §3.7a, §5.7 |
+| that seven is *all* of them, over the whole `.text`, by two independent methods | updater 1.10 (1,154,048 `.text` bytes) and 1.04 | §3.7a |
+| the two feature-report lengths, `0x411` and `0x40` | updater 1.10 and cfg107 | §2, §3; `config-protocol.md` §1 |
+| the response convention: `resp[1]`, `0x01` ready, `0x04` busy | **updater only** — cfg107's busy byte is `0x03` | §2; `config-protocol.md` §1 |
+| the busy-poll shape: +100 ms per pass, 2000 ms budget | **updater only** — cfg107's budget is 1000 ms | §2; `config-protocol.md` §1 |
+| the transport retry set `0x15 0x17 0x1D 0x57 0x65B`, 4 attempts, 50 ms | updater 1.10 **and** cfg107 — shared | §2; `config-protocol.md` §1 |
+| block numbering and the `0x34` base | updater 1.10 | §3.8 |
+| the device-selection predicate | **cfg107** — the updater's enumerator is a different function | `config-protocol.md` §3a |
+| that exactly **14** functions can reach the device | **updater 1.10** (raw call edges; 1.04's closure is 10, cfg107's is 32) | §9 |
+| that the config tools cannot flash (no `FWFILE` resource in any of the four) | cfg100/101/104/107 | §6.2.1 |
 
 **What we do not know, and must not invent**, is in §6 "Not yet derived" and §5
 of this document.

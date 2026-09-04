@@ -6,8 +6,10 @@ touched hardware: there is **no `[O]` in this file**. Provenance tags per
 
 Scope: **all four configuration tools** — cfg107, cfg104, cfg101, cfg100. Claims
 state which binaries they were checked against. cfg100 is a **separate code
-base** (11,071 functions vs ~9,500) and is the cross-check on the other three,
-the way fw104 is for the updaters.
+base** and is the cross-check on the other three, the way fw104 is for the
+updaters. Function counts, from `.analysis/export/<tag>.jsonl` — regenerate with
+`wc -l`, do not quote: cfg100 **11,071**, cfg101 **9,516**, cfg104 **9,495**,
+cfg107 **9,528**. The gap is the point: cfg100 is not a rebuild of the others.
 
 **Corrections applied 2026-09-04 are marked inline.** Two mattered: §2 undercounted
 the device-facing surface by missing dynamically resolved HID entry points, and a
