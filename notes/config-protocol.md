@@ -558,3 +558,112 @@ Two consequences, and the second is the one that bears on our design:
    same time**, which the vendor's two tools also can. `[G]` whether that is
    safe; it is a question for the device, and it belongs on the device-gated
    list in `CLAUDE.md` §5 rather than being designed around by guesswork.
+
+## 9. What the unique-body read of cfg107 / cfg104 / cfg101 produced
+
+**Scope.** 839 function bodies — the ones whose normalised body matches nothing
+in updater 1.10 (already read) and nothing in the other config tools, so reading
+this set reads a *different* portion of each of the three binaries. Cut into 50
+batches by `Tools/ghidra-export/mkbatches.py`, one reader per batch, each shown
+only raw objdump text.
+
+**Provenance, and it is not `[D]`.** What follows is what readers reported. It
+is a **lead inventory**, not a derivation. `CLAUDE.md` §1.2 applies without
+exception: nothing here may inform a write until it is re-derived from the bytes,
+and §1.3 forbids a `[G]` byte reaching the device regardless of how confident a
+summary sounds.
+
+**Reader error rate, measured** (`Tools/ghidra-export/verify_read.py`, over the
+722 functions reported when 45 of 50 batches had returned):
+
+| check | result |
+|---|---|
+| invented function ids | **0** |
+| direct call targets | 6,076 in truth; **14 functions disagreed**, 4 extra, 11 missed |
+| indirect call slots | 913 in truth; **11 functions disagreed**, 10 extra, 1 missed |
+
+Spot-checking the disagreements changed how they read, which is the point of
+doing it: `0x00495e1e` really did drop two calls; `0x0043dd05`'s "extra" is a
+vtable displacement (`calll *0x1c(%eax)`) that the field's wording invited; and
+`0x004b4a89`'s extra `0x52d810` is `movl 0x52d810,%edi` followed by a call
+through the register — **the reader was right and the checker was blind**, the
+same blind spot §2 already declares. `summary`, `category`, `vendor_specific`
+and `settings_relevant` are judgements and **nothing checks them**.
+
+### 9.1 Two claims from the read, re-derived from the bytes  [D]
+
+Picked because both bear on `CLAUDE.md` §1.3 and on §6's open items.
+
+**`0x0040e410` (cfg107, 91 bytes) is a DPI clamp and quantiser.** Read in full;
+the whole body is nine basic blocks and no call:
+
+```
+40e410  cmpl $0xa, %ecx     ; below 10      -> return 10
+40e41b  cmpl $0x7530, %ecx  ; above 30000   -> return 30000
+40e429  cmpl $0x2710, %ecx  ; above 10000   -> round to a multiple of 50
+40e44e                      ; otherwise     -> round to a multiple of 10
+```
+
+The two magic multiplies are the usual reciprocal division: `0x51EB851F` with a
+`shrl $0x4` is `/50` (then `imull $0x32`, and `cmpl $0x19` = remainder ≥ 25
+rounds up); `0xCCCCCCCD` with `shrl $0x3` is `/10` (then `leal (%edx,%edx,4)` +
+`addl %eax,%eax` = ×10, and `cmpl $0x5` = remainder ≥ 5 rounds up). Half-up in
+both branches.
+
+So the host's DPI domain is **[10, 30000], quantised to 10 up to 10000 and to 50
+above it.** `0x0040d880` is the caller that applies a delta and re-quantises
+through the same `/10` sequence inline.
+
+**`0x004138f0` (cfg104, 240 bytes) writes a default settings record.** A leaf
+with no calls that fills a caller-supplied buffer in `%eax` and touches offsets
+`0x00` through `0x6c`, so the record is at least **0x6d bytes**. The four
+16-bit values the work plan already flagged are there and paired:
+
+```
+4138f9  movw $0x190, 0x10(%eax) ; and 0x12   400
+413906  movw $0x320, 0x16(%eax) ; and 0x18   800
+413915  movw $0x640, 0x1c(%eax) ; and 0x1e  1600
+413923  movw $0xc80, 0x22(%eax) ; and 0x24  3200
+```
+
+Each written **twice, to adjacent 16-bit slots six bytes apart**, with a zero
+byte at `0x14`/`0x1a`/`0x20` between the pairs — a four-stage table of
+`{flag, valueA, valueB}` records at stride 6, starting at `0x0e`. That is a
+structural observation from the stores, not a claim about what the fields mean.
+
+The tail is a second table: `movb $0x8` then a dword at stride 8 from `0x34`
+(`0x200`, `0x400`, `0x1000`, `0x800`, `0xf109`, `0x101`, `0xff01`) through
+`0x6c` — eight records of 8 bytes. `0xf109` is `SC_CLOSE` and `0xff01` is the
+vendor usage page from §3a; both are almost certainly coincidence at this level
+of evidence and neither is being read as meaningful.
+
+### 9.2 Lead inventory — 69 bodies the readers flagged as settings-shaped
+
+Recorded so the next session does not have to re-run 50 agents to find them
+again. **Every one is an agent summary. None is derived.** Grouped by what they
+appear to touch; addresses are per the binary named.
+
+| area | bodies |
+|---|---|
+| serialise globals → record | cfg101 `0x403c30` (block at `0x57f3e0`); cfg107 `0x4144c0`, cfg104 `0x413fa0`, cfg101 `0x413e90` (dirty-check, two **0x73-byte** stack buffers) |
+| record ↔ record sync | cfg107 `0x414010` (`0x57f210` and `0x57f2a0`, 0x90 apart), cfg101 `0x413a30` (`0x57f2b0` ↔ `0x57f340`), cfg104 `0x413b40` |
+| dialog → globals (harvest) | cfg107 `0x406180`, `0x40ec20`, `0x411ab0`, `0x412030`; cfg101 `0x410750`; cfg104 `0x4107b0` |
+| globals → dialog (restore) | cfg107 `0x4062b0`, `0x40ee80`, `0x411bd0`; cfg101 `0x410970`; cfg104 `0x4109f0` |
+| defaults | cfg104 `0x4138f0` (§9.1); cfg101 `0x40fdb0`-region resets |
+| clamping / validation | cfg107 `0x40e410`, `0x40d880` (§9.1); cfg104 `0x411bf0`; cfg101 `0x411b30` |
+| apply / commit | cfg107 `0x413ea0`, cfg101 `0x4138d0`, cfg104+cfg107 `0x4139e0` |
+| device arrival/removal | cfg107 `0x413600`, cfg101 `0x4130f0`, cfg104 `0x4131f0` |
+| button assignment | cfg107 `0x4076c0` (command ids `0x1f41`–`0x1f7c`, jump table `0x4083a4`), `0x408e40` (**six-byte record**: type `+0`, code `+1`, words `+2`, `+4`), `0x408650` (modifier mask → `0x57f335`) |
+| slider / scroll dispatch | cfg107 `0x4069f0` (control ids `0x409`–`0x42b`, jump table `0x406be4`), `0x411dd0`; cfg101 `0x40ffb0`; cfg104 `0x410010` |
+| mode selector | cfg107 `0x40f750` (0–3 into `0x57f21a` **and** `0x57f2aa`, 0x90 apart — consistent with the two-record layout above) |
+
+The categories the readers assigned across all 805 bodies: `windows-ui` 366,
+`mfc-atl-framework` 259, `string-or-container` 53, `cpp-runtime-eh` 32,
+`registry` 21, `c-runtime` 20, `device-io` 17, `unclear` 13, `file-io` 12,
+`math-or-float` 8, `allocator` 4. **83 were flagged `vendor_specific`** — an
+order of magnitude more than the updater's unique set, which is expected: the
+config tool *is* mostly application code, whereas the updater is mostly MFC.
+
+**What this does NOT settle**, and the §6 list stands unchanged: the record's
+field meanings, which control writes which offset, and what the 1024-byte `A0 11`
+payload contains beyond the ~0x73 bytes the host serialises. Those are LIST 3.
