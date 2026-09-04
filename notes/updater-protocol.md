@@ -53,11 +53,35 @@ the updaters: **B vs A**. Stated plainly because §6 forbids silent sampling.
 bootloader**, and the tool handles it by re-running the whole SetupDi
 enumeration against the other PID [D].
 
-### Firmware version display [D]
-`FUN_004011f0` @ `0x004011f0` formats `DAT_0056a0f4` (the HID `VersionNumber`)
-and divides by `100.0` for display: `L"Mouse firmware current version %.2f"`.
-So **`bcdDevice` = firmware version × 100** (e.g. `140` → `1.40`). The tool
-never gates on this value; it only displays it [D].
+### Firmware version display — it is BCD, and the decode is not division [D]
+`FUN_004011f0` @ `0x004011f0`, instruction by instruction (`0x401245`–`0x401263`):
+
+```
+movl 0x56a0f4, %ecx        ; the HID VersionNumber captured by FUN_00401000
+pushl %ecx
+pushl $0x5443b0            ; the format string, which is  L"%x"
+call  0x4014a0             ; CStringT::Format
+call  0x4f7965             ; -> __wtol  (decimal parse)
+movzwl %ax, %edi           ; truncate to 16 bits
+```
+and the caller divides by `100.0` for `L"Mouse firmware current version %.2f"`.
+
+So the decode is **format `bcdDevice` in hexadecimal, read those digits back as
+a decimal number, divide by 100**. That is a BCD round trip, not arithmetic:
+
+| `bcdDevice` | `"%x"` | `__wtol` | displayed |
+| --- | --- | --- | --- |
+| `0x0140` | `"140"` | 140 | 1.40 |
+| `0x0143` | `"143"` | 143 | 1.43 |
+
+Getting this wrong is easy and consequential. Treating the field as a plain
+integer and dividing by 100 turns `0x0143` into 3.23, because `0x143` is 323.
+**`bcdDevice` is packed BCD; decode it digit-wise.**
+
+The format string at `0x005443b0` really is `L"%x"` — verified in the file at
+offset `0x1433b0` [D].
+
+The tool never gates on the version; it only displays it [D].
 
 ## 2. Transport
 
@@ -297,9 +321,19 @@ Then [D]:
 Failure string: `L"Loading firmware file failed"`.
 
 **Which `FWFILE` belongs to which product is still not derived.** The tool loads
-140 and that is all the code says. The six blobs and their cross-version
-behaviour are recorded in `working-memory.md`; do not turn that table into a
-belief about product mapping without evidence.
+140 and that is all the code says.
+
+There is a tempting correlation, and it is recorded here as `[G]` precisely so
+it does not quietly harden into a fact. The six resource names — 133, 135, 137,
+140, 142, 143 — read as firmware versions 1.33 … 1.43 under exactly the BCD
+convention §1 shows the tool using for `bcdDevice`, and the tool loads 140,
+which would be v1.40.
+
+**But that reading has a problem**: the bytes of `FWFILE` 140 are different in
+1.06, 1.07 and 1.10 (§0). A resource whose name is a firmware version should not
+change contents between releases. So either the names are product codes and the
+resemblance to versions is coincidence, or the vendor re-cuts a version slot in
+place. Nothing in either binary decides it. **Do not act on either reading.**
 
 ## 5. Sequences
 
