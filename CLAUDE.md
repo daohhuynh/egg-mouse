@@ -3,8 +3,13 @@
 Native macOS software for the Endgame Gear OP1 8k v2. Endgame ships Windows-only
 tools. The protocol must be derived independently from their `.exe` files.
 
-**This file contains rules and decisions only. It deliberately contains no
-protocol findings.** See §7.
+**This file is rules, decisions, and objectively checkable context. Nothing
+else.** No protocol findings (§7), no status, no session summaries, no
+justification for decisions already made. Those belong in `working-memory.md`,
+`notes/`, or a commit message. Editing this file is fine; growing it by default
+is not. A rules file that gains a paragraph every session and loses none stops
+getting reread, and a rules file nobody rereads enforces nothing. Rewrite and
+delete in preference to appending.
 
 ## 1. Hard rules
 
