@@ -1259,15 +1259,13 @@ and — as importantly — **what has not**.
 | the device closure is 14 and 10, all in band | 9 | raw call edges (`closure.py`), replacing Ghidra's call graph |
 | every DARK byte belongs to a known function | 6.2.2 | per-function re-disassembly (`darkclass.py`) |
 | `0x5c69a8` is the device-path `CString` | 6.2.4 | read at `0x401000` and `0x401d20`–`0x401d36` |
+| the repair-loop defect (we deviate from it) | 5.6 | re-read `0x401c90`–`0x401e61`; the `-0x424` slot proven single-assignment by scanning the body for its displacement |
 
 **Not re-derived, and still resting on their original derivation:**
 
 - §3.7b's response byte offsets beyond those named above.
 - §4's `FWFILE` entropy figures and the load path in §8.3–§8.5 (read once,
   carefully, but not re-derived by a second route).
-- §5.6's account of the vendor's repair-loop defect — load-bearing, because we
-  deliberately deviate from it. **This one should be re-derived before any code
-  copies or avoids it.**
 - The XM1r file in its entirety; it is analogy, not evidence (§1 there).
 
 The distinction is the point. A note that says everything is verified is
