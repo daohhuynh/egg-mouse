@@ -1136,14 +1136,19 @@ unrelated methods landing on the same numbers is the point of doing both.
 
 **Results.**
 
+> ### CORRECTION 2026-09-04 — the config-tool rows below were WRONG
+> The original table said the config tools have **7** device-touching functions.
+> They have **13**. The updater rows were right, and are re-confirmed by a
+> corrected method. Superseded table, cause, and the meta-lesson: **§9.3**.
+
 | binary | functions | touch HID/SetupAPI | upward closure | closure span |
 |---|---|---|---|---|
 | fw110 / fw107 / fw106 | 9,076 | **3** | 14 | `[0x401000,0x403960]` |
 | fw104 | 10,763 | **3** | 10 | `[0x401bc0,0x404980]` |
-| cfg107 | 9,528 | 7 | 18 | `[0x4027d0,0x414010]` |
-| cfg104 | 9,495 | 7 | 18 | `[0x4027e0,0x413b40]` |
-| cfg101 | 9,516 | 7 | 18 | `[0x4027e0,0x413a30]` |
-| cfg100 | 11,071 | 7 | 17 | `[0x4038a0,0x415860]` |
+| ~~cfg107~~ | 9,528 | ~~7~~ **13** | ~~18~~ **25** | see §9.3 |
+| ~~cfg104~~ | 9,495 | ~~7~~ **13** | ~~18~~ **24** | see §9.3 |
+| ~~cfg101~~ | 9,516 | ~~7~~ **13** | ~~18~~ **24** | see §9.3 |
+| ~~cfg100~~ | 11,071 | ~~7~~ **13** | ~~17~~ **23** | see §9.3 |
 | xm1r | 23,001 | 7 | 31 | `[0x643b80,0x64d000]` |
 
 The three direct-touch functions of each updater code base correspond
@@ -1288,3 +1293,93 @@ examples"):
 6. No write is emitted unless preflight passed.
 7. No return from the post-`A0 03` phase without a verified image or an explicit,
    loud unrecoverable state.
+
+
+### 9.3 CORRECTION — the config tools resolve HID dynamically, and both published methods were blind to it  [D]
+
+**What was wrong.** §9 reported 7 device-touching functions for each config tool.
+The true figure is **13**. The updaters' figure of 3 was right.
+
+**Why both methods missed it, and why their agreement was worthless.** Every
+config tool calls `LoadLibraryA("hid.dll")` and then resolves **eleven** HID
+entry points with `GetProcAddress`, storing the results into `.data`:
+
+| | resolver | module handle | slot range |
+|---|---|---|---|
+| cfg107 | `0x004027d0` | `0x57f330` | `0x57f160`–`0x57f188` |
+| cfg100 | `0x004038a0` | `0x5dcb70` | `0x5dcb74`–`0x5dcb9c` |
+
+The eleven are `HidD_GetPreparsedData`, `HidD_GetIndexedString`,
+`HidD_SetNumInputBuffers`, `HidD_GetAttributes`, `HidD_GetManufacturerString`,
+**`HidD_SetFeature`**, `HidD_GetSerialNumberString`, `HidD_FreePreparsedData`,
+**`HidD_GetFeature`**, `HidP_GetCaps`, `HidD_GetProductString`.
+
+Functions then call HID **through those `.data` slots**, not through the IAT. The
+sharpest example is hidapi's `hid_send_feature_report` at `0x00403320`, which
+executes `ff 15 74 f1 57 00` = `calll *0x57f174` at `0x403333` — a
+`HidD_SetFeature` call that references no IAT slot at all.
+
+- **§9 method 1** scanned `.text` for *IAT slot addresses*. A dynamic call
+  references a `.data` slot, so it was invisible.
+- **§9 method 2** used Ghidra's data-refs, which record a reference to a `.data`
+  location, not to an import. Also invisible.
+
+**The meta-lesson, and it is the important part.** §9 offered as its warrant:
+*"two unrelated methods landing on the same numbers is the point of doing both."*
+That reasoning is void when the methods share a blind spot — and these two do.
+Their agreement on the config-tool rows measured nothing. **Cross-validation only
+counts when the methods fail differently**; agreement between two methods with
+the same blind spot is one method reported twice.
+
+**A second wrong test, mine, from the same day.** I checked for dynamic
+resolution by asking *"are there HID API name strings that are not in the import
+table?"* — found five, none of them `SetFeature`/`GetFeature`, and concluded the
+protocol path was statically imported and safe. That test cannot detect a
+function that is **both** statically imported **and** dynamically resolved, which
+is exactly what `HidD_SetFeature` is here. The right question is not which names
+are missing from the imports; it is **which name strings have their address
+pushed in `.text`**, i.e. used as a `GetProcAddress` argument.
+
+**Corrected method.** The seed set is the union of
+(a) functions referencing a static HID/SetupAPI **IAT** slot, and
+(b) functions referencing a **dynamically resolved** slot, where those slots are
+found by locating each HID API name string whose address is pushed in `.text`
+and taking the following `a3` (`mov %eax, <abs>`) store. Keying on the *name
+string* rather than an instruction shape matters: cfg100 pushes the module handle
+with `pushl <mem>` where cfg107 uses `pushl %eax`, and a shape-matched regex
+found only 1 of cfg100's 11 slots.
+
+**Corrected results.** Closures rebuilt from raw `E8` displacements over entire
+`.text` sections, with a start list including every recovered function:
+
+| binary | static IAT users | dynamic slot users | **seed** | closure (`E8`) | closure (`E8`+`E9`) | span |
+|---|---|---|---|---|---|---|
+| fw110 | 11 | **0** | **3** | **14** | 14 | `[0x401000,0x403960]` |
+| fw104 | 11 | **0** | **3** | **10** | 10 | `[0x401bc0,0x404980]` |
+| cfg107 | 15 | 11 | **13** | 25 | 33 | `[0x4027d0,0x4142a5]` |
+| cfg104 | 15 | 11 | **13** | 24 | 32 | `[0x4027e0,0x413b40]` |
+| cfg101 | 15 | 11 | **13** | 24 | 32 | `[0x4027e0,0x413a30]` |
+| cfg100 | 15 | 11 | **13** | 23 | 31 | `[0x4038a0,0x415a46]` |
+
+`E9` tail-jumps are reported separately because a tail-jump is a transfer of
+control, not a call; including them is the conservative choice and both numbers
+are given rather than one being chosen silently.
+
+### 9.4 What this does NOT change: the flasher  [D]
+
+**The updaters have no dynamic HID resolution at all**, established by the
+corrected test rather than the flawed one:
+
+- `HidD_*`/`HidP_*` name strings in fw110 and fw104 whose **address is
+  referenced from `.text`**: **zero**. No `GetProcAddress` of any HID function
+  is possible.
+- The single `HID.DLL` string in each updater sits inside the **import name
+  table** (immediately after the `HidP_GetCaps` and `HidD_FreePreparsedData`
+  hint/name entries) and has **zero** `.text` references — it is the import
+  descriptor's DLL name, not a `LoadLibrary` argument.
+- Dynamic-slot users: **0**. Seed unchanged at **3**; closure unchanged at
+  **14** (fw110) and **10** (fw104), member-for-member.
+
+So the confinement argument the flasher rests on survives intact, and now rests
+on a test that would have caught the config tools' dynamic resolution had it been
+present. The error was confined to the config-tool rows.
