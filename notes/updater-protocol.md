@@ -1447,10 +1447,48 @@ Every `FWFILE` in every version is **exactly 66560 bytes** = `0x10400` =
 
 ### 8.2 Only resource 140 is reachable  [D]
 
-The `FWFILE` type string is UTF-16 in `.rdata`. An exhaustive `.text` scan finds
-**exactly one reference to it in each of the four binaries** — therefore exactly
-one `FindResourceW` call site, therefore exactly one resource name can ever be
-requested.
+> **ARGUMENT CORRECTED 2026-09-04. The conclusion survives; the reasoning as
+> written did not.** This section said an exhaustive scan finds one reference to
+> the `FWFILE` string "therefore exactly one `FindResourceW` call site". That
+> inference is invalid, and the premise it leans on is false as stated:
+> `FindResourceW`'s IAT slot is referenced at **12 sites** in fw110 and **16** in
+> fw104. Most of them are MFC loading dialogs, strings and menus. What is true is
+> the narrower thing — only one of those sites can pass `FWFILE` as the type —
+> and it needs the argument below, not a count of string references standing in
+> for a count of call sites.
+
+**The type string's address occurs exactly ONCE in the entire file** — not once
+in `.text`, once in all 2,133,504 bytes of fw110 and all 2,427,904 of fw104. So
+no code pushes it anywhere else and no data structure anywhere holds a pointer to
+it:
+
+| | `L"FWFILE"` VA | occurrences of that address, whole file | at |
+|---|---|---|---|
+| 1.10 | `0x5447c0` | **1** | `.text` `0x403208` |
+| 1.04 | `0x5a1cd8` | **1** | `.text` `0x40433a` |
+
+and that single site is the `FindResourceW` call below, with the name immediate
+`0x8c`. The other eleven `FindResourceW` sites pass some other type and cannot
+reach a `FWFILE` resource.
+
+**The other three ways in are closed too**, which is what makes this an API bound
+rather than a string scan:
+
+- **`FindResourceExW`** is imported and *is* referenced — fw110 `0x4f37fe`,
+  fw104 `0x4b4a01` — so ignoring it would have been a real hole. Its single site
+  passes `lpType = 5` (`RT_DIALOG`) as an integer immediate with a language id
+  `0xfc11`; it is MFC's localized-dialog loader and cannot name a string type.
+- **`EnumResourceNamesW`/`A` are not imported** in either binary, so the
+  resource directory cannot be walked to discover names at runtime.
+- **`LoadResource`, `LockResource`, `SizeofResource`, `FreeResource`** all take a
+  handle produced by a `FindResource*` call. They cannot originate a lookup, so
+  their many reference sites do not widen the surface.
+
+**Blind spot, stated rather than implied:** this finds the type string's address
+as a 4-byte literal. A type name assembled at runtime — built byte by byte,
+decrypted, or composed from fragments — would not appear in any of these scans.
+Nothing in these binaries suggests that, and the `lpName` immediate is a
+compile-time constant in all four, but the scan cannot exclude it.
 
 | | string VA | ref site | pushed name |
 |---|---|---|---|
