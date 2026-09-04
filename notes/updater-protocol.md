@@ -480,3 +480,53 @@ It settles the protocol: no device-facing code was missed. It does **not** by
 itself discharge §6 for the remaining candidates, which could in principle hold
 vendor code that never touches the device. Those are being read separately; the
 counts above are the honest denominator.
+
+## 8. Structure of the `FWFILE` images
+
+Nothing here changes what our flasher does — the updater copies the resource
+byte for byte (§4) and so will we. It is recorded because it says something
+about what the *device* does, and because it bounds what a corrupted image would
+look like.
+
+Every one of the six 65 KiB blobs in updater 1.10 has the **same shape** [D],
+measured by hashing each 1024-byte block:
+
+```
+blocks  0 .. 28   29 distinct blocks   real content
+blocks 29 .. 63   ONE block repeated 35 times, contiguous   filler
+block  64         distinct                                  real content
+```
+
+`FWFILE` 133, 135, 137, 140, 142 and 143 all give `distinct = 31` with the same
+35× run at the same indices [D].
+
+### The encryption is deterministic and position-independent [D]
+A single 1024-byte value occupying 35 different block positions produces
+**identical ciphertext at every one of them**. So whatever transform produced
+these blobs has no IV, no chaining and no dependence on block index or address:
+the same plaintext block always yields the same ciphertext block. That is
+ECB-shaped, at a granularity no coarser than 1024 bytes.
+
+Confirmed independently by the version diffs of `FWFILE` 140 [D]:
+
+| pair | differing bytes | shape |
+| --- | --- | --- |
+| 1.07 → 1.10 | 30,600 / 66,560 | blocks 0–28 and 64 differ ~100%; blocks 29–63 **identical** |
+| 1.04 → 1.06 | 4,078 / 66,560 | exactly four 1024-byte blocks differ, ~99.6% within each |
+
+A change confined to four blocks leaving all others bit-identical is only
+possible without chaining.
+
+### The key appears to be per-image [D]
+**No 1024-byte block is shared between any two of the six `FWFILE` resources** —
+not even the filler block, which all six have 35 copies of. If the filler
+plaintext is the same in all six, which its identical position and run length
+makes likely, then the six images are encrypted under different keys or
+otherwise separated. `[G]` as to mechanism.
+
+### What follows for us
+- The bytes are opaque to the host and stay opaque. §1.3.
+- The device decrypts. We never need to.
+- Roughly 30 KiB of the 65 KiB is content and 35 KiB is filler, but the updater
+  sends **all 65** blocks and the device's whole-image checksum covers all 65
+  (§3.5). Do not "optimise" by skipping the filler.
