@@ -285,6 +285,25 @@ whose low byte is a report id gives the complete set:
 
 **All four commands are present in all four versions**, including the oldest.
 
+> **Scope upgraded 2026-09-04.** The table above came from disassembling each
+> tool's *device band*. Re-run over **all of `.text`** with
+> `Tools/ghidra-export/cmdscan.py`, which reports every instruction storing an
+> immediate whose low byte is a report id to memory:
+>
+> - **cfg107: 10 hits.** Eight are the four commands plus their four response
+>   report ids, all inside `0x403b20`, `0x404180`, `0x4045e0`, `0x404720`. Two
+>   are pointers whose low byte happens to be `0xa0` (`movl $0x5737a0`,
+>   `$0x5379a0`).
+> - **cfg100: 47 hits.** Eight are the same four commands plus responses —
+>   including `A1 13` at `0x415783`, inside `FUN_00415700`. The rest are the
+>   pointer `0x5814a0` stored repeatedly, and four `movb $0xa0`/`$0xa1` to
+>   **`-0x4(%ebp)` inside `0x00466e71`**, which is the MSVC exception-handling
+>   state slot, not a frame buffer — the same false-positive shape fw104 shows
+>   (`notes/updater-protocol.md` §3.7a).
+>
+> So the command set is four, over the whole section rather than a band, in both
+> code bases. The band scoping was the same defect §3.7a had on the updater side.
+
 > **CORRECTION (2026-09-04).** This table previously recorded `A1 13` as absent
 > from cfg100, and said "`A1 13` appears from cfg101 onward". **Both were wrong.**
 > cfg100 builds it at `0x415783` (`c7 45 b0 a1 13 00 00`,
