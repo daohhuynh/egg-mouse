@@ -188,6 +188,31 @@ actually uses (`0x34..0x74`) the difference never shows, but it is real.
 response and, if `resp[1] == 0x01`, copies all 1041 bytes to `ECX`
 (`rep movsl` 0x104 + `movsb`, `0x401b96`) [D].
 
+### 3.4a Return values are not always device status bytes [D]
+Three of the send functions return a `uint8` that the caller compares against
+`0x01`. On their failure paths that byte does **not** come from the device — it
+comes from the request buffer or from a literal. Established by disassembly on
+2026-09-03 while reconciling the adversarial verify pass.
+
+| function | on success | `HidD_SetFeature` failed | `HidD_GetFeature` failed |
+| --- | --- | --- | --- |
+| `FUN_00401890` `A0 03` start | `resp[1]` (`0x40195b`) | `0x02` (`movb $0x2,%al`, `0x40192a`) | `req[1]` = **`0x03`** (`0x401960`, reads `-0x459(%ebp)` = base `-0x458` + 1) |
+| `FUN_00401980` `A0 06` write | `resp[1]` (`0x401aac`) | `0x02` (`0x401949` region) | `req[1]` = **`0x06`** (`0x401ab1`, same idiom) |
+| `FUN_00401ad0` `A0 07` read | `resp[1]` (`0x401b7f`) | **`0x02`** (`movb $0x2,%al`, `0x401b3e`) | `resp[1]`, buffer left zeroed ⇒ `0x00` |
+
+Every one of these values is `!= 0x01`, so all three **fail closed** and no
+caller can mistake a transport failure for a device success [D].
+
+Two consequences for our implementation. First, a returned `0x02`, `0x03` or
+`0x06` is a *transport* failure, not a device status — §2 lists only `0x01`
+ready and `0x04` busy as device values, and conflating the two would make a
+`0x06` look like an unknown device state. Ours should return a distinct error
+type rather than reusing the status byte, precisely because the vendor's
+overloading is what makes its own repair loop misbehave (§5.6). Second, `[G]`:
+the choice to return `req[1]` looks like a bug rather than a design — the
+command byte is a meaningless thing to hand back — but it is harmless here and
+we must not "fix" it in a way that changes which values are treated as success.
+
 ### 3.5 Whole-image checksum — `FUN_00401bb0` @ `0x00401bb0` [D]
 Base `-0x44(%ebp)`, length `0x40`.
 ```
