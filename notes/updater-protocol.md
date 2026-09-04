@@ -1108,3 +1108,97 @@ failure mode is the interesting part: a sloppy matcher *manufactured a
 contradiction* with a correct earlier result, and the tempting resolution — "the
 earlier exhaustive claim must have missed four" — would have corrupted a sound
 finding. Matchers get whole API names, never substrings.
+
+## 10. The block arithmetic, and what to do about the unknown erase boundary
+
+### 10.1 The block arithmetic is fully pinned  [D]
+
+This is the computation CLAUDE.md §4.3 names as a top failure mode ("wrong chunk
+boundary"), so it is derived end-to-end rather than inferred from the loop shape.
+
+In `FUN_00403960`:
+```
+403a48  xorl %ebx,%ebx                    ; i = 0
+403a4a  cmpl %ebx,0x21c(%esi) ; jle       ; loop while i < block_count
+403a56  leal 0x220(%esi),%edx             ; src = image base
+403a62  movl %edx,-0xa0(%ebp)             ; src pointer lives in -0xa0(%ebp)
+
+403a86  pushl $0xa1                       ; status-read report id
+403a8b  leal 0x34(%ebx),%ecx              ; WRITE  block index = 0x34 + i
+403a8e  calll 0x401980                    ; A0 06 write
+
+403aff  leal 0x34(%ebx),%eax              ; VERIFY block index = 0x34 + i
+403b02  movzbl %al,%ecx                   ; truncated to a byte
+403b0c  calll 0x401c90                    ; read back / repair
+
+403b47  addl $0x400,-0xa0(%ebp)           ; src += 1024, EXACTLY once per block
+403b58  incl %ebx
+403b59  cmpl 0x21c(%esi),%ebx ; jl
+```
+
+Three facts that matter more than they look:
+
+1. **Write and verify compute the index the same way**, from the same counter
+   with the same `0x34` base. They cannot drift apart.
+2. **The source pointer advances by `0x400` exactly once per block**, after the
+   verify succeeds — not inside the write retry loop. A block retried five times
+   re-sends the same 1024 bytes.
+3. **The index is truncated to a byte** (`movzbl %al`). With `block_count = 65`
+   the range is `0x34 … 0x74` and nothing wraps, but the truncation is real: a
+   block count above 203 would wrap the index and write to the wrong place. Our
+   flasher must assert the count, not rely on the image being the usual size.
+
+With `block_count = 65` (§8.3) the loop covers indices **`0x34`–`0x74`** and
+source bytes `0` – `66559`: the whole image, exactly once, no remainder.
+
+### 10.2 The erase boundary is still unknown — and it no longer blocks the design
+
+`A0 03` remains `[G]` (§6). There is no erase command among the seven, so
+CLAUDE.md §4.2's "before erase / after erase" split cannot be implemented
+literally: we cannot point at the instant the flash is destroyed.
+
+What removes the blockage is that **the recovery path is the same on both sides
+of that unknown instant**, which follows from two `[D]` facts:
+
+- **The tool flashes a device it finds already in the bootloader**, with no
+  application-mode handshake at all (§5.1 case 6: `mode == 2` at PID `0x1977`
+  goes straight to `FUN_00403960`).
+- **No command ever addresses a block below `0x34`** (§10.1). The vendor tool
+  cannot write outside `0x34…0x74` because the index is computed, not chosen.
+
+The reading those support — and it is `[G]`, stated as such — is that the
+bootloader lives below block `0x34`, is never a target of this protocol, and
+survives a failed update, leaving the device enumerable at PID `0x1977`.
+
+**Therefore the design rule does not need the erase instant.** Ours becomes:
+
+> The point of no return is `A0 03`. From the moment it is sent until a verified
+> image is resident, no code path returns. On any failure — including a
+> disconnect — re-enumerate, accept PID `0x1977`, and resume the block loop.
+> There is no timeout that gives up and no cancel.
+
+This is *more* conservative than the vendor's tool, which does give up: five
+tries per block, then abort (§5.4). We keep driving; §4.2 says exiting cleanly
+after erase guarantees the bad outcome.
+
+Treating `A0 03` rather than `A1 3A` as the boundary is deliberate. Entering the
+bootloader is demonstrably survivable — the vendor tool's `mode == 2` path exists
+precisely to pick up a device sitting there — so `A1 3A` is not the dangerous
+step. `A0 03` is the first command that could plausibly erase, so it is where the
+non-abortable region starts.
+
+### 10.3 Invariants this yields for `EGGFlashCore`
+
+Assertable without hardware, per CLAUDE.md §4.3 ("assert invariants, not
+examples"):
+
+1. `block_count == image_size >> 10` and `image_size % 1024 == 0`.
+2. `block_count == 65` for every image we have seen; refuse anything else rather
+   than emulate an untested vendor path (§8.6).
+3. Every emitted block index is in `[0x34, 0x74]`. No exceptions, no fallback.
+4. Block index and source offset are derived from **one** counter — never
+   tracked separately.
+5. The source pointer advances only after a verified block, never inside a retry.
+6. No write is emitted unless preflight passed.
+7. No return from the post-`A0 03` phase without a verified image or an explicit,
+   loud unrecoverable state.
