@@ -1176,6 +1176,45 @@ inventory exactly: 133/135/137 byte-identical across all four releases
 > their full hashes differ. Comparing leading bytes therefore says "same" when
 > the blobs are not the same. Compare whole-blob hashes, never prefixes.
 
+## 6.3 What was looked for and NOT found
+
+`CLAUDE.md` §6 forbids silent sampling, and the corollary is that a search which
+returns nothing is a result, not a non-event. This section collects the
+confirmed-nothings, because they are most of the evidence that the search was
+wide rather than lucky, and because they are the first thing that quietly
+disappears from a document that only records discoveries.
+
+Each row says what was searched, over what, and by what method. **A zero here is
+only worth the scope beside it**, so the scope is stated, and where the method
+has a blind spot it is named rather than left implied.
+
+| looked for | over | found | method, and what it cannot see |
+|---|---|---|---|
+| bytes in a code section that no structure accounts for | `.text` of 6 PE binaries | **0** | `darkclass.py`; every DARK run resolves to a known function's tail or an instruction interior. Rests on per-function re-disassembly, not a linear sweep. |
+| bytes in the *file* that no structure accounts for | all 9 binaries, whole files | **0** | `filemap.py`; partition must sum to the file size or it exits non-zero. Says where bytes are, not what they mean. |
+| HID/SetupAPI slot references outside every Ghidra function | `.text` of 6 PE binaries | **0** | `closure.py`, exhaustive 4-byte scan attributing each hit to a function or orphan unit. Blind to a slot address held only in a register. |
+| `E8` calls into a HID/SetupAPI IAT thunk | all 7 binaries | **0** | Byte scan for `E8` targeting one of the 14 thunk addresses. xm1r has all 14 thunks and nothing calls them. Blind to a computed thunk target. |
+| `GetProcAddress`-resolved HID entry points in the updaters | fw110, fw104, xm1r | **0** | Name-string method that finds 11 in every config tool, so it is calibrated to succeed where such slots exist. |
+| fw110 device-closure functions byte-matching another binary | 14 members × 6 binaries | **0 of 14** | Normalised body hash. Excludes the one failure mode `classify.py`'s own docstring warns about (§6.2.6). |
+| `FWFILE` resources, or any 66,560-byte resource, in a config tool | cfg100/101/104/107, full resource trees | **0** | `filemap.py`'s exhaustive walk, partition closing to zero — not a search that could have missed a branch. |
+| an eighth updater command | all 1,154,048 bytes of fw110 `.text` | **0** | Two independent methods (§3.7a): every report-id immediate stored to memory, and every caller of the only two device-touching APIs. |
+| a bootloader PID `0x1977` reference in cfg107 | all five call sites of the matcher | **0** | Call-site enumeration, after a literal scan was shown to be the *wrong question* (§3a.1 of `notes/config-protocol.md`). |
+| function bodies whose instructions will not tile their extent | 7 binaries, 82,450 functions | **0** | `microread.py`; a body that does not tile exactly is refused rather than approximated. |
+| rel32 call sites that could not be attributed to an owner | all 9 binaries | **0** | `calledges.py`, after orphan units were added; before that, sites in unattributed `.text` were silently dropped. |
+| device-touching functions among the 474 bodies unique to fw110 | 474 read bodies | **10, all already documented** | Independent readers, verified against the bytes; plus the mechanical scan of §9 agreeing. |
+| invented call targets in the reading pass | 4,686 reported targets | **1** (0.02%) | Every reported target checked against the function's own disassembly. |
+| invented import references in the reading pass | 876 reported slots | **0** | Same check. |
+
+Two of these were **not** zero when first computed, and both changed because the
+method was wrong rather than because the binary was:
+
+- "Recovered starts that reach the device" looked like 12, then 7, before
+  per-function re-disassembly took it to 0 (§6.2.2).
+- "Config-tool functions touching HID" was 7 for months. It is 13. The scan was
+  exhaustive over the wrong set (§9.3).
+
+Which is the argument for writing the scope next to every zero.
+
 ## 7. Scope of the search — what was read, and what was not
 
 `CLAUDE.md` §6 forbids silent sampling, so here are the numbers.
