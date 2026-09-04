@@ -113,3 +113,79 @@ the result is the next step.
   displayed. This is where factory reset (§4.1) will be, and §4.1 requires it
   working before any other config write.
 - Config tools 1.04, 1.01, 1.00.
+
+## 2. The complete command set, and the absence of a factory reset  [D]
+
+Work-plan item 7. `CLAUDE.md` §4.1 requires factory reset to be implemented and
+confirmed **before any other write path**, on the grounds that it is the undo for
+bad config state. That requirement rests on a premise this section tests.
+
+### 2.1 The command set is four, and it is complete
+
+Commands are built as a 32-bit immediate stored to a stack slot — `movl
+$0x12a1, -0x50(%ebp)` — **not** as `push imm32`. (Worth stating because a scan
+for the push form finds nothing and looks like a clean negative result. It is
+not; it is the wrong instruction form.)
+
+Disassembling each config tool's whole device band and taking every immediate
+whose low byte is a report id gives the complete set:
+
+| command | cfg100 | cfg101 | cfg104 | cfg107 |
+|---|---|---|---|---|
+| `A1 12` | `0x404ff9` | `0x403b6a` | `0x403b6a` | `0x403b8a` |
+| `A0 11` | `0x4056fb` | `0x404208` | `0x404208` | `0x404218` |
+| `A1 02` | `0x405b25` | `0x40465c` | `0x40465c` | `0x40466c` |
+| `A1 13` | — | `0x40478f` | `0x40478f` | `0x40479f` |
+
+Four in total, three of them present since the oldest build. `A1 13` appears
+from cfg101 onward and in cfg107 its containing function `0x00404720` has
+**zero callers** — dead code in the shipped build. (The updater does send
+`A1 13`, once, after a verified success: `notes/updater-protocol.md` §5.4 step 7.)
+
+This corroborates §1's set as complete rather than merely as what was found.
+
+### 2.2 Read is a request plus a large GetFeature  [D]
+
+`FUN_00403b20` is the read path:
+```
+403b8a  movl $0x12a1,-0x50(%ebp)   ; A1 12, 64-byte request
+403b91  calll 0x403850             ; send
+403bc9  movl $0x411,%esi           ; 1041-byte response buffer
+403bd4  movb $0xa0,-0x468(%ebp)    ; response report id = 0xA0
+403bdb  calll 0x403920             ; receive
+403bed  movl $0x100,%ecx           ; 0x100 dwords = 1024 bytes copied
+403bf8  movl $0x57f340,%edi        ; into/out of the settings globals
+403bfd  movl $0x57f210,%eax
+```
+So the settings round trip is **`A1 12` (64 bytes out) → `0xA0` GetFeature (1041
+bytes in, 1024 bytes of payload)**, and the write is `A0 11` with 1024 bytes at
+`+0x10` (§1). Read and write are exact mirrors, which is what read-modify-write
+needs.
+
+### 2.3 There is no factory-reset command  [D], and §4.1 needs adjusting
+
+**No config tool version contains a command that resets the device.** The set is
+four commands; two are reads, one is the settings write, one is dead. Nothing
+else reaches the device.
+
+So if the vendor's software offers a "reset to defaults" at all, it is
+implemented as **an ordinary `A0 11` write of a default blob composed on the
+host** — the same write path as any other setting, not an independent undo.
+
+That has a direct consequence for `CLAUDE.md` §4.1's ordering rule:
+
+- Factory reset **cannot** be "implemented and confirmed working before any
+  other write path", because it *is* the other write path. Sequencing it first
+  buys nothing that the first `A0 11` does not already risk.
+- Worse, a host-composed default blob would be **`[G]` in every byte we did not
+  read off the device**, and §1.3 forbids writing those.
+
+**The undo that actually exists is the one §4.1 already requires for a different
+reason: save a known-good blob on first connect and write it back.** That is
+strictly better than a factory reset here — the bytes are `[O]`, read from this
+device, rather than guessed defaults — and it needs no command we do not have.
+
+Recommended amendment to §4.1, for the owner to accept or reject: replace "implement
+factory reset first" with "capture and verify a known-good blob first, and
+implement restore-from-blob before any other write path". The intent of the rule
+is preserved; the mechanism it names does not exist.
