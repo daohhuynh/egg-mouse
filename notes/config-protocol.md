@@ -369,10 +369,48 @@ enumerated by a raw byte scan and all four read in full.** That closes the gap
 the immediate-scan alone leaves open, and it corroborates §4's set as complete
 rather than merely as what was found.
 
-**Still to do the same way: cfg100/101/104.** Their send wrappers have not been
-located by slot reference yet, so the four-command claim for those three rests on
-the immediate scan alone (which §7.1's whole-`.text` re-run does support, but by
-one method rather than two).
+**Done the same way for all four** (2026-09-04). Each version's send wrapper was
+located by slot reference and its callers recovered from raw `E8` edges:
+
+| | send wrapper | its callers | receive wrapper | inline `GetFeature` |
+|---|---|---|---|---|
+| cfg107 | `0x403850` | `0x403b20 0x404180 0x4045e0 0x404720` | `0x403920` | `0x404180` |
+| cfg104 | `0x403830` | `0x403b00 0x404170 0x4045d0 0x404710` | `0x403900` | `0x404170` |
+| cfg101 | `0x403830` | `0x403b00 0x404170 0x4045d0 0x404710` | `0x403900` | `0x404170` |
+| cfg100 | `0x404ce0` | `0x404fa0 0x405660 0x405ac0 **0x415700**` | `0x404db0` | `0x405660` |
+
+**Exactly four callers in every version**, one per command — and cfg100's fourth
+is `0x415700`, the function containing the `A1 13` store at `0x415783`. That is
+the corrected cfg100 factory-reset finding arriving a third time, by a method
+that never looks at an immediate.
+
+### 7.1a The hidapi write path is unreachable in all four tools [D]
+
+§2 records that these binaries statically link hidapi and resolve HID a second
+time through `GetProcAddress`. hidapi's `hid_send_feature_report` calls
+`HidD_SetFeature` through the dynamic slot, so it is a **second, independent way
+to write to the device** and it has to be accounted for or §7.1's bound is void.
+
+It is dead, by two checks in every one of the four binaries:
+
+| | hidapi write fn | direct callers (raw `E8` scan) | occurrences of its address in the **whole file** |
+|---|---|---|---|
+| cfg107 | `0x403320` | **0** | **0** |
+| cfg104 | `0x403320` | **0** | **0** |
+| cfg101 | `0x403320` | **0** | **0** |
+| cfg100 | `0x404590` | **0** | **0** |
+
+The second column matters more than the first: a function with no direct callers
+could still be reached through a pointer, so the address was searched for as a
+4-byte value across **every byte of each file** — `.text`, `.rdata`, `.data`,
+resources, everything. It appears nowhere, so no vtable, jump table, callback
+registration or thread-start argument can reach it. The same search on the two
+*live* wrappers returns 0 as well, which is the calibration: these programs
+simply do not take the address of their transport functions.
+
+**Blind spot:** an address computed at runtime rather than stored — base plus
+offset — would not appear. Nothing in these binaries does that, and hidapi is
+compiled in as ordinary static code, but the scan cannot exclude it.
 
 ### 7.2 Read is a request plus a large GetFeature  [D]
 
