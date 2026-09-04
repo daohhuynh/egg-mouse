@@ -1,6 +1,56 @@
 #!/usr/bin/env python3
 """Positively identify statically-linked library code by cross-binary presence.
 
+The updaters and the configuration tools are different programs statically
+linked against the same MFC and MSVC CRT, so a normalised function body that
+occurs in both is very likely library code.
+
+VALIDATED 2026-09-03 against fw110; results and limits, so nobody trusts this
+further than it has been shown to go:
+
+  * Of the twelve confirmed device-facing functions in updater 1.10 (0x401000,
+    0x4012a0, 0x401330, 0x401890, 0x401980, 0x401ad0, 0x401bb0, 0x401c90,
+    0x403200, 0x403600, 0x403750, 0x403960) it matched ZERO. No protocol
+    function was falsely called library.
+  * It DOES match 54 of the 79 sized functions in [0x401000,0x4040ad). That is
+    correct, not a false positive: that address range holds the vendor's code
+    AND the ATL/MFC template instantiations the compiler emitted alongside it
+    (Ghidra names several of them - CStringT<...>, GetManager, Empty).
+    Corollary worth remembering: **that address range is not "the vendor band"
+    in the sense of containing only vendor code.**
+  * Internal collisions in fw110: 147 normalised hashes cover >1 function, 707
+    functions in total, and 126 of the 147 involve bodies under 64 bytes. Only
+    21 have a smallest body >= 64 bytes, and the largest (1361 bytes) is
+    __ld12tod against __ld12tod - the same CRT routine emitted twice. Every
+    collision inspected was a genuine duplicate.
+  * Normalisation zeroes 27.1% of all body bytes. That is a lot of destroyed
+    information; ~73% still discriminates, and the collision data above says
+    that is empirically enough, but do not raise the masked range casually.
+
+THE PREMISE IS AN ASSUMPTION, NOT A PROOF. This tool is sound only if the vendor
+shares no source between the updater and the config tool. That is UNPROVEN, and
+there is direct reason to doubt it: the two tools use the same transport design
+- same two report IDs and lengths, same byte-1 framing, the same five
+GetLastError retry codes (notes/config-protocol.md 1). If a shared source file
+were compiled into both, its functions would byte-match and be silently labelled
+"library" - and those would be exactly the protocol functions that matter.
+
+So: a match is EVIDENCE of library code, not proof. Never let a match alone
+exclude a function that is device-adjacent. The guard that actually holds is the
+independent confinement proof - every reference to every HID/SetupAPI import is
+enumerated by raw byte scan, and every referencing function is read regardless
+of what this tool says about it.
+
+Normalisation, so the same library function in two builds hashes the same:
+  * the rel32 operand of E8/E9 is masked
+  * any 4 bytes anywhere in the body that read as a VA in [0x400000,0x700000)
+    are masked - unaligned, so this can mask non-operand bytes by coincidence
+  * bodies under 16 bytes are skipped; they collide meaninglessly
+  * NOTE: an earlier version of this docstring claimed .reloc sites are masked.
+    They are not. No .reloc parsing happens here. Claim removed rather than
+    implemented, because the E8/E9 + VA masking is what was actually validated.
+"""Positively identify statically-linked library code by cross-binary presence.
+
 The updaters and the configuration tools are different programs by the same
 vendor, statically linked against the same MFC and MSVC CRT. So a function body
 that occurs in BOTH an updater and a configuration tool is library code: the
