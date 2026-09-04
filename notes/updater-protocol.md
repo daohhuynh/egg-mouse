@@ -83,6 +83,40 @@ offset `0x1433b0` [D].
 
 The tool never gates on the version; it only displays it [D].
 
+### 1.1 Exactly two product IDs are ever searched for [D]
+An exhaustive `E8`-rel32 scan of `.text` finds **exactly 9 direct callers** of
+the enumerator `FUN_00401000` — `0x403608`, `0x403649`, `0x403696`, `0x4036c9`,
+`0x403805`, `0x403836`, `0x4038d6`, `0x403c81`, `0x403c97` — and at all nine the
+pushed argument is a literal, either `0x1978` or `0x1977`. There is no path that
+computes a PID, reads one from a resource, or takes one from a list.
+
+That matters for §1.4 of `CLAUDE.md` in the same way the `FWFILE` constant does:
+the device-identity search space is closed at two values, both compile-time
+constants, and ours should be too.
+
+The `VendorID` test is a genuine 16-bit compare (`0x4010fa movl $0x3367,%eax`,
+`0x4010ff cmpw %ax,-0xc(%ebp)`). The `ProductID` test is **32-bit**:
+`0x401105 movzwl -0xa(%ebp),%ecx` then `0x401109 cmpl 0x8(%ebp),%ecx` — the
+zero-extended 16-bit PID against the full 32-bit stack argument, so any argument
+with a bit set above bit 15 could never match. Harmless with the two literals it
+actually uses; recorded because a reimplementation that widened the parameter
+would inherit a silent never-match.
+
+### 1.2 Two resource leaks in the enumerator — do not copy [D]
+`FUN_00401000` stores every `CreateFileW` result to the handle global
+`0x0056a174` (`0x4010e8`) as it walks the interface list, and calls no
+`CloseHandle` anywhere in its body — so every non-matching candidate's handle is
+leaked to the caller's bookkeeping. Separately, the **success** path
+(`0x40118a` → `0x4011cc` → `0x4011e9 retl`) returns without calling
+`SetupDiDestroyDeviceInfoList`; only the not-found exit at `0x40116b` destroys
+the device-info set. The same shape exists in code base B at `0x00401bc0` [D],
+so it is the vendor's habit, not a one-off.
+
+Neither leak affects the protocol. Both are noted because §4.2 has us
+re-enumerating repeatedly across a bootloader transition, which is exactly the
+loop where leaking a handle per pass would matter for us and evidently did not
+for a tool that exits soon afterwards.
+
 ## 2. Transport
 
 Two HID **feature report** IDs, distinguished by length [D]:
@@ -665,16 +699,49 @@ vendor anchors (the HID enumerator, the two feature-report wrappers, the
 Every reference, in the whole 9,076-function image, to any HID or SetupDi import
 and to every one of the vendor's device globals, is inside the band [D]:
 
-| symbol | referencing functions | outside band |
+Re-done on 2026-09-03 as an **exhaustive 4-byte-literal scan of the whole
+`.text` section** (VA `0x401000`–`0x51ac00`, 1,153,536 bytes), not by counting
+referencing functions. The earlier version of this table undercounted every
+global — it is corrected below. The conclusion did not change.
+
+| symbol | occurrences in `.text` | outside band |
 | --- | --- | --- |
-| `HidD_SetFeature` | `0x004012a0` | none |
-| `HidD_GetFeature` | `0x00401330` | none |
-| `HidD_GetHidGuid`, `HidD_GetAttributes`, `HidP_GetCaps`, `HidD_GetPreparsedData`, `SetupDiEnumDeviceInterfaces` | `0x00401000` | none |
-| device handle `DAT_0056a174` | 6 refs | none |
-| found flag `DAT_0056a0f8` | 4 refs | none |
-| mode flag `DAT_0056a0fc` | 3 refs | none |
-| `bcdDevice` `DAT_0056a0f4` | 3 refs | none |
-| HID GUID / devinfo / caps `DAT_0056a11c`, `0056a120`, `0056a130`, `0056a132`, `0056a118` | 1 ref each | none |
+| `HidD_SetFeature` | `0x004012a0` only | none |
+| `HidD_GetFeature` | `0x00401330` only | none |
+| `HidD_GetHidGuid`, `HidD_GetAttributes`, `HidP_GetCaps`, `HidD_GetPreparsedData`, `HidD_FreePreparsedData`, `SetupDi*` | `0x00401000` only | none |
+| device handle `0x0056a174` | **14** (12 reads, 2 writes) | **0** |
+| found flag `0x0056a0f8` | **7** | **0** |
+| mode flag `0x0056a0fc` | **6** | **0** |
+| `bcdDevice` `0x0056a0f4` | **3** | **0** |
+| HID GUID `0x0056a11c` | **5** | **0** |
+| devinfo `0x0056a120` | **3** | **0** |
+| `caps.Usage` `0x0056a130` | **2** | **0** |
+| `caps.UsagePage` `0x0056a132` | **1** | **0** |
+| `0x0056a118` | **1** | **0** |
+
+### The vendor never validates report lengths [D]
+The same scan run over the rest of `HIDP_CAPS` returns **zero**:
+
+| field | address | occurrences in all of `.text` |
+| --- | --- | --- |
+| `caps.InputReportByteLength` | `0x0056a134` | **0** |
+| `caps.OutputReportByteLength` | `0x0056a136` | **0** |
+| `caps.FeatureReportByteLength` | `0x0056a138` | **0** |
+
+The tool calls `HidP_GetCaps`, checks `Usage` and `UsagePage`, and **never looks
+at the declared report lengths**. `0x411` and `0x40` are hardcoded at every one
+of the seven send sites (§3.7a). It has no idea whether the collection it opened
+actually declares a 1041-byte feature report; if the device presented a
+different length, `HidD_SetFeature` would simply fail and the tool would read
+that as a transport error.
+
+**We should not copy this.** §4.2 makes any preflight failure abort, and this is
+free safety the vendor left on the table: on macOS the report descriptor is
+available before any write, so comparing the device's declared feature-report
+lengths against the constants `0x411`/`0x40` is a preflight check that costs
+nothing and would catch a wrong-collection or wrong-product open before a single
+byte is sent. It also resolves §6.1 from our side without needing the device:
+whatever the descriptor says, we compare rather than assume.
 
 The same holds for 1.04: all eight HID/SetupDi imports and the sole `FWFILE`
 reference resolve to `0x00401bc0`, `0x00401e30`, `0x00401ed0` and `0x00404330`,
