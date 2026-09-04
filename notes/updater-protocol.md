@@ -850,6 +850,45 @@ For fw110 the largest classes are `.text` 1,153,969 (54.09%), `.rdata` 268,113
 (12.57%), `.reloc` blocks 105,332 (4.94%), the six `FWFILE` blobs 399,360
 (18.72% together), section padding 61,969, `.data` 23,169.
 
+### 6.2.3 The starts Ghidra missed do not reach the device [D]
+
+`gapscan.py` recovers function starts Ghidra never created, from two
+loader-authoritative sources — direct call targets, and addresses taken as
+pointers in `.reloc`. There are a lot of them: **2,405** in fw110 (240 by call
+target, 2,165 by pointer), 2,178 in fw104, 2,990 in cfg107, 2,708 in cfg100.
+This is the same hole that hid cfg107's Factory Reset handler, so "do any of
+these reach the device?" is not a rhetorical question.
+
+**It is settled mechanically, not by reading them.** `closure.py`'s seed scan
+walks every byte of `.text` for a reference to any HID/SetupAPI slot — static or
+`GetProcAddress`-filled — and attributes each hit to its owning function *or*,
+where no function owns those bytes, to the orphan unit that does. Orphan-unit
+hits are reported separately. The result:
+
+| binary | slot references outside every Ghidra function |
+|---|---|
+| fw110, fw104, cfg107, cfg104, cfg101, cfg100 | **none** |
+| xm1r | `0x411025` — the IAT thunk block, and nothing calls it (§9) |
+
+So in all six PE binaries, **every** HID/SetupAPI reference in `.text` lies
+inside a function Ghidra already knows about. Not one of the ~2,400 recovered
+starts per binary touches the device, and the seeds are unchanged by them: 3, 3,
+13, 13, 13, 13, 7. This is an exhaustive byte scan, not a sample — the same
+method that produced the seeds themselves.
+
+The 18 recovered starts that fall inside fw110's vendor band were read anyway,
+being few and device-adjacent: `0x40219e 0x4021a3 0x4021a8 0x4021ac 0x4021bc
+0x4024b9 0x4024be 0x4024c3 0x4024c8 0x4024d8 0x4025e1 0x4025e6 0x4025eb
+0x40260c 0x40261c 0x402e23 0x4031f0 0x403ee0`. They are: `jmp`/`call` stubs into
+the EH helpers at `0x404e78`/`0x404eb0`; funclet epilogues (`popl %ebp; retl`);
+an SEH unregistration tail at `0x402e23` (`movl -0xc(%ebp),%ecx; movl
+%ecx,%fs:0x0`); one field accessor at `0x4031f0` (`movl 0xb8(%ecx),%eax; retl`,
+followed by `int3` padding — a genuine standalone function Ghidra missed); and
+one window helper at `0x403ee0`, which is
+`SendMessageW(hwnd, WM_SYSCOMMAND 0x112, 0xF012, 0)` — `SC_MOVE|HTCAPTION`, the
+standard trick for dragging a window by its client area. fw104's 7 in-band
+recovered starts are the same shapes.
+
 ### 6.2.2 The DARK residue is fully accounted for [D]
 
 `gapscan.py` partitions `.text` into KNOWN/CALLED/PTR/PAD/DARK, where DARK means
