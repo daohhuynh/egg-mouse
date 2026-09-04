@@ -746,6 +746,32 @@ the checksum-enforcement gate §3.2 calls the most load-bearing unknown in this
 file, so the two are almost certainly fields of one small per-product descriptor.
 That is a lead, not a finding.
 
+## 6.10 What was looked for and NOT found — scope and blind spot per row
+
+The standard `notes/updater-protocol.md` §6.3 sets: a negative claim is a claim
+about a method first and about the binary second, so each row says what was
+searched, over what, and what the search could not have seen. Regenerated
+2026-09-04; **do not quote these, re-run them.**
+
+| looked for | scope searched | found | what this method cannot see |
+|---|---|---|---|
+| other references to the ignore-mismatch flag `0x00706a80` | the flag's address as a 4-byte literal in **all 5,664,256 bytes of the file** | **4**, the ones §3.2 lists | an address computed at runtime (base + offset) rather than stored |
+| other references to the three 32-byte keys | each key's address as a 4-byte literal, whole file | **1 each**, all three inside `0x6450c0` | the same; also a key rebuilt byte-by-byte instead of pointed at |
+| other references to the three firmware blobs | each blob address as a 4-byte literal, whole file | **1 each**, all three inside `0x6441c0` (§6.9) | a blob reached by arithmetic from a neighbour — and the three ARE contiguous, so `blob1 + 0x8000` reaches blob2 without the literal appearing. Nothing observed does this; the scan cannot exclude it |
+| other dispatch tables for the command decoder | `0x645050` and `0x645060` as 4-byte literals, whole file | **1 each**, both in `0x644730` | a table reached relative to another |
+| a second `HidD_SetFeature` command path | `closure.py`, raw call edges from every HID/SetupAPI slot reference in `.text` | seed **7**, closure **31**, all in band; **0** calls into the 14 HID thunks; the one orphan slot reference `0x411025` is the IAT thunk block itself | a call through a pointer whose slot address never appears as a literal |
+| shared toolkit lineage with Endgame | the string `Ruling` in ASCII and UTF-16 across xm1r and the eight Endgame binaries | **2 + 2** in xm1r, **0** in every Endgame binary | one string is one signal; a shared toolkit could be renamed or statically stripped |
+| a use for the dead payload-size byte | `leal -0x1(%ebp)` anywhere in `0x6441c0`–`0x644728` | **0** — its address is never taken, so the five writes (§5.1) cannot escape the frame | nothing; for a stack slot in one function this is exhaustive |
+| a PE overlay | last section's raw end vs file size | equal at **5,664,256** — no overlay | nothing; this one is arithmetic |
+
+The rows that would change a conclusion if wrong are the first three, and all
+three share one blind spot: **a literal scan sees stored addresses, not computed
+ones.** For the blobs that is not hypothetical — they are contiguous by
+construction (§6.9), so arithmetic from one reaches the others. Nothing in the
+read code does it, and the read code is where the images are selected, so the
+risk is bounded; but "bounded" is not "excluded" and the difference is the point
+of this table.
+
 ## 7. Not yet derived
 - The 45 commands' meanings beyond `0x13` (§4.1), `0x11` (§3.2a) and the two the
   flash uses, `0x08` / `0x09` (§5.1).
