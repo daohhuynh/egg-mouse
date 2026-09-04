@@ -1303,6 +1303,53 @@ Two consequences worth carrying:
 The CFG split also lines up with the code-base split this file already uses:
 1.04 and cfg100 are the second code base, and they are the CFG builds.
 
+### 6.2.9 The cross-binary read partition — and the hole it found [D]
+
+`Tools/ghidra-export/readpartition.py`, written 2026-09-04 because the reading
+plan's coverage had never been stated as a partition, only as per-binary counts.
+
+**The hole.** Work-list item 3 queued, per binary, the bodies *unique* to that
+binary — present in it and in none of the other eight. That is a sound way to
+make each binary contribute a different portion, and it has a remainder that no
+per-binary count can show: **a body shared by exactly two non-fw110 binaries is
+unique to neither, so it enters no queue at all.** fw104 and cfg100 are the same
+code base; 1,639 bodies are shared by exactly those two. None of the individual
+numbers was wrong. The remainder was simply never computed.
+
+```
+$ python3 Tools/ghidra-export/readpartition.py
+
+binary     sized in-queue  micrord   hand    OPEN  open bytes
+fw110       9076     5193     3844     39       0           0
+fw107       9076     5193     3844     39       0           0
+fw106       9076     5193     3844     39       0           0
+fw104      10763     3244     4168      0    3351      376037
+cfg107      9528     4896     4177      0     455      137844
+cfg104      9495     4854     4159      0     482      158484
+cfg101      9516     4947     4158      0     411      129156
+cfg100     11071     2550     4348      0    4173      446699
+xm1r       23001     9540    10332      0    3129      228973
+
+distinct OPEN bodies, union over all binaries: 4497
+```
+
+**The three 1.10-family binaries close to zero**, which is the row that matters
+for the flasher and it is now zero without a subtraction anywhere (§6.2.5b).
+1.06 and 1.07 close for the same reason 1.10 does: identical `.text`, so their
+hashable bodies are the same bodies, and `microread.py` was run for them too
+rather than assumed — before that it had never been run for either, and the tool
+said so in its own output instead of silently scoring them as open.
+
+**The 4,497 are the true remainder of items 3 and 4** and they are a reading
+queue, not an estimate: `readpartition.py --queue` writes each one with a
+representative `(tag, entry, size)`. Median 68 bytes, 90th percentile 245,
+largest 7,423; about 640 KB of disassembly in total.
+
+Stated plainly so it is not mistaken for a smaller claim: **until that queue is
+read, "most of every other executable" is true of the updaters and the config
+tools by bytes, and is not yet true by bodies.** The number to quote is 4,497,
+regenerated, never copied from this paragraph.
+
 ### 6.2.2 The DARK residue is fully accounted for [D]
 
 `gapscan.py` partitions `.text` into KNOWN/CALLED/PTR/PAD/DARK, where DARK means
