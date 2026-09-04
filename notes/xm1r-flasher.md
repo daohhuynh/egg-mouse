@@ -244,8 +244,22 @@ recv[3] = sequence         ; obj+0x119
 
 The second receive loop is **not** run for every command — it is armed by a
 dispatch class field, so the 45 commands of §4 split into "immediate reply only"
-and "immediate reply plus a deferred completion reply". Which commands fall in
-which class is **not** yet enumerated here.
+and "immediate reply plus a deferred completion reply".
+
+**The field is `obj+0xc8`, and the commands are enumerated** (2026-09-04,
+resolving a §7 item). `0x644730` zeroes `obj+0xc8` on entry (`0x6447b8`); the
+dispatch at `0x644899` sets it to 1 for exactly the commands §4 lists under
+case 1, via the handler at `0x6448a0`. It is then read twice:
+
+| site | test | effect |
+|---|---|---|
+| `0x644b47` | `obj+0xc8 != 0` | sets `-0x34(%ebp) = 1`, the "expect a second reply" flag |
+| `0x644e48` | `obj+0xc8 != 0` (with `0xbc` and `0xc0`) | allows the completion at `0x644e6c`, `obj+0xcc = 1` |
+
+So the **15 commands that arm the deferred `0x15` reply** are §4's case 1:
+`02 04 06 0d 0f 11 1a 1b 1c 1e 1f 20 27 29 2a`. The flash commands `0x08` and
+`0x09` (§5.1) are case 0 and do **not** arm it; the version query `0x11` (§3.2a)
+does, which is the shape a query needs.
 
 The expected second sequence is computed at `0x644d8e`–`0x644da0`:
 ```
@@ -733,13 +747,20 @@ file, so the two are almost certainly fields of one small per-product descriptor
 That is a lead, not a finding.
 
 ## 7. Not yet derived
-- The 45 commands' meanings beyond `0x13` (§4.1), and which the flash sequence uses.
+- The 45 commands' meanings beyond `0x13` (§4.1), `0x11` (§3.2a) and the two the
+  flash uses, `0x08` / `0x09` (§5.1).
 - The runtime CRC-16 table generator and its polynomial.
-- Everything upstream: enumeration, the upgrade button handler, the sequence.
-- **Which of the 45 commands arm the deferred `0x15` reply** (§3.1). The dispatch
-  class field selects it; the per-command values are not enumerated.
-- **The meaning of `obj+0x492`**, the byte that gates checksum enforcement (§3.2).
-  Currently `[G]`. This is the most load-bearing unknown left in this file.
+- **What the per-image 16-bit constant is.** Its *role* is derived (§5.1: sent to
+  the device in the start frame, offset 8, never computed or checked by the host)
+  and four candidate functions over the raw blob are ruled out (§6.9). What
+  remains untested is any function over the *decrypted* image, which cannot be
+  computed without the decryption the host does not perform.
+- **The meaning of `obj+0x493`**, which gates image selection on `== 1` (§6.9).
+  A product or variant code is the obvious reading and is not derived. This is
+  now the largest single unknown in the object layout.
+- Enumeration and the upgrade-button handler — the UI path into `0x6479a0`.
+- Whether the device validates the §4.1 key, the §5.1 constant, or anything else
+  it is sent. Nothing in the host can answer this.
 
 *Resolved since the first draft:* the second `HidD_SetFeature` site at `0x00644ff7`
 is the **ACK frame** (§3.1), not a separate command path.
@@ -749,3 +770,15 @@ is the **ACK frame** (§3.1), not a separate command path.
 firmware images' location and size (three contiguous 32,768-byte `.data` blobs at
 `0x706a88`, `0x70ea88`, `0x716a88`, entropy 7.73). The per-image 16-bit constant
 was tested against three CRC-16s and an additive sum and matches none.
+
+*Resolved 2026-09-04, second pass:*
+- **Which commands arm the deferred `0x15` reply** — §3.1: the field is
+  `obj+0xc8`, the commands are §4's case 1, fifteen of them.
+- **`obj+0x492`** — §3.2a: the patch component of the device-reported firmware
+  version, `recv[6]` of the reply to command `0x11`. It was called the most
+  load-bearing unknown in this file; it is now `[D-X]`, and it made §3.2's
+  finding stronger rather than weaker.
+- **The flash sequence** — §5.1, end to end, both commands, frame layouts and
+  chunk arithmetic.
+- **`0x647660`** — §6.9: a predicate on the open device, not an open. The earlier
+  reading suggested a wrong-image hazard that does not exist.
