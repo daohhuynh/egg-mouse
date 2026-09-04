@@ -41,6 +41,27 @@ as `CLAUDE.md` §3 hoped but did not assume, and proving the transport once in
 `0x06`, `0x07`, `0x08`, `0x09`, `0x13`, `0x3A`; cfg107's four send sites use
 `0x02`, `0x11`, `0x12`, `0x13`. Do not read across.
 
+**Nor is the busy convention shared, and this one is a trap** — the receive
+wrappers are structurally near-identical, so the difference is easy to miss by
+reading one and assuming the other:
+
+| | updater `0x401330` | config `0x403920` |
+| --- | --- | --- |
+| "ready" status in `resp[1]` | `0x01` | `0x01` — same |
+| **"busy" status in `resp[1]`** | **`0x04`** | **`0x03`** |
+| backoff step | +100 ms per pass | +100 ms per pass — same |
+| **total budget** | **`0x7d0` = 2000 ms** | **`0x3e8` = 1000 ms** |
+| initial sleep before first re-read | none | fixed `Sleep(0x64)` = 100 ms |
+
+Verified in raw disassembly on both sides: config `0x40396e cmpl $0x3` and
+`0x4039d7 cmpl $0x3e8`; updater `0x40135d cmpb $0x4,0x1(%edi)` and
+`0x40139d cmpl $0x7d0`. fw104's receiver `0x401ed0` agrees with fw110 —
+`0x401f08 cmpb $0x4`, `0x401f4d cmpl $0x7d0` — so the updater value is confirmed
+across two code bases, not read once.
+
+**A transport that hardcodes one busy byte is wrong for the other tool.** It is
+a parameter, not a constant.
+
 ## 2. Device-facing surface — 13 functions, not 9 references [D]
 
 > **CORRECTED 2026-09-04.** This section previously said "nine references" and
@@ -116,6 +137,68 @@ Guards on the handle global `0x0057f338` being non-null. On failure calls
 (`0x4038ed`). Exactly **4 direct callers**, found by exhaustive `E8`-rel32 scan:
 `0x403b91`, `0x404243`, `0x404676`, `0x4047a6`.
 
+## 3a. How the device is selected — `FUN_004035f0` [D]
+
+The whole open-and-match predicate, read from raw disassembly. This is what
+`EGGCore`'s enumerator has to reproduce.
+
+```
+403709  calll *0x52d270          ; CreateFileW(path, 0xC0000000, 3, 0, 3, 0, 0)
+40370f  movl  %eax, 0x57f338     ; the device handle global
+403714  cmpl  $-0x1, %eax        ; INVALID_HANDLE_VALUE -> give up on this path
+403722  calll *0x52d1e0          ; HidD_GetAttributes -> HIDD_ATTRIBUTES at -0x10(%ebp)
+403738  movl  $0x3367, %eax      ; VID
+40373d  cmpw  %ax, -0xc(%ebp)    ;   .VendorID   must equal 0x3367
+403747  movzwl -0xa(%ebp), %ecx  ;   .ProductID
+40374b  cmpl  0x8(%ebp), %ecx    ;   must equal the CALLER'S ARGUMENT
+40375e  calll *0x52d1d4          ; HidD_GetPreparsedData
+403771  calll *0x52d1d0          ; HidP_GetCaps -> HIDP_CAPS at 0x57f1d0
+403777  movl  $0xff01, %edx
+40377c  cmpw  %dx, 0x57f1d2      ;   .UsagePage  must equal 0xFF01
+403785  cmpw  $0x2, 0x57f1d0     ;   .Usage      must equal 0x02
+```
+
+Layout note: `HIDD_ATTRIBUTES` is `{Size, VendorID, ProductID, VersionNumber}`,
+so `-0x10/-0xc/-0xa/-0x8`; `HIDP_CAPS` starts `{Usage, UsagePage}`, so
+`0x57f1d0` is Usage and `0x57f1d2` is UsagePage — they are the other way round
+from the order the code tests them in, which is worth care when transcribing.
+
+On a full match it stores `.VersionNumber` to `0x0057f190`, sets the
+device-present word `0x0057f194` to 1, and keeps the device path.
+
+**Four conditions, all required: VID `0x3367`, PID = argument, UsagePage
+`0xFF01`, Usage `0x02`.** The usage-page pair is what picks the vendor
+collection out of the several a gaming mouse presents; matching on VID/PID alone
+would open the wrong interface.
+
+### 3a.1 The bootloader PID question, answered properly [D]
+
+An earlier open item asked whether cfg107 ever looks for the bootloader PID
+`0x1977`, and reasoned from a literal scan: `0x1978` appears as a 32-bit
+immediate 7 times, `0x1977` zero times. **That framing could not have settled
+it**, because the PID is never a literal inside the comparison — it is the
+function's argument, compared at `0x40374b` against `0x8(%ebp)`. A scan of the
+matcher would find no PID at all.
+
+The answer comes from the call sites instead, and it is stronger than the guess
+was. `FUN_004035f0` has exactly five callers, and **every one pushes the
+compile-time constant `$0x1978`**:
+
+```
+4130ac  pushl $0x1978    ; OnInitDialog
+413844  pushl $0x1978    ; WM_DEVICECHANGE
+413edb  pushl $0x1978    ; APPLY
+413f9d  pushl $0x1978    ; Factory Reset
+414046  pushl $0x1978    ; sub-dialog live-apply
+```
+
+Each verified by disassembling at the site. **cfg107 has no bootloader
+awareness**: it cannot open PID `0x1977`, because nothing ever asks it to.
+
+This is a `CLAUDE.md` §1.2a case worth keeping as calibration — the original
+negative was *stated over the wrong search space*. It happened to reach the
+right conclusion, which is the dangerous kind of near-miss.
+
 ## 4. The four commands cfg107 sends [D]
 
 Each read off the `movl` immediate that initialises byte 0 and byte 1 together.
@@ -126,7 +209,26 @@ Little-endian, so `$0x12a1` writes `a1 12 00 00`.
 | `0x403b8a` | `$0x12a1` | `0xA1` | `0x12` | `0x40` | `Sleep(0x50)` = 80 ms |
 | `0x404218` | `$0x11a0` | `0xA0` | `0x11` | `0x411` | `Sleep(arg)`, then a 64-byte `0xA1` read |
 | `0x40466c` | `$0x2a1` | `0xA1` | `0x02` | `0x40` | `Sleep(0x32)` = 50 ms |
-| `0x40479f` | `$0x13a1` | `0xA1` | `0x13` | `0x40` | failure path pushes `0x44c` |
+| `0x40479f` | `$0x13a1` | `0xA1` | `0x13` | `0x40` | **success** path: `Sleep(0x44c)` = 1100 ms, then a 64-byte `0xA1` read |
+
+> **CORRECTION 2026-09-04 — the `A1 13` row had the branch backwards.** It read
+> "failure path pushes `0x44c`", and recorded no response read at all. Both
+> wrong. At `0x4047ad` the `je 0x4047fa` jumps to the **failure** epilogue
+> (`orb $-0x1,%al` at `0x404805`); the 1100 ms sleep at `0x4047af` is on the
+> **fall-through, i.e. success**. It is followed by a real response read:
+> memset 64 bytes at `-0x90(%ebp)` (`0x4047c4`), `movb $0xa1` at `0x4047d2`
+> — objdump prints this as `$-0x5f`, which is exactly how a text scan for `$0xa1`
+> misses it — then `calll 0x403920` at `0x4047d9`, requiring both a non-zero
+> return and **`resp[1] == 1`** (`cmpb $0x1,-0x8f(%ebp)` at `0x4047e2`) before
+> `movb $0x1,%al`.
+>
+> **This matters for us.** Factory reset is not fire-and-forget on the config
+> side: the vendor waits 1.1 s and then requires an explicit ready status. Per
+> `CLAUDE.md` §4.2, "mirror whatever verification the vendor protocol provides,
+> exactly" — so our factory reset must do the same and must not report success
+> on the send alone. Note the contrast with the *updater's* post-flash `A1 13`,
+> which genuinely is fire-and-forget (`notes/updater-protocol.md` §5.4a): same
+> command byte, different caller discipline.
 
 **`0xA0 0x11` carries 1024 bytes** copied to buffer `+0x10` by `rep movsl` of
 `0x100` dwords (`0x404222`–`0x404233`) — the same payload geometry as the
@@ -151,11 +253,6 @@ byte-identical frame after a successful flash, which is why a firmware update
 resets settings (`notes/updater-protocol.md` §5.4a).
 
 ## 6. Not yet derived
-- Whether cfg107 ever looks for the bootloader PID `0x1977`. Literal scan finds
-  `0x1978` at 7 sites as a 32-bit immediate but **zero** 32-bit `0x1977` — which
-  is suggestive of a config tool with no bootloader awareness, but a 2-byte
-  immediate or a computed value would not show up that way, so this is **not**
-  established. It is a scan result, not a proof.
 - The 1024-byte settings blob's field layout, and which UI control writes which
   offset. Lead: `0x413db0` writes the host-side defaults as inline immediates
   including `0x190/0x320/0x640/0xc80` = 400/800/1600/3200.
