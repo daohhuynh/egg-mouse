@@ -6,8 +6,6 @@ tools. The protocol must be derived independently from their `.exe` files.
 **This file contains rules and decisions only. It deliberately contains no
 protocol findings.** See §7.
 
----
-
 ## 1. Hard rules
 
 ### 1.1 Third-party projects are OFF LIMITS
@@ -64,95 +62,37 @@ Static analysis only. Nothing about this project requires running them.
 
 ### 1.6 Do straightforward work the straightforward way
 Reach for the simplest thing that does the job. A 300-line file gets read, not
-delegated. Spawning a fleet of agents to answer a question that one careful pass
-would answer is not thoroughness, it is overhead, and it can actively make the
-answer worse: each agent sees less context than you do, they re-read the same
-file in parallel, and their findings come back flattened into a summary that is
+delegated to a fleet of agents. Volume is not rigour: each agent sees less
+context than you do, and their findings come back flattened into a summary
 thinner than what you would have seen yourself.
 
-Parallel agents earn their place in exactly two cases. The work genuinely does
-not fit in one context, or independence is the point, as in an adversarial check
-on a conclusion that is about to reach the hardware. Both cases exist in this
-project. Most tasks are neither.
+Parallel agents earn their place in two cases only. The work does not fit in one
+context, or independence is the point, as in an adversarial check on a
+conclusion about to reach hardware. Reading thousands of decompiled functions is
+the first case. Most tasks are neither.
 
-The same instinct that says "use more machinery" is the one §1.2 warns about.
-Effort is not evidence, and volume is not rigour.
+### 1.7 Commit finished work, and keep working memory
+Sessions die without warning, and anything held only in a session's head dies
+with it.
 
-### 1.7 Commit when something is actually finished, and keep working memory
-Two habits, because a session can die at any moment and everything held only in
-its head dies with it.
+**Commit when a thing is done, not when it is started.** Done means implemented
+and checked, or investigated and concluded. Not "it compiles", not "I have a
+theory". The message says what was verified and how, so a later reader can tell
+a checked claim from an assumed one without rerunning anything.
 
-**Commit when a thing is done, not when a thing is started.** Done means
-implemented and checked, or investigated and concluded. Not "the file compiles",
-not "I have a theory". One coherent unit per commit, and the message says what
-was verified and how, so the next reader can tell a checked claim from an
-unchecked one without rerunning anything. Never commit a state you know is
-broken without saying so in the message.
+**`working-memory.md` at the repo root is the agent's own file**, not
+documentation for the user. Using it is not optional. This project outruns any
+one context window, so without written external state you will re-derive
+finished work, contradict an hour-old conclusion, and lose track of which claims
+were checked, sounding equally confident throughout. That is the §7 failure
+mode. Read it first in a session, update it as you go, commit it every time, and
+trust it over recollection when they disagree.
 
-**Keep `working-memory.md` at the repo root, and commit it with every commit.**
-
-**This file is yours.** It is not documentation, not a status report, and not
-written for the user, who does not need it and will not usually read it. It is
-external memory for the agent doing the work, and using it is not optional.
-
-Use it because this project is bigger than any one context window and will
-outrun you otherwise. Thousands of functions across four versions of two
-binaries, a chain of derivations where each step depends on the last, a rule
-that every claim carries a provenance tag, and a hard prohibition on any
-untagged byte reaching hardware. Without a written external state you will
-re-derive things you already derived, contradict a conclusion you reached an
-hour ago, lose track of which claims were checked and which were assumed, and
-present the result with the same confidence either way. That is precisely the
-failure described in §7, and it is the failure this file exists to prevent.
-
-So: read it first thing in a session, before touching anything else. Update it
-as you go, not only at commit time. Trust it over your recollection when the two
-disagree, because it was written when the details were fresh and your
-recollection was not.
-
-What goes in it: what is being worked on right now, what is next, what was tried
-and ruled out, what is blocked and on what, and anything that would take an hour
-to re-derive.
-
-It only works if it is **trimmed, not just appended to**. Rules:
-
-- It is *state*, not a log. Git already has the log. Nothing belongs here
-  because it happened; things belong here because they are still true and still
-  needed.
-- The moment an item is done, delete it. If it is worth keeping, it belongs in a
-  commit message or in `notes/`, not here.
-- Rewrite entries in place as understanding changes. A file that only grows has
-  already failed.
-- Reconcile it with reality *before* every commit, in the same commit. If
-  nothing in it changed, that is a signal it is being ignored.
-- Write it for a stranger with none of your context, because that is exactly
-  who reads it next: a fresh session, or you after a compaction. "Continue the
-  analysis" is useless. Name the binary, the address, the command, the file.
-- If it is longer than a screen or two, it has become a log. Cut it back.
-
-The test: if this session ends mid-sentence, can a fresh session read
-`working-memory.md` and pick the work up cold, without guessing? If not, the
-file is wrong. Sessions do end mid-sentence. Assume yours will.
-
----
-
-## 1b. Product context
-
-**Removed. See §7.1.**
-
-What stood here was presented as vendor documentation and official changelogs,
-but it was unsourced, and the user has confirmed that part of it was fabricated
-and described a different mouse. None of it survived. Hardware part numbers,
-button behaviour, LED indications, the firmware version history and the
-per-version changelog all have to be re-entered from the actual vendor documents
-before anything relies on them.
-
-One planning assumption from that section is worth keeping, because it is a
-decision rather than a claim: **assume Endgame provides no protocol
-documentation and no support for non-Windows tooling.** Build as if no answer is
-coming.
-
----
+It holds current state, never history; git has the history. Delete each item the
+moment it is done, rewrite in place instead of appending, and write for the
+stranger who reads it next: name the binary, the address, the command. Past a
+screen or two it has become a log. The test: if this session stops mid-sentence,
+can a fresh one pick the work up cold from that file alone?
 
 ## 2. Threat model
 
@@ -161,6 +101,9 @@ user error. Those are out of scope by explicit decision.
 
 ### Constraints
 - **No spare mouse.** One device.
+- **No vendor documentation.** Endgame's config software is Windows-only by
+  their own account. Assume no protocol documentation and no support is coming,
+  and build as if no answer arrives.
 - **No Windows.** No Boot Camp, no VM, no USB capture of the official tool.
   There is no independent check on the derivation other than the device itself.
 - **Do not open the mouse.** Assume a brick is not covered by warranty, and
@@ -169,25 +112,19 @@ user error. Those are out of scope by explicit decision.
 - Must work without root. Detect missing macOS permissions and say so rather
   than failing silently.
 
----
-
 ## 3. Architecture
 
 **One repo, three targets. Two executables.**
 
 ```
-egg-mouse/
-  CLAUDE.md
-  notes/
-  Sources/
-    EGGCore/        # HID transport, enumeration, logging, device identity,
-                    # protocol tables (as DATA), mock device harness
-    EGGConfigCore/  # read-modify-write, diff-verify
-    EGGFlashCore/   # preflight, chunked write, per-chunk verify, persist-retry
-    egg-flash/      # CLI executable
-    egg-config/     # CLI executable (GUI later, if ever)
-  Tools/exe-diff/
-  Tests/
+Sources/
+  EGGCore/        # HID transport, enumeration, logging, device identity,
+                  # protocol tables (as DATA), mock device harness
+  EGGConfigCore/  # read-modify-write, diff-verify
+  EGGFlashCore/   # preflight, chunked write, per-chunk verify, persist-retry
+  egg-flash/      # CLI executable
+  egg-config/     # CLI executable (GUI later, if ever)
+Tools/exe-diff/   plus notes/ and Tests/
 ```
 
 One repo, because a shared core in a separate repo can drift: correct an opcode,
@@ -198,27 +135,21 @@ Separate executables, because the two have **contradictory quit semantics**
 (§4). Sharing a process makes "can the user quit now?" a conditional on internal
 state — the exact bug class being designed out.
 
-**Language: C++ with `hidapi`.** IOKit is a C API; every language calls it
-equally well. C++ matches decompiler output idiom, reducing transcription errors
-on bytes where a transcription error is expensive. `hidapi` wraps `IOHIDManager`.
+**Language: C++ with `hidapi`.** C++ matches decompiler output idiom, reducing
+transcription errors on bytes where a transcription error is expensive.
+`hidapi` wraps `IOHIDManager`.
 
 **Flasher is CLI-first.** No window to close, no Dock quit item, output is a log
 by construction. Trap `SIGINT`/`SIGTERM` explicitly during the write phase.
+Protocol constants live in `EGGCore` **as data tables**, not scattered through code.
 
-Protocol constants live in `EGGCore` **as data tables**, not scattered through
-code.
+### 3.1 Tooling on this machine
+Ghidra 12.1.3, a Homebrew formula (not a cask). `analyzeHeadless`, `ghidraRun`
+and `pyghidraRun` are on `PATH`. It declares a JDK 21 minimum with no maximum
+and runs on the Java 24 installed here. Also radare2 / `rabin2`, `objdump`,
+`strings`, `xxd`, python3. `.claude/settings.json` allowlists them all.
 
-### 3.1 Tooling available on this machine
-- **Ghidra 12.1.3**, installed via Homebrew. `analyzeHeadless` is on `PATH`
-  (symlinked to `/opt/homebrew/opt/ghidra/libexec/support/analyzeHeadless`);
-  `ghidraRun` and `pyghidraRun` are also on `PATH`.
-- radare2 / `rabin2`, `objdump`, `strings`, `xxd`, Java 24, python3.
-- `.claude/settings.json` allowlists these so they run without prompting.
-
-No extraction or triage script is checked in. The previous one was deleted; see
-§7.1.
-
----
+No extraction or triage script is checked in. The previous one was deleted, §7.1.
 
 ## 4. Safety design
 
@@ -275,11 +206,10 @@ wrong opcode, trusting a reported success — compile clean in any language.
 wait for it.** Both tools ship on the same timeline.
 
 Stages 1 and 2 are *transport validation for the flasher*, not config work. If
-the two tools turn out to share a transport, proving it once proves it for both,
-but that has to be established rather than assumed. Step 1 uses a read-only
-command because that is the cheapest possible way to prove the layer works — a
-bootloader-mode query serves equally well if preferred, and skips config
-entirely.
+the two tools share a transport, proving it once proves it for both, but
+establish that rather than assuming it. Step 1 uses a read-only command as the
+cheapest way to prove the layer works; a bootloader-mode query does just as
+well and skips config entirely.
 
 1. **One read-only command round trip.** Exercises enumeration, channel open,
    report framing, response parsing, timing. Nothing is written; nothing to undo.
@@ -291,13 +221,9 @@ entirely.
    writes.
 4. **A real flash.**
 
-By stage 4 the only untested code is erase and write.
-
-Config work — read-modify-write, factory reset as the undo, settings semantics —
-proceeds in parallel on the same shared transport. Factory reset must still be
-working before any *config* write; that gate does not apply to flashing.
-
----
+By stage 4 the only untested code is erase and write. Config work proceeds in
+parallel on the same transport. Factory reset must be working before any
+*config* write; that gate does not apply to flashing.
 
 ## 5. Device-gated work (requires the physical device)
 - Report descriptor → confirm report IDs and exact lengths [O].
@@ -312,18 +238,12 @@ working before any *config* write; that gate does not apply to flashing.
 Everything else — transport, framing, state machines, mock harness, dry-run,
 invariants, the `.exe` differ — is buildable now.
 
----
-
 ## 6. Reading policy for the binaries
 
-Read **every** candidate function — everything not positively identified as
-statically-linked library code. A relevance score may set reading ORDER; it must
-never decide what goes unread.
-
-If the candidate set is too large to read exhaustively, **say so and give the
-number**. Do not silently sample.
-
----
+Read **every** candidate function, meaning everything not positively identified
+as statically-linked library code. A relevance score may set reading ORDER; it
+must never decide what goes unread. If the candidate set is too large to read
+exhaustively, **say so and give the number**. Do not silently sample.
 
 ## 7. Why there are no protocol findings in this file
 
@@ -341,28 +261,21 @@ Disagreements are expected. They mean one of: the prior analysis was wrong, the
 new analysis is wrong, or the behaviour is version-dependent. **The tiebreaker
 is the device, never authority or seniority.**
 
-### 7.1 The prior session's contamination reached this repo
-
+### 7.1 The contamination reached this repo, not just the notes
 Withholding the findings was not enough. Two leaks were found and removed.
 
-**The tooling.** A Ghidra extraction script (`Tools/ghidra_scripts/MineAll.java`)
-carried the prior session's conclusions inside it: its relevance scorer awarded
-points for specific hardcoded constants, and its pattern matching assumed a
-specific command shape. A tool that scores for the answer is not a neutral
-instrument, and anyone who reads it inherits the answer. It was deleted rather
-than repaired. Any replacement must extract structure without encoding a belief
+**The tooling.** A Ghidra extraction script scored functions for specific
+hardcoded constants and pattern-matched a specific command shape, so it carried
+the prior conclusions inside it and anyone reading it inherited them. Deleted,
+not repaired. A replacement must record structure without encoding a belief
 about what the structure means.
 
-**The prose.** §1b asserted vendor documentation and user preferences that were
-not sourced, and part of it was confirmed false. §4.2 and §4.4 asserted protocol
-details in a file that opens by claiming it holds none. All of that is gone.
+**The prose.** A "product context" section asserted vendor documentation and
+user preferences that were never sourced, part of it confirmed false, and §4.2
+and §4.4 asserted protocol details in a file that claims to hold none. Gone.
+§1.1 was reviewed and **kept in full**: it describes the projects themselves,
+never anything inside them, and knowing what to avoid requires knowing what it is.
 
-§1.1 was reviewed and kept in full. It describes the two community projects
-themselves — their names, licences, scope, authorship — and never reproduces
-anything found inside them. Repository metadata is not protocol knowledge, and
-knowing what to avoid requires knowing what it is.
-
-The lesson generalises. **Contamination hides in whatever is not treated as a
-claim**: a scoring heuristic, a variable name, a section that sounds like
-background rather than analysis, a hedge that has quietly become an assertion by
-the third time it is restated. §1.2 applies to all of it.
+**Contamination hides in whatever is not treated as a claim**: a scoring
+heuristic, a variable name, a section that reads as background rather than
+analysis, a hedge that has become an assertion by its third restatement.
