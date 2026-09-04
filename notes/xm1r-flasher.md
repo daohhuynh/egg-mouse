@@ -746,6 +746,21 @@ the checksum-enforcement gate §3.2 calls the most load-bearing unknown in this
 file, so the two are almost certainly fields of one small per-product descriptor.
 That is a lead, not a finding.
 
+## 6.9a Two `.text` byte counts appear in this repo and both are right
+
+Recorded before it becomes a phantom discrepancy. `.text` **raw** size is
+`0x26da00` = **2,546,176**, which is what a whole-section file scan covers and
+what `working-memory.md`'s confinement note quotes. `.text` **virtual** size is
+`0x26d82a` = **2,545,706**, which is what `Tools/ghidra-export/filemap.py`
+partitions; the 470-byte difference is alignment padding and lands in that tool's
+`SECPAD` class. `filemap.py xm1r` still totals to the file size with zero
+residue, so neither number is wrong and there is nothing to reconcile.
+
+Note also that `filemap.py`'s `SECPAD` is measured by scanning back from each
+section's raw end for actual `0x00`/`0xCC` padding — it is **not**
+`raw_size − virtual_size`, so arithmetic on the section headers will not
+reproduce its total and should not be expected to.
+
 ## 6.10 What was looked for and NOT found — scope and blind spot per row
 
 The standard `notes/updater-protocol.md` §6.3 sets: a negative claim is a claim

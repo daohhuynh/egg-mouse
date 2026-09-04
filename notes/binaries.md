@@ -10,6 +10,17 @@ inconsistent use of a `v` prefix.
 Every binary listed has been present on the analysis machine. Nothing here is a
 protocol claim; these are file identities only.
 
+**Every size and SHA-256 below was re-verified against the files on disk on
+2026-09-04** — all nine match, none missing. Regenerate rather than trust this
+sentence:
+
+```
+for f in *.exe old-config-executables/*.exe old-firmware-executables/*.exe; do
+  printf '%-60s %10d %s\n' "$(basename "$f")" "$(stat -f%z "$f")" \
+         "$(shasum -a 256 "$f" | cut -c1-64)"
+done
+```
+
 ## Configuration Tool
 
 | Version | Size (bytes) | SHA-256 |
@@ -66,7 +77,10 @@ Per CLAUDE.md 1.5, these are never executed. Static analysis only.
 `XM1r_Flash_Upgrade_1.9.46.exe` — **a different product (Endgame Gear XM1r) and
 a different vendor's code base** (Ruling Technologies Sdn. Bhd., per the string
 table). Analysed in `notes/xm1r-flasher.md` under its own `[D-X]`/`[V]` tags so
-that nothing from it can be mistaken for an OP1 finding. See `CLAUDE.md` §1.4.
+that nothing from it can be mistaken for an OP1 finding. The rule that governs
+this is `CLAUDE.md` **§1.2** (provenance tags on every protocol claim); an
+earlier revision cited §1.4, which is about firmware-image selection and is not
+what keeps the two products apart.
 
 | size | sha256 |
 | --- | --- |
