@@ -822,6 +822,74 @@ each declares. Until then, the plan is to mirror the vendor exactly (`0x411` for
 `0xA0`, `0x40` for `0xA1`) and to treat a length mismatch as a preflight failure
 rather than something to paper over.
 
+## 6.2 Whole-file byte partition — every byte of all nine binaries [D]
+
+`coverage.py` partitions Ghidra's function list; `gapscan.py` partitions `.text`
+bytes. Neither covers the **file** — headers, `.rdata`, `.data`, `.rsrc` and
+`.reloc` were outside both, so "exhaustively accounted" had never once meant the
+whole binary. `Tools/ghidra-export/filemap.py` closes that:
+
+```
+.analysis/venv/bin/python Tools/ghidra-export/filemap.py <tag> --json .analysis/filemap_<tag>.json
+```
+
+Every byte lands in exactly one class — DOS header/stub, PE header, section
+headers, header pad, each data directory, each `.reloc` block, each resource
+blob named by type and name, section bodies, section padding, overlay — and the
+classes must sum to the file size or the tool exits non-zero.
+
+**Result: all nine binaries partition with zero residue and zero double-claimed
+bytes**, first run, no exceptions carved out:
+
+| | fw110 | fw107 | fw106 | fw104 | cfg107 | cfg104 | cfg101 | cfg100 | xm1r |
+|---|---|---|---|---|---|---|---|---|---|
+| file bytes | 2,133,504 | 2,066,944 | 2,066,944 | 2,427,904 | 1,836,032 | 1,833,472 | 1,837,568 | 2,193,920 | 5,664,256 |
+| GAP residue | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+For fw110 the largest classes are `.text` 1,153,969 (54.09%), `.rdata` 268,113
+(12.57%), `.reloc` blocks 105,332 (4.94%), the six `FWFILE` blobs 399,360
+(18.72% together), section padding 61,969, `.data` 23,169.
+
+### 6.2.1 `FWFILE` is a STRING-typed resource, and the config tools have none [D]
+
+The resource type is the string `L"FWFILE"`; the six names are integers. Read
+directly off the loader — `FUN_00403200`:
+
+```
+403207  pushl $0x5447c0     ; L"FWFILE"  (the TYPE, a string)
+40320c  pushl $0x8c         ; 140        (the NAME, an integer)
+403211  pushl $0x0          ; hModule = NULL
+403213  calll *0x51b230     ; FindResourceW
+```
+
+Worth stating explicitly because getting it wrong is easy and it looked like a
+finding: a resource directory entry is either an integer id or, with the high
+bit set, an **offset** to a length-prefixed UTF-16 string. Reporting the masked
+offset as though it were an ordinal makes one string type appear as three
+different numbers across builds — 3304 for 1.04, 3340 for 1.06/1.07, 3388 for
+1.10 — which reads exactly like a per-version type ordinal that our code would
+have to track. **It is not.** It is `"FWFILE"` in every build, stored at a
+different directory offset. `filemap.py` resolves the strings; the trap is
+recorded in its docstring.
+
+**The negative that matters:** cfg100, cfg101, cfg104 and cfg107 contain **no
+`FWFILE` resource of any name**, and no resource of 66,560 bytes at all. Their
+only string-typed resources are MFC's `AFX_DIALOG_LAYOUT` markers, 2 bytes each.
+Scope of that claim: the full resource tree of each file, walked exhaustively by
+`filemap.py`, whose partition closes to zero — so this is not a search that
+could have missed a branch. **The vendor's configuration tools carry no firmware
+image and therefore cannot flash.**
+
+Corroborates §8's census by a second, independent route, and confirms the blob
+inventory exactly: 133/135/137 byte-identical across all four releases
+(SHA-256), 140 and 142 different in every one of the four, 143 present only in
+1.10.
+
+> One caution about 140 and 142, since it invites a wrong inference: across
+> releases these blobs share a **16-byte identical prefix** in some pairs while
+> their full hashes differ. Comparing leading bytes therefore says "same" when
+> the blobs are not the same. Compare whole-blob hashes, never prefixes.
+
 ## 7. Scope of the search — what was read, and what was not
 
 `CLAUDE.md` §6 forbids silent sampling, so here are the numbers.

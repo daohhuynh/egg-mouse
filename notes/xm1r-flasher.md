@@ -68,6 +68,14 @@ updater never gates on version. This one does. Do not generalise either way.
 
 ## 2. The complete UI surface  [D-X]
 
+> **CORRECTION 2026-09-04.** There are **eleven** `TEXTFILE` resources, not one:
+> names **4000–4010**. 4000 is 4,844 bytes; 4001–4010 are 4,720 bytes each.
+> Found by the exhaustive resource walk in `Tools/ghidra-export/filemap.py`,
+> whose whole-file partition closes to zero residue, so the count is complete
+> rather than "what was noticed". Only 4000 has been read. The other ten are
+> **unread** — near-identical sizes suggest translations of the same text, but
+> that is `[G]` and they have not been opened. Recorded as an open item.
+
 `TEXTFILE` resource **4000**, lang 1033, 4,844 bytes, UTF-16LE. Resources
 4001–4010 are all byte-identical to each other (`521de15e…`) and differ from
 4000 — a localisation table with only English populated.
