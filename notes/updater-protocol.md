@@ -883,8 +883,11 @@ Still open:
   frame and the send; `[G]` only for what the device does on receipt.
 - **The mapping from block number to a flash address.** Block `0x34` is `[D]`;
   `0x34 * 1024` is `[G]`.
-- **Which `FWFILE` belongs to which product.** The tool hardcodes 140 and says
-  nothing about the other five.
+- ~~**Which `FWFILE` belongs to which product.**~~ **Largely closed 2026-09-04,
+  §8.5a.** 1.10's 140 is the same image lineage as 1.04's — same filler
+  ciphertext across all four releases, and the same lock-step change profile
+  with 142 — so the EL1 project path in 1.10 did not come with a swapped image.
+  What the other five *are* remains unknown and does not need to be known.
 - **What the device does with a `0xA0/0x06` whose `[2..3]` is outside
   `0x34..0x74`.** The vendor tool never sends one, so its behaviour is
   unconstrained by anything in the binary. Our flasher must never emit one.
@@ -1194,6 +1197,83 @@ One reader also flagged `0x004c0043` as "three bytes decoding as `subl
 the same conclusion as §6.2.2's separate analysis, that Ghidra defined a function
 at an address that is not an instruction boundary, without being prompted to look
 for one.
+
+### 6.2.7 Updater 1.04's unique bodies are read — partition and error rate [D]
+
+Work-list item 3, second code base. The 3,185 normalised bodies that are unique
+to 1.04 after subtracting the 4,817 the 1.10 read already covered. 72 batches,
+**72 returned, 0 failed**.
+
+**Mechanical check** (`verify_read.py`, which scores only the two fields a
+script can recompute — see its docstring for what it cannot):
+
+| | count |
+| --- | --- |
+| functions in the batches | 3,185 |
+| reported by the readers | 3,184 |
+| **invented ids** | **0** |
+| missing | 1 — `0x00534bf5` |
+| call targets in the truth set | 13,401; **21 functions disagree** (16 extra, 9 missed) |
+| indirect-call slots in the truth set | 6,683; **12 functions disagree** (8 extra, 5 missed) |
+
+`0x00534bf5` was read by hand: 36 bytes, calls `GDI32!GetViewportOrgEx`
+(`*0x56e060`) on the handle at `this+8` and copies the returned `POINT` to the
+caller's out-parameter. MFC device-context accessor; no device relevance.
+
+**Judgement-field precision, measured rather than assumed.** 24 functions came
+back flagged `vendor_specific`. 13 are the already-derived device layer and its
+neighbours (§5.8, §6.3). The other **11 are all false positives, and all one
+idiom**: `0x0040b0d9`, `0x004efbfc`, `0x004efc28`, `0x004efc54`, `0x004efc80`,
+`0x004efca7`, `0x004efcd2`, `0x004efcfe`, `0x00535812`, `0x0053583d`,
+`0x0053a469` — 33 to 44 bytes each, every one an MFC `ON_UPDATE_COMMAND_UI`
+handler that computes a bool from a member (`this+0x344` against 0…5,
+`this+0x13c`, `this+0x38c`) and calls `CCmdUI` vtable slot `+0x0` or `+0x4`.
+Each was disassembled; **none is in the device closure**. Precision of the flag
+on this run: **13 of 24**. `CLAUDE.md` §6.2 asks for the reader's error rate to
+be measured instead of assumed — this is it for the judgement field, and it is
+the number to quote, not the 0.6% mechanical one.
+
+**One substantive reader error, caught and corrected.** The summary for
+`0x00404760` says the `A1 3A` frame is "retried up to ten times". It is
+**nine**, and the bytes are unambiguous: `0x40477c movl $0x2,%ebx`, loop bottom
+`0x404821 addl $0x2,%ebx` / `0x404824 cmpl $0x14,%ebx` / `jl 0x404791`, so the
+entry values are 2, 4, … 18. **Nine, the same as 1.10's**, which is what §5.7's
+cross-version agreement requires; the reader's number would have contradicted
+it. The frame itself is confirmed: `movl $0x3aa1,-0x44(%ebp)` +
+`movl $0x32a55a00,-0x40(%ebp)` = `A1 3A 00 00 00 5A A5 32`. The retry sleep is
+`Sleep(2k)` on pass `k` — 2 ms to 18 ms, not the hundreds used elsewhere.
+
+### 6.2.8 Three of the nine binaries were built with Control Flow Guard [D]
+
+Not a protocol fact, but it removes a large source of noise from every future
+read and it explains a boundary already in these notes.
+
+In **fw104, cfg100 and the XM1r**, every indirect call is preceded by
+`calll *<one .rdata slot>` whose stored value is a `.text` address holding
+`c2 00 00` — a bare `retl $0` — i.e. `_guard_check_icall_nop`:
+
+| binary | slot | target | `ff 15` sites |
+| --- | --- | --- | --- |
+| fw104 | `0x0056e990` | `0x00401bb0` | 7,724 |
+| cfg100 | `0x005809c8` | `0x00402a10` | 7,717 |
+| XM1r | `0x0066fcc4` | `0x005eb93b` | 11,493 |
+
+fw110 / fw107 / fw106 and cfg107 / cfg104 / cfg101 have no such slot; their
+most-referenced indirect targets are ordinary imports at a few hundred sites.
+
+Two consequences worth carrying:
+
+1. **The single most-referenced "import slot" in those three binaries is not an
+   import.** Any tool or reader that treats `calll *<abs>` as an API call will
+   attribute thousands of sites to one non-existent API. `verify_read.py`
+   counts it correctly — it only claims "indirect call through an absolute
+   address" — but a human reading its output should know what dominates it.
+2. **It names the boundary in §6.2.4.** `0x00401bb0` is exactly where fw104's
+   MFC-init region stops because `0x00401bb0` *is* the CFG nop, the last thing
+   the linker placed before the vendor band at `0x00401bc0`.
+
+The CFG split also lines up with the code-base split this file already uses:
+1.04 and cfg100 are the second code base, and they are the CFG builds.
 
 ### 6.2.2 The DARK residue is fully accounted for [D]
 
@@ -1541,7 +1621,7 @@ itself discharge §6 for the remaining candidates, which could in principle hold
 vendor code that never touches the device. Those are being read separately; the
 counts above are the honest denominator.
 
-## 8. Structure of the `FWFILE` images
+## 8.0 Structure of the `FWFILE` images
 
 Nothing here changes what our flasher does — the updater copies the resource
 byte for byte (§4) and so will we. It is recorded because it says something
@@ -1766,6 +1846,77 @@ differ, i.e. a localized plaintext edit rewrites its whole 1024-byte chunk.
 does not need to be: the host never decrypts. Recording it here as a bounded
 unknown rather than an open question that looks like a task.
 
+### 8.5a Which blob is ours — §6's open question, largely closed  [D]
+
+§0.1.1 left this open and it deserved better than "the tool hardcodes 140".
+The evidence is the ciphertext itself, and it needs no cipher identification.
+
+**Fact 1 — every resource name has its own filler ciphertext, and it never
+changes across releases.** Chunks 29–63 are one chunk repeated 35 times in all
+21 blobs (verified: `chunks29..63 all equal` for each). Its SHA-256, by name:
+
+| name | filler chunk SHA-256 (first 12) | 1.04 | 1.06 | 1.07 | 1.10 |
+| --- | --- | --- | --- | --- | --- |
+| 133 | `a6632c2e2504` | ✓ | ✓ | ✓ | ✓ |
+| 135 | `fe2e7a5c0920` | ✓ | ✓ | ✓ | ✓ |
+| 137 | `a744b0294fe5` | ✓ | ✓ | ✓ | ✓ |
+| **140** | **`cefe77fb6c23f0d4cb19fc709232bed0035ba41cc1413d46688172d3e6c6ffda`** | ✓ | ✓ | ✓ | ✓ |
+| 142 | `ec43b18e4646` | ✓ | ✓ | ✓ | ✓ |
+| 143 | `e0cac456c107` | — | — | — | ✓ |
+
+Six distinct values over 21 blobs and **zero collisions between names** — no
+1024-byte chunk value whatsoever is shared by two different resource names.
+
+**Fact 2 — 140 and 142 change in lock-step, on identical chunk indices.**
+
+| release step | 140 changes | 142 changes |
+| --- | --- | --- |
+| 1.04 → 1.06 | chunks `8, 27, 28, 64` | chunks `8, 27, 28, 64` |
+| 1.06 → 1.07 | chunks `0–28, 64` (30) | chunks `0–28, 64` (30) |
+| 1.07 → 1.10 | chunks `0–28, 64` (30) | chunks `0–28, 64` (30) |
+
+133/135/137 change on **no** chunk in any step. So the six split cleanly:
+three frozen, two version-tracking in lock-step, one that appears in 1.10.
+
+**Fact 3 — all four updaters identify as the same product.** Every
+`VERSIONINFO` string in 1.04, 1.06, 1.07 and 1.10 says `OP1 8k v2 Firmware
+Updater`, including 1.04, whose PDB path says only `OP1 8k`. The `EL1` trace is
+confined to 1.10's PDB path and occurs once in the whole file (§0.1.1).
+
+**What that settles.** 1.04 is the OP1 8k v2 updater by its own version
+resource, and it predates the copied EL1 project directory. Its `FWFILE`/140
+has filler ciphertext `cefe77fb…`. **1.10's 140 has the same filler ciphertext
+and the same lock-step change profile with 142 that 140 had in every earlier
+step.** For 1.10's 140 to be a different product's image, that image would have
+to reproduce a filler ciphertext that no other resource in the corpus
+reproduces, and continue 140's own three-release change pattern. **1.10's
+`FWFILE`/140 is the same image lineage as 1.04's.** The sixth blob 143 arrived
+alongside it with a filler ciphertext shared with nothing — an addition, not a
+substitution.
+
+**What it does not settle**, stated so it is not read as more: this is an
+argument about *lineage*, not about which physical mouse 140 is for. That comes
+from §8.2 — only 140 is reachable, the tool sends it to whatever answers at VID
+`0x3367` / PID `0x1978`, and that is our device. And the inference "different
+filler ciphertext ⇒ different key" needs the premise that the filler
+*plaintext* is the same in all six, which is `[G]`. The facts above are `[D]`
+and the lineage conclusion rests only on them.
+
+**A wrong-image guard that costs nothing and runs before the first byte**
+(`CLAUDE.md` §2 requires the guard to be ours):
+
+```
+size == 66560                                   exactly 65 x 1024
+chunk[i] == chunk[29]  for all i in 29..63       the 35x filler run
+sha256(chunk[29]) == cefe77fb6c23f0d4cb19fc709232bed0035ba41cc1413d46688172d3e6c6ffda
+sha256(whole)     == 8148ebe9f8d2848abe483aee98df6e42bab341c6a17523bfef0f85f1f66754d0
+```
+
+The last line alone pins the exact image; the three before it are what still
+holds if Endgame ships a 1.11 and we deliberately move to it. **Note the third
+line is the discriminator that would have caught a swapped 143** — its filler
+is `e0cac456c107…`.
+
 ### 8.6 Consequences for the ingest design
 
 1. Extract `FWFILE`/**140** only. The name stays a hardcoded constant (§1.4).
@@ -1777,6 +1928,9 @@ unknown rather than an open question that looks like a task.
    refuse an updater whose set does not match one we have read.
 5. Treat the additive checksum as a transport integrity check only. It is not
    evidence that the image is the right image.
+6. Assert §8.5a's four-line guard on the extracted bytes before anything else
+   happens. It is four comparisons and it is the only thing between us and
+   flashing another product's firmware.
 
 ## 9. Device-layer confinement, proved twice and for every binary  [D]
 
