@@ -434,12 +434,82 @@ Flagged per §0: this is explanation after the fact, not prediction.
 | No button held, no bootloader gesture | consistent — no such gesture seen in `0x644730` |
 | Never failed, no retry | untestable from the binary |
 
+## 6.9 Product selection, firmware images and the version triple  [D-X]
+
+Derived 2026-09-04 from `FUN_006441c0`, a device-closure member. It tries three
+product branches in order, each self-contained:
+
+```
+644292  pushl $0x1903            ; PID
+644297  pushl $0x3367            ; VID
+64429c  movl  -0x18(%ebp), %ecx  ; context
+64429f  addl  $0x2dc, %ecx       ; -> its HID sub-object
+6442a6  calll 0x647660           ; open(ctx+0x2dc, vid, pid) -> bool in al
+...  on success:
+6442b5  movl  $0x8000,   -0x24(%ebp)   ; 32,768
+6442bc  movb  $0x38,     -0x1(%ebp)    ; 56
+6442c0  movb  $0x1,      -0x2(%ebp)
+6442c4  movb  $0x1,      -0x3(%ebp)
+6442c8  movl  $0xbadf00d,-0x28(%ebp)   ; magic
+6442cf  movl  $0x716a88, -0x20(%ebp)   ; -> a .data blob
+6442d9  movb  $0x1,  0x24c(%eax)       ; version major
+6442e3  movb  $0x9,  0x24d(%ecx)       ; version minor
+6442ed  movb  $0x2e, 0x24e(%edx)       ; version patch = 46
+6442f4  movl  $0x8298, %eax
+6442f9  movw  %ax, -0x10(%ebp)         ; a 16-bit per-image constant
+```
+
+then the same block for **PID `0x1905`** with blob `0x706a88` and constant
+`0x08b4`, then a third branch gated on `0x493(%ecx) == 1` **and**
+`0x38c(%eax) != 0`, with blob `0x70ea88` and version minor `8`.
+
+**Device identity — resolves a §7 item.** VID **`0x3367`** (the same vendor id
+the OP1 config tool matches on) with PIDs **`0x1903`** and **`0x1905`**, plus a
+third gated branch. Note the identity comparison is *not* in `FUN_006473d0`,
+which merely fills a struct from `HidD_GetAttributes`/`HidP_GetCaps`; matching
+happens in the caller, which is why looking for it inside the HID wrapper found
+nothing.
+
+**The three-component version decode — resolves a §7 item.** It is three
+consecutive bytes in the context object, `+0x24c` major, `+0x24d` minor,
+`+0x24e` patch, written as plain integers. `1, 9, 0x2e` = **1.9.46**, matching
+the tool's own filename; the third branch writes minor `8`.
+
+**Firmware image location and size — resolves a §7 item.** The three pointers are
+**contiguous, in `.data`, exactly `0x8000` = 32,768 bytes each**, back to back:
+
+| blob VA | file offset | ends at | selected by |
+|---|---|---|---|
+| `0x706a88` | `0x304e88` | `0x70ea88` | PID `0x1905` |
+| `0x70ea88` | `0x30ce88` | `0x716a88` | the `+0x493` branch |
+| `0x716a88` | `0x314e88` | `0x71ea88` | PID `0x1903` |
+
+Each blob's last byte abuts the next blob's first, verified by reading across the
+boundaries, and UTF-16 `"Arial"` follows the last one — so the array is exactly
+three images and the run is bounded on both sides. Entropy **7.73 bits/byte**
+with 149–160 zero bytes in 32,768: **encrypted or compressed**, on the same
+entropy standard §4 of `notes/updater-protocol.md` applies to the OP1's `FWFILE`
+blobs (7.94). Blobs 1 and 3 share an identical 16-byte prefix while differing
+overall — the same prefix-collision the OP1 blobs show, and the same warning
+applies: compare whole-blob hashes, never prefixes.
+
+**What the 16-bit constant is NOT.** `0x8298` (blob `0x716a88`) and `0x08b4`
+(blob `0x706a88`) look like per-image checksums and the shoe fits — §3.2's
+machinery is CRC-16. **Tested and it does not match.** Over the raw 32,768
+bytes: additive sum `0xb62a`/`0xb82d`, CRC-16-CCITT `0x7b54`/`0x73af`, CRC-16-IBM
+`0x0383`/`0x8ae7`. None equals the expected value for either blob. So either the
+checksum is over the *decrypted* image, or it is not a checksum at all. Recorded
+as `[G]` and unresolved rather than fitted to a fourth polynomial until something
+matched — which is how a wrong constant gets into a flasher.
+
+**`obj+0x493`** gates the third branch. It sits one byte after **`obj+0x492`**,
+the checksum-enforcement gate §3.2 calls the most load-bearing unknown in this
+file, so the two are almost certainly fields of one small per-product descriptor.
+That is a lead, not a finding.
+
 ## 7. Not yet derived
 - The 45 commands' meanings beyond `0x13` (§4.1), and which the flash sequence uses.
-- The firmware image's exact location, size, and whether it is encrypted.
-- The three-component version decode.
 - The runtime CRC-16 table generator and its polynomial.
-- Device identity: VID/PID have not been located yet.
 - Everything upstream: enumeration, the upgrade button handler, the sequence.
 - **Which of the 45 commands arm the deferred `0x15` reply** (§3.1). The dispatch
   class field selects it; the per-command values are not enumerated.
@@ -448,3 +518,9 @@ Flagged per §0: this is explanation after the fact, not prediction.
 
 *Resolved since the first draft:* the second `HidD_SetFeature` site at `0x00644ff7`
 is the **ACK frame** (§3.1), not a separate command path.
+
+*Resolved 2026-09-04 (§6.9):* device identity (VID `0x3367`, PIDs `0x1903` /
+`0x1905`), the three-component version decode (`obj+0x24c/0x24d/0x24e`), and the
+firmware images' location and size (three contiguous 32,768-byte `.data` blobs at
+`0x706a88`, `0x70ea88`, `0x716a88`, entropy 7.73). The per-image 16-bit constant
+was tested against three CRC-16s and an additive sum and matches none.
