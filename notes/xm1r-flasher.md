@@ -312,9 +312,85 @@ cmpl   $0x7, %r
 jg     <skip the store>
 movb   $0x0, 0x706a80
 ```
-Enforcement is switched on only when the byte at `obj+0x492` is **≤ 7** (signed
-compare). What `obj+0x492` means is **[G]** — plausibly a protocol or firmware
-version — and is not derived here.
+**That quotation is the last third of the gate and was incomplete; corrected
+2026-09-04.** Each store is guarded by **three** comparisons in sequence, on
+three consecutive bytes, and any one of them failing skips the store
+(`0x64560a`–`0x645637`, and the twin at `0x645c74`–`0x645c9e`):
+
+```
+64560a: movzbl 0x490(%eax), %ecx
+645614: cmpl   $0x1, %ecx
+645617: jg     0x64563e          ; skip
+645619: movzbl 0x491(%edx), %eax
+645623: cmpl   $0x3, %eax
+645626: jg     0x64563e          ; skip
+645628: movzbl 0x492(%ecx), %edx
+645632: cmpl   $0x7, %edx
+645635: jg     0x64563e          ; skip
+645637: movb   $0x0, 0x706a80    ; enforce
+```
+
+So enforcement is switched on **only when `0x490 ≤ 1` and `0x491 ≤ 3` and
+`0x492 ≤ 7`**, each component bounded independently — which is not a version
+comparison, just three range checks written in a row.
+
+**And `obj+0x490`–`0x492` is now derived: it is the firmware version the device
+itself reports.** §3.2a below. The consequence is sharper than the original
+finding: **both firmware versions this tool ships are 1.9.46 and 1.8.155**
+(§6.9), whose middle component is 9 and 8, both `> 3`. On any device reporting
+either of them the second comparison fails, the store never runs, and
+`0x00706a80` keeps its shipped value `0x01` — **checksum mismatches ignored.**
+The enforcing path is reachable only for a device reporting something at or below
+`1.3.7` componentwise, which is not a version this tool can install.
+
+### 3.2a `obj+0x490`–`0x493` is the device-reported firmware version  [D-X]
+
+This resolves what §7 called the most load-bearing unknown in this file.
+
+The four bytes are filled by four one-byte `memcpy` calls at `0x64557c`–`0x645607`
+(twin at `0x645be0`–`0x645c6b`), immediately after the exchange at `0x64552c`
+returns 0:
+
+```
+64551d: pushl $0x11                 ; command 0x11
+645522: addl  $0x2dc, %ecx          ; the port sub-object
+64552c: calll 0x644730              ; returns 0 on success
+645531: testl %eax, %eax
+645533: jne   0x64569f              ; failed -> abandon
+...
+64557c: leal  0x3f2(%eax,%edx), %ecx ; edx = 4    -> src
+645587: addl  $0x490, %edx           ->            dst
+64558e: calll 0x5ee040               ; memcpy(dst, src, 1)
+       ... repeated with 5, 6, 7 -> 0x491, 0x492, 0x493
+```
+
+**The source is the receive buffer.** The port sub-object begins at `obj+0x2dc`
+and §3.1 puts its receive buffer at `+0x116`; `0x2dc + 0x116 = 0x3f2`, exactly
+the base used here. So the four bytes are `recv[4]`, `recv[5]`, `recv[6]`,
+`recv[7]` — the first four payload bytes after §3.1's tag and sequence — of the
+reply to **command `0x11`**, which §4's dispatch table places in case 1, the
+class that arms the deferred `0x15` reply. A version query answered by a deferred
+reply is exactly the expected shape.
+
+**Then they are stored as a version triple.** `0x64563e`–`0x645677` passes
+`0x490`, `0x491`, `0x492` to three one-line thiscall setters:
+
+| setter | body | writes |
+|---|---|---|
+| `0x402120` | `movb %cl, 0x2d8(%eax)` | `obj+0x2d8` |
+| `0x402140` | `movb %cl, 0x2d9(%eax)` | `obj+0x2d9` |
+| `0x402160` | `movb %cl, 0x2da(%eax)` | `obj+0x2da` |
+
+and `0x2d8/0x2d9/0x2da` are the device-side counterpart of the image-side triple
+`0x24c/0x24d/0x24e` that §6.9 derives: the constructor `0x0064bb20` initialises
+both runs adjacently (`0x64bc43`–`0x64bc93`), each has its own one-line getter
+(`0x4040a0/0x4040c0/0x4040e0` against `0x404040/0x404060/0x404080`), and the
+image-side one is written with literal `1, 9, 0x2e` and `1, 8, 0x9b`.
+
+So **`obj+0x492` is the third component (patch) of the device's reported firmware
+version**, `0x490` the first and `0x491` the second. `[D-X]`. What `obj+0x493`
+means stays `[G]`; §6.9 shows it gating image selection on `== 1`, so a product
+or variant code is the obvious reading and is not derived.
 
 **What this establishes, and what it does not.** It does not show the XM1r
 updater is unsafe in practice; the gate may well be satisfied on every real
@@ -417,8 +493,12 @@ H ≈ 7.78, with small internal gaps — inside **writable `.data`**, which is
 consistent with in-place decryption but is not yet established. Three further
 8 KiB runs sit in `.rdata` at `0x6a8000`, `0x6af000`, `0x6c6000`.
 
-**Which of these is the image, and its exact extent, is not yet derived.** The
-correct next step is the code that references the region, not a guess from size.
+**Superseded by §6.9** (2026-09-04): the images are three contiguous 32,768-byte
+`.data` blobs at `0x706a88`, `0x70ea88` and `0x716a88`, found from the code that
+references them rather than from the entropy scan. The entropy run above brackets
+them loosely and its 91.75 KiB figure is the scan's artefact, not the image size;
+`3 × 0x8000 = 0x18000` = 98,304 bytes is the derived total. The `.rdata` runs are
+not firmware.
 
 ## 6. What the video corroborates — post-hoc, weak evidence
 
