@@ -945,6 +945,40 @@ calls the type is convention, and nothing downstream depends on the name.
 **Nothing in the range touches HID or SetupAPI**, by the exhaustive slot scan of
 §6.2.3.
 
+### 6.2.6 `classify.py`'s worst case is empirically excluded for the flasher [D]
+
+`classify.py` identifies library code by cross-binary body match, and its own
+docstring names the way that can go wrong:
+
+> "This tool is sound only if the vendor shares no source between the updater
+> and the config tool. That is UNPROVEN, and there is direct reason to doubt it:
+> the two tools use the same transport design … If a shared source file were
+> compiled into both, its functions would byte-match and be silently labelled
+> 'library' — and those would be exactly the protocol functions that matter."
+
+That is a live risk, not a hypothetical: §1 of `notes/config-protocol.md`
+establishes that the two tools **do** share the transport design — same report
+IDs, same lengths, same byte-1 framing, the same five `GetLastError` retry codes.
+
+**Tested directly.** Normalised body hash of each of fw110's 14 device-closure
+members, looked up in cfg100, cfg101, cfg104, cfg107, fw104 and xm1r:
+
+**0 of 14 match anything in any other binary.**
+
+So the vendor did not compile a shared transport source file into both programs.
+The design is common; the code is not. `classify.py`'s premise holds exactly
+where a failure would have been most expensive, and this is now a measured
+result rather than an assumption carried in a docstring.
+
+Two of the fourteen sit below `classify.py`'s 16-byte hashing cutoff and are
+excluded from hashing by construction, so they were read instead:
+`0x00402f00` (16 B) is `pushl %ebp; movl %esp,%ebp; movl 0x8(%ebp),%eax; pushl
+%eax; calll 0x403750; xorl %eax,%eax; popl %ebp; retl` — a thin `cdecl`
+forwarder into **enter-bootloader** that discards the result and returns 0 — and
+`0x00402f10` (15 B) is the same shape forwarding into **`0x403960`, the flash
+worker**. Neither adds protocol; both matter only as the entry points the UI
+calls.
+
 ### 6.2.5 The 474 bodies unique to 1.10 were read, and the readers were checked [D]
 
 Of fw110's 5,232 functions that `microread.py` could not settle mechanically,
