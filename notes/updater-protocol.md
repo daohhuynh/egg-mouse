@@ -382,6 +382,17 @@ checksums; it does not require the vendor's bug. Reproduce the *commands*
 exactly and the *verification* correctly. This is also a concrete reason not to
 treat the vendor tool as the reference for correctness, only for protocol.
 
+There is a second oddity in the same loop. `FUN_00401980`'s follow-up status
+read uses the report ID it is handed on the stack, with a **fixed 64-byte
+length** (`pushl $0x40` at `0x401a8a`). On the normal path `FUN_00403960` passes
+`0xA1` (`pushl $0xa1`, `0x403a86`), which matches a 64-byte report. On the repair
+path `FUN_00401c90` passes **`0xA0`** (`pushl $0xa0`, `0x401e06`) — the 1041-byte
+report ID, read into a 64-byte buffer [D]. Whatever that returns, it is not a
+well-formed `0xA0` response.
+
+Both defects sit on the repair path and nowhere else. The main write-and-verify
+path is sound.
+
 ## 5.7 Cross-version confirmation: code base B agrees with code base A
 
 Updater 1.04 is a separately compiled program — different toolchain, 1,459 KiB
@@ -445,6 +456,32 @@ Still open:
   unconstrained by anything in the binary. Our flasher must never emit one.
 - **Everything in `CLAUDE.md` §5.** No `[O]` exists yet; the device is not in
   hand. Nothing above has been checked against hardware.
+
+### 6.1 One question the binaries cannot answer, and it is a design input
+The tool passes **two different buffer lengths to the same device handle**:
+`0x411` for report `0xA0` and `0x40` for report `0xA1` [D]. On Windows,
+`HidD_SetFeature` is normally called with the collection's
+`FeatureReportByteLength`, which is the **maximum** over all feature reports in
+that collection. If this device's vendor collection declares both report IDs,
+that maximum would be 1041, and every 64-byte call — including the
+enter-bootloader command that the whole update depends on — would have to be
+tolerated by the stack rather than being exactly sized.
+
+`FUN_00401000` calls `HidP_GetCaps` but only ever reads `Usage` and `UsagePage`
+from the result; it never looks at `FeatureReportByteLength` [D]. So the tool
+hardcodes both lengths and the binaries say nothing about what the device
+actually declares.
+
+This matters because macOS is not Windows: `IOHIDDeviceSetReport` takes an
+explicit length and does no padding, so we must send exactly the right number of
+bytes and cannot rely on a driver being lenient.
+
+**Resolve it from the report descriptor when the device arrives** — that is
+already `CLAUDE.md` §5's first item, and this is the specific thing to look for:
+whether `0xA0` and `0xA1` live in one collection or two, and what feature length
+each declares. Until then, the plan is to mirror the vendor exactly (`0x411` for
+`0xA0`, `0x40` for `0xA1`) and to treat a length mismatch as a preflight failure
+rather than something to paper over.
 
 ## 7. Scope of the search — what was read, and what was not
 
