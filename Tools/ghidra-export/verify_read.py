@@ -22,6 +22,21 @@ them. A 0% mechanical error rate is evidence the reader looked at the right
 bytes; it is NOT evidence the summary is right. Do not let this tool's output be
 quoted as if it were.
 
+PLANTED POSITIVES (`--plants PATH`). CLAUDE.md 6.2: a harness that cannot
+produce a bad result is not evidence, so each run seeds batches with functions
+that ARE device-facing, unlabelled, and the miss rate on them is the measured
+false-negative rate for the judgement fields. PATH is a JSON object mapping the
+planted id to {"tag", "batch", and optionally "expect": [field, ...]} -- the
+default expectation is `firmware_relevant`. The report prints per-plant hit or
+miss and the rate; **a rate of zero misses across a small plant set is a weak
+result, not a strong one**, and the tool says so rather than letting the reader
+of its output forget it.
+
+Plant only functions whose device nature is visible IN THEIR OWN DISASSEMBLY.
+fw110's plant at 0x004012a0 failed because the honest answer needed the reader
+to know that `calll *0x51b1d4` resolves to HidD_SetFeature, which symbol-free
+disassembly cannot show. That was a bad question, not a bad reader.
+
 The journal is the workflow's own record (`journal.jsonl` under the run's
 transcript directory); results are read from it rather than from the workflow's
 return value, which is capped at 4,096 elements.
@@ -178,6 +193,34 @@ def main():
         print(f"   calls  {fid} extra={extra} missed={miss}")
     for fid, extra, miss in bad_imps[:10]:
         print(f"   imps   {fid} extra={extra} missed={miss}")
+    if "--plants" in sys.argv:
+        pp = json.load(open(sys.argv[sys.argv.index("--plants") + 1]))
+        print("\nPLANTED POSITIVES (CLAUDE.md 6.2) -- measured false-negative rate")
+        hit = seen = 0
+        for pid, meta in sorted(pp.items()):
+            fid = pid.strip().lower()
+            f = reported.get(fid)
+            want = meta.get("expect") or ["firmware_relevant"]
+            if f is None:
+                print(f"   {pid}  batch {meta.get('batch')}  NOT REPORTED AT ALL")
+                seen += 1
+                continue
+            seen += 1
+            got = [w for w in want if f.get(w)]
+            ok = len(got) == len(want)
+            hit += ok
+            print(f"   {pid}  batch {meta.get('batch'):>3}  "
+                  f"{'HIT ' if ok else 'MISS'}  "
+                  f"want={want} got={{{', '.join(w + '=' + str(f.get(w)) for w in want)}}}  "
+                  f"category={f.get('category')!r} confidence={f.get('confidence')!r}")
+        if seen:
+            print(f"   plants {hit}/{seen} detected; miss rate "
+                  f"{100.0 * (seen - hit) / seen:.0f}%")
+            if hit == seen:
+                print("   NOTE: a clean sweep over a plant set this small is weak "
+                      "evidence. It bounds nothing below a miss rate of roughly "
+                      f"1-in-{seen}; it is not proof the readers do not miss.")
+
     print("\nNOTE: summary/category/vendor_specific/settings_relevant are NOT "
           "checked here and cannot be. See the docstring.")
 

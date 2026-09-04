@@ -101,8 +101,24 @@ data tables, not scattered through code").
 Before erase nothing has changed on the device, so `CLAUDE.md` §4.2 makes any
 single failure an abort with no partial-pass path.
 
-1. **Image identity.** The image is a compile-time constant (`§1.4`). Not a
-   filename, not a resource index chosen at runtime, not an argument.
+1. **Image identity, four checks, and they are cheap** — `updater-protocol.md`
+   §8.5a. The image is a compile-time constant (`§1.4`): not a filename, not a
+   resource index chosen at runtime, not an argument. On top of that, assert on
+   the bytes themselves before anything else runs:
+
+   ```
+   size == 66560                              exactly 65 x 1024
+   chunk[i] == chunk[29]   for i in 29..63    the 35x filler run
+   sha256(chunk[29]) == cefe77fb6c23f0d4cb19fc709232bed0035ba41cc1413d46688172d3e6c6ffda
+   sha256(whole)     == 8148ebe9f8d2848abe483aee98df6e42bab341c6a17523bfef0f85f1f66754d0
+   ```
+
+   The last line pins the exact image; the third is the one that discriminates
+   *product*, and it is the check that would catch resource 143 — the blob that
+   appeared in 1.10, the same build whose PDB path names an EL1 project — being
+   substituted for 140. `CLAUDE.md` §2 says every guard against flashing the
+   wrong firmware has to be ours and has to run before the first byte; this is
+   that guard, and it is four comparisons.
 2. **Image size** matches the constant the block arithmetic expects (§3.8).
 3. **Device identity** by the full four-part predicate above.
 4. **Report descriptor check.** macOS gives us the descriptor *before* any
@@ -253,6 +269,14 @@ Stated here so they are not silently resolved by an implementation detail:
   Windows**, and how long it takes. The vendor polls with 500 ms sleeps to a
   10-second ceiling (§5.3); we have no basis for a different number.
 - **Whether we send `A1 13` at all** — Flagged for decision #1.
+- **Whether the *bootloader* presents `UsagePage 0xFF01` / `Usage 0x02`.** The
+  vendor's updater requires it (`updater-protocol.md` §1: the same four-part
+  predicate is applied with PID `0x1977`), so it must — otherwise their own tool
+  could never find the device in bootloader mode. That is an inference from the
+  vendor's code, not an observation, and §5 of `CLAUDE.md` puts it on the
+  device-gated list. It matters because the mouse presents **two** vendor
+  collections in application mode (`config-protocol.md` §10) and we do not know
+  how many it presents in bootloader mode.
 - **Settings preservation policy if the pre-flash capture fails** — Flagged for
   the owner #2, and a genuine tradeoff: `§4.1` says never write after a failed read,
   which if applied here lets a config failure block a firmware update.
