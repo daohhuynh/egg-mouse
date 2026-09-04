@@ -1478,7 +1478,7 @@ has a blind spot it is named rather than left implied.
 
 | looked for | over | found | method, and what it cannot see |
 |---|---|---|---|
-| bytes in a code section that no structure accounts for | `.text` of 6 PE binaries | **0** | `darkclass.py`; every DARK run resolves to a known function's tail or an instruction interior. Rests on per-function re-disassembly, not a linear sweep. |
+| bytes in a code section that no structure accounts for | `.text` of **all 7** binaries with a Ghidra export — the XM1r added 2026-09-04 | **0** | `darkclass.py`; every DARK run resolves to a known function's tail or an instruction interior. Rests on per-function re-disassembly, not a linear sweep. The XM1r is the interesting row: `gapscan.py` reports **7.20% of its `.text` DARK** (183,399 bytes in 19,045 runs) against ~0.1% for the Endgame binaries, and **all 19,045 runs still resolve** — 1,589 interior bytes, 17,456 past a short declared end, **0 unexplained**. A 70× larger residue with the same explanation is worth more than another 0.1% row. |
 | bytes in the *file* that no structure accounts for | all 9 binaries, whole files | **0** | `filemap.py`; partition must sum to the file size or it exits non-zero. Says where bytes are, not what they mean. |
 | HID/SetupAPI slot references outside every Ghidra function | `.text` of 6 PE binaries | **0** | `closure.py`, exhaustive 4-byte scan attributing each hit to a function or orphan unit. Blind to a slot address held only in a register. |
 | `E8` calls into a HID/SetupAPI IAT thunk | all 7 binaries | **0** | Byte scan for `E8` targeting one of the 14 thunk addresses. xm1r has all 14 thunks and nothing calls them. Blind to a computed thunk target. |

@@ -7,10 +7,16 @@ in 158 runs for fw110) and it is the only part of the code section with no
 evidence attached, so it is exactly where something unknown could hide. This
 settles what it is.
 
-RESULT, all six PE binaries, zero exceptions: every DARK run is part of a
-function Ghidra already knows about. ~80% lie past the function's declared end
-(its extent is short); the rest are interior bytes of a real instruction. No
-DARK run in any binary is code Ghidra missed entirely.
+RESULT, all seven binaries with a Ghidra export, zero exceptions: every DARK run
+is part of a function Ghidra already knows about. ~80% lie past the function's
+declared end (its extent is short); the rest are interior bytes of a real
+instruction. No DARK run in any binary is code Ghidra missed entirely.
+
+The XM1r was added 2026-09-04 and is the strongest row, not the weakest: its
+DARK residue is 7.20% of .text (183,399 bytes, 19,045 runs) against ~0.1% for
+the Endgame binaries, and all 19,045 runs still resolve -- 1,589 interior,
+17,456 past a short declared end, 0 unexplained. A 70x larger residue with the
+same explanation tests the explanation; another 0.1% row would not have.
 
 WITHOUT relying on the whole-.text linear sweep.
 

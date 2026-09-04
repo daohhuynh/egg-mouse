@@ -917,3 +917,65 @@ enumerated. Five of seven was stated as a fact and the two-function residue was
 not written down, so a whole device channel sat in plain sight for a day. This
 is the second time in this project that a correct count with an unenumerated
 remainder concealed the finding.
+
+
+## 11. What the cfg100 read produced [D] for the numbers, lead-grade for the flags
+
+`read5`, the 2,489 normalised bodies unique to configuration tool **v1.00**.
+116 batches, **116 returned, 0 failed**.
+
+**Mechanical check** (`verify_read.py`; it scores only the two fields a script
+can recompute):
+
+| | count |
+| --- | --- |
+| functions in the batches | 2,489 |
+| reported | 2,489 |
+| **invented ids** | **0** |
+| **missing** | **0** |
+| call targets in the truth set | 12,750; **20 functions disagree** (5 extra, 16 missed) |
+| indirect-call slots | 5,803; **9 functions disagree** (11 extra, 0 missed) |
+
+Cleaner than the fw104 run (`updater-protocol.md` §6.2.7), which had 1 missing
+and 21/12 disagreements over a larger set.
+
+### 11.1 Where the 84 `vendor_specific` flags actually landed
+
+Partitioned rather than counted, and every member of the third row read by hand:
+
+| | n | what they are |
+| --- | --- | --- |
+| in cfg100's device closure | 15 | `0x403ee0 0x4049c0 0x404a50 0x404ce0 0x404db0 0x404fa0 0x405660 0x405ac0 0x414660 0x414700 0x414a70 0x414fe0 0x415630 0x415700 0x415860`. The readers re-identified the device layer with no access to these notes — the same independent corroboration the fw104 read gave for the updater |
+| below `0x416000`, outside the closure | 66 | the vendor band: dialog, settings and UI logic |
+| **above `0x416000`** | 3 | `0x00466e71` — the 29 KB MFC body settled in `updater-protocol.md` §6.2.7a, a false positive. `0x004bc841` (426 B) and `0x004bc9ec` (132 B) — custom UI painting: `0x4bc9ec` calls `USER32!GetWindowRect` through `*0x5806c0`, stores the rect to `0x5d28c0`/`0x5d28c4`, then passes an ARGB palette at `0x005da248` whose bytes are `1a 1a 1a ff` repeated. Application code, so the flag is arguably right; it is simply not protocol |
+
+**The lesson is about the flag, not the readers:** `vendor_specific` answers
+"was this written for one product", and that is **not** the same question as "is
+this protocol-relevant". cfg100 ships a dark-themed custom UI, so it has vendor
+code that has nothing to do with the device. Do not use this flag as a protocol
+filter; `closure.py` is the protocol filter.
+
+### 11.2 `0x004050e0` is the settings-record BUILDER, and it runs the other way [D]
+
+cfg107's `0x00404830` copies an incoming record into a shadow at the *same*
+offsets (`src[k] → 0x0057f2a0 + k`, §10.5). cfg100's `0x004050e0` is the mirror
+image and its arrangement is different:
+
+```
+4050e0  movzbl 0x5dbb38 -> movb %al, 0x00(%edx)
+4050e9  movzbl 0x5dbb3d -> movb %al, 0x06(%edx)
+4050f3  movzbl 0x5dbb3e -> movb %al, 0x07(%edx)
+4050fd  movzbl 0x5dbb3f -> movb %al, 0x0c(%edx)
+405107  movzbl 0x5dbb40 -> movb %al, 0x26(%edx)
+40510b… 0x5dbb41 -> 0x27, 0x5dbb42 -> 0x28, 0x5dbb43 -> 0x29, 0x5dbb44 -> 0x2a …
+```
+
+**The globals are consecutive and the record offsets are scattered**, the
+opposite of cfg107's layout. So v1.00 keeps settings in a packed struct and
+scatters them into the wire record; v1.07 keeps a record-shaped shadow. Both
+give a byte-level map of the record, from opposite directions, and **two
+independent maps of the same record is exactly what LIST 3 should start from.**
+
+Recorded as a lead, not as a derivation: the offsets above are transcribed from
+the disassembly, the *meaning* of any of them is not derived, and nothing here
+is a basis for a write.
