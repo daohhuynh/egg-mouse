@@ -17,18 +17,32 @@ Classes, and note that only the last one is a hole:
   KNOWN   inside a function body Ghidra reported
   CALLED  outside those, but is the target of a direct E8/E9 -- definitely code,
           definitely a function start, and definitely missed by Ghidra
-  PTR     outside those, but some 4-byte word ANYWHERE in the image points at
-          it. This is how MFC message maps and C++ vtables name their handlers,
-          and it is the class 0x00413f90 belongs to -- an E8 scan alone cannot
-          see it, which is why an earlier version of this tool reported it as
-          absent. Address-taken code is still code.
+  PTR     outside those, but the RELOCATION TABLE proves some absolute address
+          there points into .text. This is how MFC message maps and C++ vtables
+          name their handlers, and it is the class 0x00413f90 belongs to -- an
+          E8 scan alone cannot see it, which is why an earlier version of this
+          tool reported it as absent. Address-taken code is still code.
+
+AUTHORITATIVE SOURCES ONLY (the point of the rewrite, 2026-09-03). The first
+version of this class used a heuristic: scan every 4-aligned dword in the file
+and take those landing in .text. Checked against .reloc, that heuristic MISSED
+752 code pointers in fw110, 839 in cfg107 and 745 in fw104. A heuristic cannot
+support a completeness claim, and the earlier one silently understated the hole.
+Everything here now comes from structures the OS LOADER depends on, so the
+linker cannot have omitted an entry:
+  .reloc         every 32-bit absolute address in the image (HIGHLOW)
+  export table   every externally reachable entry point
+  TLS directory  every callback that runs BEFORE the entry point
+  LoadConfig     the SEH handler table, i.e. every valid exception handler
+  entry point    from the optional header
+These are ground truth. Ghidra's function list is not.
   PAD     0xCC / 0x90 / 0x00 filler between bodies
   DARK    none of the above. Bytes nothing accounts for.
 
 Structure only. It classifies bytes by provenance and holds no opinion about
 what any of them mean (CLAUDE.md 7.1).
 """
-import sys, os, json, bisect, collections
+import sys, os, json, bisect, collections, struct
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from litscan import TAGS, sections
@@ -41,6 +55,86 @@ def text_of(d, secs):
         if nm == '.text':
             return va, vsz, ro, rsz
     raise SystemExit('no .text')
+
+def _dirs(d):
+    pe = struct.unpack_from('<I', d, 0x3c)[0]
+    magic = struct.unpack_from('<H', d, pe + 24)[0]
+    return pe + 24 + (96 if magic == 0x10b else 112)
+
+def authoritative_text_pointers(d, base, secs, va, n):
+    """Every address in .text that a loader-critical structure names.
+
+    Sources are structures the Windows loader itself consumes, so they cannot
+    be incomplete without the binary failing to run. See the module docstring.
+    """
+    def off(rva):
+        rva += base
+        for nm, v, vsz, ro, rsz in secs:
+            if v <= rva < v + max(vsz, rsz):
+                k = rva - v
+                return ro + k if k < rsz else None
+        return None
+    out = set()
+    dd = _dirs(d)
+
+    # entry point
+    pe = struct.unpack_from('<I', d, 0x3c)[0]
+    ep = struct.unpack_from('<I', d, pe + 24 + 16)[0]
+    if ep: out.add(base + ep)
+
+    # .reloc HIGHLOW -- every 32-bit absolute address in the image
+    rva, sz = struct.unpack_from('<II', d, dd + 8 * 5)
+    if rva:
+        p = off(rva); end = p + sz if p else 0
+        while p and p < end:
+            pgrva, blk = struct.unpack_from('<II', d, p)
+            if blk < 8: break
+            for i in range((blk - 8) // 2):
+                e = struct.unpack_from('<H', d, p + 8 + 2 * i)[0]
+                if (e >> 12) != 3: continue
+                fo = off(pgrva + (e & 0xfff))
+                if fo is None or fo + 4 > len(d): continue
+                v = int.from_bytes(d[fo:fo + 4], 'little')
+                if va <= v < va + n: out.add(v)
+            p += blk
+
+    # exports
+    rva, sz = struct.unpack_from('<II', d, dd + 8 * 0)
+    if rva:
+        e = off(rva)
+        if e:
+            nFunc = struct.unpack_from('<I', d, e + 20)[0]
+            fo = off(struct.unpack_from('<I', d, e + 28)[0])
+            for i in range(nFunc):
+                v = base + struct.unpack_from('<I', d, fo + 4 * i)[0]
+                if va <= v < va + n: out.add(v)
+
+    # TLS callbacks -- run before the entry point
+    rva, sz = struct.unpack_from('<II', d, dd + 8 * 9)
+    if rva:
+        t = off(rva)
+        if t:
+            cb = struct.unpack_from('<I', d, t + 12)[0]
+            co = off(cb - base) if cb else None
+            while co:
+                v = struct.unpack_from('<I', d, co)[0]
+                if not v: break
+                if va <= v < va + n: out.add(v)
+                co += 4
+
+    # LoadConfig SEH handler table -- every valid exception handler
+    rva, sz = struct.unpack_from('<II', d, dd + 8 * 10)
+    if rva:
+        lc = off(rva)
+        if lc and sz >= 72:
+            seh = struct.unpack_from('<I', d, lc + 64)[0]
+            cnt = struct.unpack_from('<I', d, lc + 68)[0]
+            so = off(seh - base) if seh else None
+            if so and cnt < 100000:
+                for i in range(cnt):
+                    v = base + struct.unpack_from('<I', d, so + 4 * i)[0]
+                    if va <= v < va + n: out.add(v)
+    return out
 
 def analyse(tag):
     d = open(os.path.join(ROOT, TAGS[tag]), 'rb').read()
@@ -65,14 +159,7 @@ def analyse(tag):
         dst = va + off + 5 + rel
         if va <= dst < va + n:
             targets.add(dst)
-    # address-taken targets: any aligned dword in the whole image pointing into
-    # .text at a byte no known body covers. Catches message-map and vtable
-    # handlers, which no call-target scan can reach.
-    ptrs = set()
-    for off in range(0, len(d) - 4, 4):
-        v = int.from_bytes(d[off:off + 4], 'little')
-        if va <= v < va + n and mark[v - va] == 0:
-            ptrs.add(v)
+    ptrs = set(authoritative_text_pointers(d, base, secs, va, n))
     newstarts = sorted(t for t in targets if mark[t - va] == 0)
     ptrstarts = sorted(p for p in ptrs if p not in targets)
 
