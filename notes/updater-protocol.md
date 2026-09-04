@@ -417,3 +417,66 @@ Still open:
   unconstrained by anything in the binary. Our flasher must never emit one.
 - **Everything in `CLAUDE.md` §5.** No `[O]` exists yet; the device is not in
   hand. Nothing above has been checked against hardware.
+
+## 7. Scope of the search — what was read, and what was not
+
+`CLAUDE.md` §6 forbids silent sampling, so here are the numbers.
+
+### Candidate sets
+| binary | functions | named by Ghidra | unnamed `FUN_` | positively library¹ | left as candidates |
+| --- | --- | --- | --- | --- | --- |
+| 1.10 (= 1.07 = 1.06) | 9,076 | 7,388 | 1,688 | 921 | **767** |
+| 1.04 | 10,763 | 4,043 | 6,720 | 2,873 | **3,847** |
+
+¹ by `Tools/ghidra-export/classify.py`: a normalised function body that also
+occurs in a program with different vendor code is MFC/CRT. One-directional — a
+match proves library, a non-match proves nothing.
+
+Cross-matching also exposed **two toolchain families**, which is why the 1.04
+number is so much worse: `{1.06, 1.07, 1.10, cfg 1.01, 1.04, 1.07}` share ~5,000
+normalised bodies, and `{1.04, cfg 1.00}` share 3,686, while across the families
+the overlap collapses to ~100. 1.04 therefore has only one useful reference
+binary instead of four.
+
+Of 1.10's 767 candidates, **703 are under 16 bytes** (thunks and stubs; the
+classifier deliberately does not hash bodies that small because they collide)
+and only **64 are substantive**. Of 1.04's 3,847, 743 are tiny and 3,104 are
+substantive.
+
+### The vendor band
+1.10's vendor code occupies `[0x00401000, 0x004040ad)` — **95 functions**, the
+first objects the linker emitted, ending exactly where `AfxSetNewHandler` and
+the MFC/ATL/CRT bodies begin. 1.04's occupies `[0x00401bc0, 0x00405200)` —
+**89 unnamed functions**, interleaved with ATL template instantiations.
+
+The band was **not** assumed from address locality. It was fixed from confirmed
+vendor anchors (the HID enumerator, the two feature-report wrappers, the
+`FWFILE` loader) and then checked.
+
+### Why the protocol cannot be hiding outside the band
+Every reference, in the whole 9,076-function image, to any HID or SetupDi import
+and to every one of the vendor's device globals, is inside the band [D]:
+
+| symbol | referencing functions | outside band |
+| --- | --- | --- |
+| `HidD_SetFeature` | `0x004012a0` | none |
+| `HidD_GetFeature` | `0x00401330` | none |
+| `HidD_GetHidGuid`, `HidD_GetAttributes`, `HidP_GetCaps`, `HidD_GetPreparsedData`, `SetupDiEnumDeviceInterfaces` | `0x00401000` | none |
+| device handle `DAT_0056a174` | 6 refs | none |
+| found flag `DAT_0056a0f8` | 4 refs | none |
+| mode flag `DAT_0056a0fc` | 3 refs | none |
+| `bcdDevice` `DAT_0056a0f4` | 3 refs | none |
+| HID GUID / devinfo / caps `DAT_0056a11c`, `0056a120`, `0056a130`, `0056a132`, `0056a118` | 1 ref each | none |
+
+The same holds for 1.04: all eight HID/SetupDi imports and the sole `FWFILE`
+reference resolve to `0x00401bc0`, `0x00401e30`, `0x00401ed0` and `0x00404330`,
+every one below `0x00405200` [D].
+
+**Nothing in either binary can send or receive a byte to the device from outside
+the band.** That is a positive, re-checkable statement, not a sampling argument.
+
+### What that does and does not settle
+It settles the protocol: no device-facing code was missed. It does **not** by
+itself discharge §6 for the remaining candidates, which could in principle hold
+vendor code that never touches the device. Those are being read separately; the
+counts above are the honest denominator.
