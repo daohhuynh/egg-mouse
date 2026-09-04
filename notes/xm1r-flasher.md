@@ -87,6 +87,38 @@ updater never gates on version. This one does. Do not generalise either way.
 > stating plainly: **everything in this file is analogy, never evidence, about
 > the OP1 protocol.** A second vendor's flasher shows what a flasher *can* look
 > like; it says nothing about what Endgame's does.
+>
+> **Strengthened 2026-09-04 from a direction that was not being searched.**
+> `bandlit.py` over the device band `[0x643b80,0x64d100)` resolves 75 distinct
+> strings, and they settle the provenance question outright — this is not an
+> XM1r tool with some shared code, it is a **generic OEM flasher with the XM1r
+> dropped into it**:
+>
+> - Two hardcoded **Cherry** device paths, `'vid_046A&pid_0076&mi_02'` (twice)
+>   and `'vid_046A&pid_0078&mi_02'` — `046A` is Cherry GmbH, and neither is a
+>   mouse the XM1r could be.
+> - `'Please wait while Profiles are being loaded from your Cherry Keyboard'`,
+>   `'Please wait for your Keyboard to restart'`, `'DK_5Q_LED_Control'` and the
+>   mailslot `'\\.\mailslot\DK_5Q_LED_Control'` — a Cherry DK 5Q keyboard.
+> - The product's own name in it is **`'RT Flash Upgrade'` / `'RT Flash Upgrade
+>   UI'` / `'RT_Flash_Upgrade_UI'`**, i.e. Ruling Technologies' own, not
+>   Endgame's and not the XM1r's.
+> - A translation framework the Endgame binaries have no trace of:
+>   `'TranslationMode'`, `'Language%d'`, `'TranslationFile%d'`,
+>   `'TranslationDefaultFont%d'`, `'TranslationFont%d'` — which is what the ten
+>   identical `TEXTFILE` slots above are for.
+>
+> Its user-visible surface differs from Endgame's in the way that matters most
+> to §4.2: it says **`'Transfer completed. Please unplug the device now.'`** and
+> `'Please wait for your Mouse to restart'`. Endgame's updater says neither —
+> it has no unplug instruction and no restart message at all
+> (`updater-protocol.md` §11.2). Two vendors, two post-flash models. Ours must
+> come from Endgame's bytes, not from this one's manners.
+>
+> Surface census for completeness: `RT_DIALOG` 4, of which the only vendor one
+> (**103**) is a `DIALOGEX` with `cDlgItems == 0` — every control is created at
+> run time, which is why the 14 `BITMAP` resources exist. All 88 `RT_STRING`
+> entries are stock MFC, as in every other binary in this corpus.
 
 `TEXTFILE` resource **4000**, lang 1033, 4,844 bytes, UTF-16LE. Resources
 4001–4010 are all byte-identical to each other (`521de15e…`) and differ from
