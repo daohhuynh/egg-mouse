@@ -120,4 +120,5 @@ def main():
             print(f"    {a:#010x} size={byadr[a]['size']} {byadr[a]['name'][:40]}")
         sys.exit(1)
 
-main()
+if __name__ == "__main__":
+    main()

@@ -1030,3 +1030,81 @@ unknown rather than an open question that looks like a task.
    refuse an updater whose set does not match one we have read.
 5. Treat the additive checksum as a transport integrity check only. It is not
    evidence that the image is the right image.
+
+## 9. Device-layer confinement, proved twice and for every binary  [D]
+
+This is the "hay" argument. It finds no new protocol facts. Its whole purpose is
+to earn the right to say the protocol surface is *completely* enumerated, and it
+is stated as a partition so a hole cannot hide as a shortfall (§6 of CLAUDE.md).
+
+**Method.** Two independent ways of asking "which functions touch the device?":
+
+1. **Raw literal scan.** Exhaustive 4-byte scan of every byte of `.text` for the
+   addresses of the HID/SetupAPI IAT slots. Structure only; no call graph.
+2. **Ghidra data-refs + call graph.** For each of the N functions, does its
+   record reference a HID/SetupAPI import; then the upward closure of callers.
+
+Cross-check: on the XM1r these agree exactly — 7 direct-touch functions and a
+31-function closure spanning `[0x643b80,0x64d000]`, by both methods. Two
+unrelated methods landing on the same numbers is the point of doing both.
+
+**Results.**
+
+| binary | functions | touch HID/SetupAPI | upward closure | closure span |
+|---|---|---|---|---|
+| fw110 / fw107 / fw106 | 9,076 | **3** | 14 | `[0x401000,0x403960]` |
+| fw104 | 10,763 | **3** | 10 | `[0x401bc0,0x404980]` |
+| cfg107 | 9,528 | 7 | 18 | `[0x4027d0,0x414010]` |
+| cfg104 | 9,495 | 7 | 18 | `[0x4027e0,0x413b40]` |
+| cfg101 | 9,516 | 7 | 18 | `[0x4027e0,0x413a30]` |
+| cfg100 | 11,071 | 7 | 17 | `[0x4038a0,0x415860]` |
+| xm1r | 23,001 | 7 | 31 | `[0x643b80,0x64d000]` |
+
+The three direct-touch functions of each updater code base correspond
+one-to-one, which is itself a structural corroboration across the two code bases:
+
+| role | 1.06/1.07/1.10 | 1.04 |
+|---|---|---|
+| enumerator | `0x401000` | `0x401bc0` |
+| `HidD_SetFeature` sender | `0x4012a0` | `0x401e30` |
+| `HidD_GetFeature` receiver | `0x401330` | `0x401ed0` |
+
+**The completeness statement.** For *both* updater code bases:
+
+- every function in the closure lies **inside the band** — 14 of 14 for 1.10,
+  10 of 10 for 1.04 — and
+- **every one of them has been read.** Closure members not in the read set: **0**
+  for 1.10, **0** for 1.04.
+- Of the functions resting on Ghidra's FunctionID name alone with a body ≥32
+  bytes, **zero** are in either closure.
+
+Regenerate rather than quote: the sets are written to
+`.analysis/device_closure.json`.
+
+### 9.1 What this argument does and does not establish
+
+It **does** establish that the set of functions touching a HID/SetupAPI import is
+exhaustive and independent of the call graph — that set was found by scanning
+*all* functions, so an indirect call cannot hide a device-facing function from
+it. This is the part that matters, and it is why the confinement claim survives
+even though the XM1r showed Endgame reaching its device layer by indirect call.
+
+It does **not** establish that the *closure* is a complete list of callers. The
+closure is built from static call edges, and an indirect call into the device
+layer would be missing from it. That weakness is one-directional and harmless
+here: a missed caller adds a caller, it does not add a function that touches the
+device.
+
+### 9.2 A false positive caught in the making, recorded per §1.7
+
+The first run of the call-graph method reported **11** direct-touch functions for
+the XM1r, contradicting the already-published exhaustive claim of 7 in
+`notes/xm1r-flasher.md`. The four extras — `0x56a956`, `0x56aac7`, `0x56ad4a`,
+`0x56ada9` — were all MFC **`CPageSetupDialog`**, matched because the substring
+`SetupDi` occurs inside "Page**SetupDi**alog".
+
+The published claim was right; the new filter was wrong. Recording it because the
+failure mode is the interesting part: a sloppy matcher *manufactured a
+contradiction* with a correct earlier result, and the tempting resolution — "the
+earlier exhaustive claim must have missed four" — would have corrupted a sound
+finding. Matchers get whole API names, never substrings.
