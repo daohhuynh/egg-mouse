@@ -138,9 +138,16 @@ whose low byte is a report id gives the complete set:
 | `A1 13` | — | `0x40478f` | `0x40478f` | `0x40479f` |
 
 Four in total, three of them present since the oldest build. `A1 13` appears
-from cfg101 onward and in cfg107 its containing function `0x00404720` has
-**zero callers** — dead code in the shipped build. (The updater does send
-`A1 13`, once, after a verified success: `notes/updater-protocol.md` §5.4 step 7.)
+from cfg101 onward.
+
+> **CORRECTION (2026-09-03).** An earlier version of this paragraph said
+> `A1 13`'s containing function `0x00404720` has "zero callers — dead code in the
+> shipped build". **That was wrong.** It rested on the exported `callers` field,
+> which is unreliable: `0x00413faf` is a direct `calll 0x404720`
+> (`e8 6c 07 ff ff`, rel `-0xf894`, next instruction `0x413fb4`). The function is
+> live, and it is the **Factory Reset** command — see §2.4. The updater's
+> post-success `A1 13` (`notes/updater-protocol.md` §5.4 step 7) is the same
+> command, which is why it is sent after a flash.
 
 This corroborates §1's set as complete rather than merely as what was found.
 
@@ -183,7 +190,68 @@ on `0xA1` is answered on `0xA0` when the payload is large and on `0xA1` when it
 is small — i.e. the report id tracks the transfer size, not the direction. Worth
 knowing before assuming a request/response pair shares a report id.
 
-### 2.3 There is no factory-reset command  [D], and §4.1 needs adjusting
+### 2.4 `A1 13` IS the factory reset, and it is a device command  [D]
+
+The main dialog (DIALOGEX resource **102**) has 8 controls, two of which matter:
+
+| control id | class | caption |
+|---|---|---|
+| `1039` (`0x40f`) | BUTTON | **`Factory Reset`** |
+| `1043` (`0x413`) | BUTTON | `APPLY` |
+
+Their `ON_BN_CLICKED` entries are adjacent 24-byte structs in `.rdata`
+(`0x5588f0` and `0x558908`), so they belong to the same message map — the main
+dialog's:
+
+| control | handler |
+|---|---|
+| `1043` APPLY | `0x00413ea0` → `0x00404180` → **`A0 11`** (settings write) |
+| `1039` Factory Reset | `0x00413f90` → `0x00404720` → **`A1 13`** |
+
+`FUN_00413f90`:
+```
+413f9d  pushl $0x1978            ; PID
+413fa2  calll 0x4035f0           ; open the device
+413fac  je    0x414002           ; not found -> return, no command sent
+413faf  calll 0x404720           ; <-- A1 13
+413fb4  movl  $0x57f210,%eax
+413fb9  calll 0x413db0           ; reset local settings copy
+413fbe  movl  $0x57f2a0,%eax
+413fc3  calll 0x413db0           ; and the second copy
+413fc8..413ffc                   ; UI refresh
+```
+
+`FUN_00404720` builds a **64-byte** frame — `memset` to `0x3f`/`0x40` at
+`0x404782`/`0x40478e`, then `movl $0x13a1, -0x50(%ebp)` at `0x40479f` — and
+sends it. It carries no payload beyond the report id and command byte.
+
+**So factory reset is a real device-side command.** The device restores its own
+defaults; the host sends 64 bytes and then re-syncs its local copies. No
+host-composed defaults blob is involved anywhere.
+
+### 2.5 The retracted recommendation
+
+**RETRACTED.** An earlier §2.3 argued that no factory-reset command existed, that
+any vendor reset must therefore be an `A0 11` write of a host-composed blob, and
+that `CLAUDE.md` §4.1 should be amended to replace factory reset with
+restore-from-blob.
+
+**Every part of that is withdrawn.** §4.1 stands exactly as written: factory
+reset exists, it is one 64-byte command, and implementing and confirming it
+first is both possible and correct.
+
+The error is worth keeping visible because of *how* it happened. The command
+scan was sound and its result — four commands — was right. The mistake was an
+**inference from absence**: no command was *named* reset, so I concluded none
+was. Two cheap checks would have caught it immediately and neither was run:
+grep the binaries for reset-related **strings** (`Factory Reset` is right there
+in `.rsrc`, in all four config tools), and check the **dialog controls** to see
+what the UI actually offers. A conclusion about what software cannot do should
+never rest only on what its command encoder looks like.
+
+The second, more dangerous cause was trusting the exported `callers` field, which
+said `0x00404720` was uncalled. That field is now known unreliable (§2.1
+correction) and an audit of every claim depending on it is under way.
 
 **No config tool version contains a command that resets the device.** The set is
 four commands; two are reads, one is the settings write, one is dead. Nothing
