@@ -90,9 +90,29 @@ unchecked one without rerunning anything. Never commit a state you know is
 broken without saying so in the message.
 
 **Keep `working-memory.md` at the repo root, and commit it with every commit.**
-It is the plan, the scratchpad and the current state in one file: what is being
-worked on right now, what is next, what was tried and ruled out, what is blocked
-and on what, and anything that would take an hour to re-derive.
+
+**This file is yours.** It is not documentation, not a status report, and not
+written for the user, who does not need it and will not usually read it. It is
+external memory for the agent doing the work, and using it is not optional.
+
+Use it because this project is bigger than any one context window and will
+outrun you otherwise. Thousands of functions across four versions of two
+binaries, a chain of derivations where each step depends on the last, a rule
+that every claim carries a provenance tag, and a hard prohibition on any
+untagged byte reaching hardware. Without a written external state you will
+re-derive things you already derived, contradict a conclusion you reached an
+hour ago, lose track of which claims were checked and which were assumed, and
+present the result with the same confidence either way. That is precisely the
+failure described in §7, and it is the failure this file exists to prevent.
+
+So: read it first thing in a session, before touching anything else. Update it
+as you go, not only at commit time. Trust it over your recollection when the two
+disagree, because it was written when the details were fresh and your
+recollection was not.
+
+What goes in it: what is being worked on right now, what is next, what was tried
+and ruled out, what is blocked and on what, and anything that would take an hour
+to re-derive.
 
 It only works if it is **trimmed, not just appended to**. Rules:
 
@@ -105,13 +125,14 @@ It only works if it is **trimmed, not just appended to**. Rules:
   already failed.
 - Reconcile it with reality *before* every commit, in the same commit. If
   nothing in it changed, that is a signal it is being ignored.
-- Write it for a stranger with none of your context. "Continue the analysis" is
-  useless. Name the binary, the address, the command, the file.
+- Write it for a stranger with none of your context, because that is exactly
+  who reads it next: a fresh session, or you after a compaction. "Continue the
+  analysis" is useless. Name the binary, the address, the command, the file.
 - If it is longer than a screen or two, it has become a log. Cut it back.
 
 The test: if this session ends mid-sentence, can a fresh session read
 `working-memory.md` and pick the work up cold, without guessing? If not, the
-file is wrong.
+file is wrong. Sessions do end mid-sentence. Assume yours will.
 
 ---
 
