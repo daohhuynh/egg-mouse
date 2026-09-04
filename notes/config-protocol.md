@@ -573,14 +573,15 @@ exception: nothing here may inform a write until it is re-derived from the bytes
 and §1.3 forbids a `[G]` byte reaching the device regardless of how confident a
 summary sounds.
 
-**Reader error rate, measured** (`Tools/ghidra-export/verify_read.py`, over the
-722 functions reported when 45 of 50 batches had returned):
+**Reader error rate, measured** (`Tools/ghidra-export/verify_read.py`, final —
+all 50 batches returned, 0 failed):
 
 | check | result |
 |---|---|
 | invented function ids | **0** |
-| direct call targets | 6,076 in truth; **14 functions disagreed**, 4 extra, 11 missed |
-| indirect call slots | 913 in truth; **11 functions disagreed**, 10 extra, 1 missed |
+| functions never reported | **1** — `0x004b8da1` (cfg104). Read by hand instead: it is `AttachToTabWnd`, MFC tabbed-MDI framework code, 705 bytes, whose only indirect calls are the user32 window-lookup slots `0x52c5b0/0x52c5f4/0x52c814/0x52c868`. No HID slot, no settings global, nothing device-facing. **So the 839 are covered: 838 by readers, 1 by hand.** |
+| direct call targets | 6,840 in truth; **15 functions disagreed**, 4 extra, 12 missed |
+| indirect call slots | 1,013 in truth; **12 functions disagreed**, 11 extra, 1 missed |
 
 Spot-checking the disagreements changed how they read, which is the point of
 doing it: `0x00495e1e` really did drop two calls; `0x0043dd05`'s "extra" is a
