@@ -135,10 +135,42 @@ whose low byte is a report id gives the complete set:
 | `A1 12` | `0x404ff9` | `0x403b6a` | `0x403b6a` | `0x403b8a` |
 | `A0 11` | `0x4056fb` | `0x404208` | `0x404208` | `0x404218` |
 | `A1 02` | `0x405b25` | `0x40465c` | `0x40465c` | `0x40466c` |
-| `A1 13` | — | `0x40478f` | `0x40478f` | `0x40479f` |
+| `A1 13` | **`0x415783`** | `0x40478f` | `0x40478f` | `0x40479f` |
 
-Four in total, three of them present since the oldest build. `A1 13` appears
-from cfg101 onward.
+**All four commands are present in all four versions**, including the oldest.
+
+> **CORRECTION (2026-09-04).** This table previously recorded `A1 13` as absent
+> from cfg100, and said "`A1 13` appears from cfg101 onward". **Both were wrong.**
+> cfg100 builds it at `0x415783` (`c7 45 b0 a1 13 00 00`,
+> `movl $0x13a1,-0x50(%ebp)`), followed by `movl $0x40,%edx` /
+> `leal -0x50(%ebp),%ecx` and SSE zeroing of the rest of the 64-byte frame —
+> structurally identical to cfg107's.
+>
+> **The cause was mine and it is the exact failure §1.2a exists to prevent.** My
+> scan covered a hand-picked window, `0x403800`–`0x405c00`, chosen because that
+> is where the *other* three commands live. cfg100's `A1 13` sits at `0x415786`,
+> outside it. I then reported the absence as a finding. A negative claim whose
+> search space is a guessed address range is worthless, and I made it one message
+> after writing the rule that says so.
+
+**Method, restated so the claim is checkable.** Search space: the **entire
+`.text`** of each binary — cfg100 `0x401000`–`0x57f957`, cfg101
+`0x401000`–`0x52c65f`, cfg104 `0x401000`–`0x52bfd1`, cfg107
+`0x401000`–`0x52c591`. Every 4-byte little-endian occurrence of each command
+immediate was located, then **mechanically discriminated** rather than judged:
+a real build is `movl $imm32, disp(%ebp)`, encoded `c7 45 <disp8>` or
+`c7 85 <disp32>`, so the bytes immediately preceding the literal decide it.
+
+That discrimination matters. `A1 02` produces 5–7 raw hits per binary, but only
+one in each is a build; the rest are preceded by `0f 84` — the literal is the
+displacement of a `jz rel32`. Reproduce with a 4-byte search for `a1 02 00 00`
+and a check of the two preceding bytes; no tool of mine required.
+
+**Blind spot of this method, stated per §1.2a:** it finds commands built as a
+32-bit immediate store. It would miss a frame built byte-by-byte with `movb`
+(which is how the *updater* builds its frames) or assembled from a register or
+table. Task E of the 2026-09-04 audit searched for those forms specifically and
+found none in cfg107; that is corroboration, not proof, and is recorded as such.
 
 > **CORRECTION (2026-09-03).** An earlier version of this paragraph said
 > `A1 13`'s containing function `0x00404720` has "zero callers — dead code in the
