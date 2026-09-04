@@ -177,10 +177,138 @@ the generator rather than assume CCITT.
 ```
 outer loop  : counter -0x30(%ebp), bound 0x64 = 100   (0x644985)
 inner read  : counter -0x28(%ebp), bound 0x14 =  20   (0x6449e9)
-sleep       : Sleep([ebp+0x18]), initialised to 2 ms  (0x64497e)
 inner sleep : Sleep(2)                                (0x644a2f)
+backoff     : failure paths sleep i*5+1 / j*15+1 ms
 ```
 Wholly unlike the OP1's 4-attempt / 5-error-code ladder.
+
+**Correction to an earlier reading in this file.** An earlier draft described the
+outer sleep as `Sleep([ebp+0x18])`, "initialised to 2 ms". That was wrong in a way
+worth naming: `0x64497e` is `movl $0x2, 0x18(%ebp)` — an **unconditional store into
+the caller's fifth argument slot**, executed before any read of it and before the
+outer loop test at `0x644985`. **Arg 5 is dead.** Whatever delay a caller passes is
+discarded and 2 ms is always used. "Initialised" implies the caller's value was
+absent; in fact it was overwritten. [D-X]
+
+### Function signature and guard  [D-X]
+`ret $0x14` at `0x64504a` ⇒ 5 stack arguments; `this` arrives in ECX (thiscall).
+
+- `this` is stored to `-0x60(%ebp)` at `0x644737` and **never read again** —
+  dead. (Verified: that store is the only `-0x60(%ebp)` reference in
+  `0x644730`–`0x645050`.)
+- Return slot `-0x2c(%ebp)` is initialised to **1** at `0x64473a` and set to
+  **0 only on success** (`0x644b64`, `0x644dcb`, `0x64500f`). Non-zero = failure;
+  it fails closed.
+- Entry guard `0x644741`–`0x644756`: if `arg1 == 0` **or** `*(arg1+0xa8) == 0`,
+  return 1 immediately with **no I/O**.
+
+### 3.1 The receive path — reply tags and the two-reply regime  [D-X]
+
+The send-side layout above was derived first; this receive-side structure was
+missed on that pass and is the substantive addition.
+
+Replies are read back into the receive buffer at `obj+0x116` and validated on
+**two** fields:
+
+```
+recv[2] = reply tag        ; obj+0x118
+recv[3] = sequence         ; obj+0x119
+```
+
+**There are two distinct replies, with different tags.**
+
+| | tag check | site | sequence expected |
+|---|---|---|---|
+| first reply | `recv[2] == 0x14` | `cmpl $0x14` @ `0x644a71` | echoes the sent sequence |
+| second reply | `recv[2] == 0x15` | `cmpl $0x15` @ `0x644cfe` | `(sent + 1) % 0xff` |
+
+The second receive loop is **not** run for every command — it is armed by a
+dispatch class field, so the 45 commands of §4 split into "immediate reply only"
+and "immediate reply plus a deferred completion reply". Which commands fall in
+which class is **not** yet enumerated here.
+
+The expected second sequence is computed at `0x644d8e`–`0x644da0`:
+```
+addb  $0x1, %cl          ; sent_seq + 1
+movl  $0xff, %ecx
+idivl %ecx               ; remainder, i.e. % 255
+```
+then compared against `recv[3]` at `0x644dba`.
+
+**Note the modulus is `0xff` = 255, not 256** — matching the send-side `% 0xff`
+at `0x64481a`. Sequence numbers cycle **0..254**; the value 255 is never
+generated and never expected. A reimplementation that used `& 0xff` would
+desynchronise after 255 frames. [D-X]
+
+**An ACK frame is sent back.** At `0x644f72`, `movb $0x14, 0xd5(%eax,%edx)` writes
+tag `0x14` into the *send* buffer, and `0x644f90`/`0x644f97` copy a byte out of the
+receive buffer into it. The exchange is not request/response; it is
+request → reply → ack (→ deferred reply).
+
+**Independent corroboration of the 65-byte report size.** The two buffer bases
+differ by `0x116 - 0xd5 = 0x41 = 65`, exactly one report. The size in §3 was taken
+from the `HidD_SetFeature` length argument; the object layout gives it again from
+a different direction.
+
+### 3.2 The host can be told to ignore a checksum mismatch  [D-X]
+
+This is the finding in this file with the clearest bearing on the OP1 work, and
+it is about the **host tool**, not the device.
+
+`0x00706a80` is a one-byte flag in `.data` (file offset `0x304e80`; `.data` VA
+`0x705000`, raw `0x303400`, raw size `0x20800`, so the byte is initialised in the
+image, not in the uninitialised tail).
+
+**Its initial value in the shipped file is `0x01`.**
+
+An exhaustive scan of `.text` finds exactly **four** references, and no others:
+
+| site | instruction | role |
+|---|---|---|
+| `0x644ade` | `movzbl 0x706a80, %eax` | read (first reply) |
+| `0x644d6b` | `movzbl 0x706a80, %edx` | read (second reply) |
+| `0x645637` | `movb $0x0, 0x706a80` | write — store **zero** |
+| `0x645c9e` | `movb $0x0, 0x706a80` | write — store **zero** |
+
+The read is reached only when the checksum comparison **failed**:
+```
+644acd: cmpl  %edx, %ecx          ; computed vs received
+644acf: jne   0x644ad8            ; differ -> leave match flag clear
+644ad1: movl  $0x1, -0x44(%ebp)   ; equal  -> match flag = 1
+644ad8: cmpl  $0x0, -0x44(%ebp)
+644adc: jne   0x644aed            ; matched -> continue
+644ade: movzbl 0x706a80, %eax     ; NOT matched:
+644ae5: testl %eax, %eax
+644ae7: je    0x644bae            ;   flag == 0 -> failure path
+644aed: ...                       ;   flag != 0 -> continue as if it matched
+```
+
+So **non-zero means a checksum mismatch is ignored**, and non-zero is the default.
+Both writes clear it — i.e. they *enable* enforcement — and both are gated
+identically:
+```
+movzbl 0x492(%reg), %r
+cmpl   $0x7, %r
+jg     <skip the store>
+movb   $0x0, 0x706a80
+```
+Enforcement is switched on only when the byte at `obj+0x492` is **≤ 7** (signed
+compare). What `obj+0x492` means is **[G]** — plausibly a protocol or firmware
+version — and is not derived here.
+
+**What this establishes, and what it does not.** It does not show the XM1r
+updater is unsafe in practice; the gate may well be satisfied on every real
+device. What it shows is that **a shipping Endgame-branded updater contains a live
+code path that accepts a frame whose checksum did not match**, selected by a field
+unrelated to the integrity of the data. Verification present in the binary was not
+verification always applied.
+
+This is direct support for the OP1 posture recorded in `CLAUDE.md` §2 ("assume the
+device does not validate the image it is given"), and it extends it: **do not
+assume a checksum in the vendor's protocol is enforced merely because the code to
+enforce it exists.** For our own flasher the rule is the stricter one — verification
+is unconditional, with no flag, no version gate, and no path that continues after a
+mismatch. [D-X]
 
 ## 4. The command set — 45 commands  [D-X]
 
@@ -291,7 +419,12 @@ Flagged per §0: this is explanation after the fact, not prediction.
 - The firmware image's exact location, size, and whether it is encrypted.
 - The three-component version decode.
 - The runtime CRC-16 table generator and its polynomial.
-- The second `HidD_SetFeature` site at `0x00644ff7` (the `0x14` command path,
-  `movb $0x14` at `0x644f72`).
 - Device identity: VID/PID have not been located yet.
 - Everything upstream: enumeration, the upgrade button handler, the sequence.
+- **Which of the 45 commands arm the deferred `0x15` reply** (§3.1). The dispatch
+  class field selects it; the per-command values are not enumerated.
+- **The meaning of `obj+0x492`**, the byte that gates checksum enforcement (§3.2).
+  Currently `[G]`. This is the most load-bearing unknown left in this file.
+
+*Resolved since the first draft:* the second `HidD_SetFeature` site at `0x00644ff7`
+is the **ACK frame** (§3.1), not a separate command path.
