@@ -24,6 +24,74 @@ filename character `6`→`7`; the functional change is entirely in the `FWFILE`
 resources [D]. Cross-version diffing therefore yields exactly one comparison for
 the updaters: **B vs A**. Stated plainly because §6 forbids silent sampling.
 
+## 0.1 Exhaustive non-code diff of all four updaters [D]
+
+Done 2026-09-03 because "the code is identical" is not the same claim as "the
+files are identical", and 1.06/1.07 had been getting the former as a substitute
+for the latter.
+
+| section | 1.04 | 1.06 | 1.07 | 1.10 |
+| --- | --- | --- | --- | --- |
+| `.text` | `9e29da4b…` | `4a2b50d5…` | `4a2b50d5…` | `4a2b50d5…` |
+| `.rdata` | `1cd566e8…` | `7726c0ce…` | `99295bed…` | `45bfd758…` |
+| `.data` | `c7e96ccd…` | `cb326ae0…` | `cb326ae0…` | `cb326ae0…` |
+| `.rsrc` | `534ab47b…` | `cac3359c…` | `d83eb8b7…` | `b0e0eff9…` |
+| `.reloc` | `4a341677…` | `118af942…` | `118af942…` | `82642f1b…` |
+
+**`.data` is byte-identical across 1.06/1.07/1.10 as well as `.text`** — newly
+verified, and not previously claimed. 1.04 has a sixth section, **`.fptable`**
+(VA `0x5c7000`, `0x80` bytes, zero-filled in the file), which the others lack.
+
+`.rdata`, **1.06 vs 1.07: exactly 20 bytes differ, in 3 runs** — `0x51bcf4` (3 B,
+debug signature), `0x544ccc` (16 B, PDB GUID), and `0x544d4d` (1 B, `'6'`→`'7'`).
+That is the whole difference between those two builds. The earlier informal claim
+is now exact.
+
+`.rdata`, 1.06 vs 1.10: 16,998 bytes in 6,273 runs — but almost all are single
+bytes shifting by −4, the low bytes of ~1,600 pointers into the string pool,
+because one string changed length by 4 bytes. `.reloc` differs for 1.10 for the
+same reason.
+
+**The format string at `0x005443b0` (`L"%x"`), on which the whole version decode
+in §1 rests, is byte-identical across 1.06/1.07/1.10** — checked explicitly,
+because it is the one `.rdata` address the protocol depends on.
+
+### 0.1.1 The 1.10 build's project identity is a *different mouse* [D]
+The string that changed length is the CodeView PDB path:
+
+```
+1.04  G:\project\K26\K26 firmware update V0.11_package_k26_1.23\Release\OP1 8k firmware updater.pdb
+1.06  G:\project\K26\K26 firmware update V0.12_package_k40_1.04\Release\Endgame Gear OP1 8k v2 Firmware Updater 1.06.pdb
+1.07  G:\project\K26\K26 firmware update V0.12_package_k40_1.04\Release\Endgame Gear OP1 8k v2 Firmware Updater 1.07.pdb
+1.10  G:\project\K26\K26 firmware update V0.12_package_k40_1.04\Release\Endgame Gear EL1 8k Firmware Updater 0.01.pdb
+```
+
+**The binary Endgame distributes as "OP1 8k v2 Firmware Updater 1.10" was linked
+from a project named "Endgame Gear EL1 8k Firmware Updater 0.01".** And 1.10 is
+the same release that gained a sixth `FWFILE` resource, 143, which 1.04/1.06/1.07
+do not have (§4).
+
+**Do not over-read this.** Every other identifier in 1.10 says OP1:
+`FileDescription`, `InternalName`, `OriginalFilename` and `ProductName` are all
+`OP1 8k v2 Firmware Updater`, `FileVersion` is `1.1.0.0`, and the dialog caption
+is `Endgame Gear OP1 8k v2 Firmware Updater`. The literal `EL1` occurs **exactly
+once in the entire binary**, in that PDB path. The overwhelmingly likely reading
+is a copied project directory, not a mis-shipped image. Recorded as `[D]` for
+what the bytes say and `[G]` for why.
+
+**What it does establish, and this is the part that matters:** Endgame's build
+process permits one product's updater to be linked from another product's
+project. That is `CLAUDE.md` §1.4's hazard demonstrated on our own target rather
+than argued from principle, and it means **"which `FWFILE` holds the OP1 8k v2
+image" is an open question, not a settled one.** The tool hardcodes 140 and says
+nothing about what 140 contains.
+
+**It also refines the code-identity gate.** 1.10's `.text` matches 1.06/1.07
+byte for byte, so a gate that checks only `.text` would accept 1.10, extract 140,
+and never notice that the build provenance changed and a new blob appeared.
+**Code identity is necessary but not sufficient.** A resource-set fingerprint —
+the exact list of `FWFILE` names and their sizes — has to be part of the gate too.
+
 ## 1. Device identity
 
 `FUN_00401000` @ **`0x00401000`** — the only enumeration routine in the tool.
