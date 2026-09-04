@@ -979,3 +979,139 @@ independent maps of the same record is exactly what LIST 3 should start from.**
 Recorded as a lead, not as a derivation: the offsets above are transcribed from
 the disassembly, the *meaning* of any of them is not derived, and nothing here
 is a basis for a write.
+
+## 12. The config tools' user-visible surface  [D]
+
+`CLAUDE.md` §1.2a's requirement, applied to the config tools the way §11 of
+`notes/updater-protocol.md` applies it to the updaters. Produced with
+`Tools/ghidra-export/dlgdump.py` and `dlgref.py`.
+
+This section is here for two reasons. The near one is that §7.1's "the command
+set is four" is a negative argued from code, and a negative wants its
+user-surface half. The far one is that this inventory is the natural starting
+point for LIST 3: it names every setting the vendor exposes, in the vendor's own
+words, before any of them has been located in a wire record.
+
+### 12.1 There is a firmware-update dialog in the config tool, and nothing can open it  [D]
+
+`DIALOG 131`, present in **all four** config tools, byte-identical across
+cfg100/101/104/107 (`sha256 9660619c44e95a52…`), captioned
+`'Endgame Gear OP1 8k v2 Configuration Tool'`:
+
+| id | class | caption |
+|---|---|---|
+| 1000 | `msctls_progress32` | — |
+| 1001 | `BUTTON` / `PUSHBUTTON` | `'Update'` |
+| −1 | `STATIC` | `'Status:'` |
+| 1017 | `EDIT` | — |
+| 1003 | `BUTTON` / `PUSHBUTTON` | `'Cancel'` |
+
+**Those are the firmware updater's four control ids — 1000, 1001, 1017 and the
+`'Status:'` label — plus a Cancel button.** Compare `updater-protocol.md` §11.1.
+The two products share a source tree, and the config tool once had, or was meant
+to have, an integrated firmware updater.
+
+**No code in any of the four config tools instantiates it.** `dlgref.py` finds
+exactly one instruction anywhere in each binary with `0x83` as an immediate, and
+in all four it is the CRT, not a dialog reference: `movl $0x83,0x64(%esi)` at
+cfg107 `0x50db25` / cfg104 `0x50d675` / cfg101 `0x50dd05`, and
+`movl $0x83,%eax` at cfg100 `0x562b3a`. Each sits in `__XcptFilter`'s
+NTSTATUS-to-signal table, in the arm for `0xC000008E`
+(`STATUS_FLOAT_DIVIDE_BY_ZERO`), where `0x83` is `_FPE_ZERODIVIDE`; the
+neighbouring arms produce `0x81`, `0x84`, `0x85` for the adjacent NTSTATUS
+values, which is what fixes the reading.
+
+**Method and its limits, per §1.2a.** The scan is over the whole file
+disassembled by `objdump -D`, matching the printed immediate `$0x83`, so it sees
+every encoding at once — `push imm8`, `push imm32`, `mov r32,imm32`,
+`mov r/m32,imm32`, the sign-extended ALU forms. It was written that way because
+the first attempt at this question scanned raw bytes for `68 <id32>` and
+reported **zero** references for `DIALOG 102`, the main window, whose id `0x66`
+is pushed as the two-byte `6a 66`. That is exactly the failure §1.2a describes,
+made again, and caught by cross-checking against a dialog that obviously *is*
+used. What the method still cannot see is an id assembled arithmetically.
+
+A control for the reading: MFC's own stock `DIALOG 30721` (`'New'`) and `30734`
+score **0** references by the same method in every binary, so "0" is a value
+this method genuinely produces for a dead resource.
+
+**What this does and does not mean.** It does not give the config tools a
+flashing capability — they contain no `FWFILE` resource (§6.2.1 of
+`updater-protocol.md`), and none of the flash opcodes appears anywhere in their
+`.text`. It *does* mean anyone who opens the resource section of a config tool
+will find a firmware-update dialog, and the honest description of that is
+"present, unreachable", not "absent".
+
+### 12.2 The complete setting inventory, in the vendor's words  [D]
+
+cfg107. The four config tools' `.rsrc` differ (cfg107 adds `DIALOG 153` and
+drops the — empty, 10-byte — `RT_MENU 154` the other three carry), so this is
+1.07's surface specifically.
+
+**Main window, `DIALOG 102`:** a `SysTabControl32` (1060), `'Firmware Version :'`
+and `'Software Version :'` readouts (1027/1029), and two buttons —
+**`1039 'Factory Reset'`** and **`1043 'APPLY'`**. Those two are the entire
+write surface of the program.
+
+**The tab control has exactly four tabs**, inserted by four calls in
+`0x00413300` and by nothing else in the binary — the only four call sites of
+`0x0041c350` in `.text`:
+
+| index | label | page dialog |
+|---|---|---|
+| 0 | `'  Basic  '` | 135 |
+| 1 | `'  Advanced Sensor  '` | 140 |
+| 2 | `'  Buttons  '` | 139 |
+| 3 | `'  Button Mapping  '` | 153 |
+
+`DIALOG 137` (LED) is created separately at `0x004056bb`, and `150` (`'FIXED
+CPI'`) and `152` (`'KEYBOARD KEY'`) are modal popups.
+
+Settings by page, verbatim:
+
+- **135 Basic** — `'CPI Levels'` combo (1019, DLGINIT items `'1' '2' '3' '4'`),
+  four CPI edits + trackbars, `'X/Y Settings'`, `'LOD'` combo (1024),
+  `'Angle Snapping'`, `'Ripple Control'`, four X/Y edit+trackbar pairs,
+  `'Disable LED on Lift-Off'`, four unlabelled `AUTORADIOBUTTON`s
+  (1062/1067/1068/1069), `'Polling Rate'` combo (1085).
+- **140 Advanced Sensor** — `'Motion Sync'`, `'Motion Jitter Filter'`,
+  `'Force max Sensor fps'`, `'Sensor Glass Mode'`, `'Sensor Angle Tuning'`
+  edit+trackbar, `'CPI Downshift Tuning'` combo (1082, DLGINIT
+  `'Force Off' / 'Medium' / 'Default'`), `'Smoothing Tuning'` combo (1084,
+  DLGINIT `'Force Off' / 'Ripple Control Off' / 'Ripple Control On'`).
+- **139 Buttons** — six hidden comboboxes (1072, 1020–1024) behind six push
+  buttons `'RIGHT CLICK'`…`'SCROLL DOWN'`, plus `'Left-handed Mode'`.
+- **153 Button Mapping** — `'Slamclick Filter'`, five per-button
+  `'… Multiclick Filter'` edit+trackbar pairs, two `'SPDT:'` combos, and an
+  acknowledgement checkbox (1064).
+- **137 LED** — `'LED On / Off'`, `'LED effect'` combo (1038, DLGINIT one item,
+  `'Singel color'` — the vendor's typo, kept verbatim), `'Scroll led'`,
+  `'Logo led'`, `'DPI led'`, R/G/B edits, `'Apply led settings'`.
+
+Two controls are shipped **hidden** (`WS_VISIBLE` clear) on page 135:
+`1059 'Apply CPI settings'` and `1061 'Surface Calibration'`. A hidden button is
+a capability the vendor built and then withheld from the UI; whether either has
+a live handler behind it is **not** determined here, and it is a LIST 3 question.
+
+Combo contents that have **no** DLGINIT — `'LOD'` (1024), `'Polling Rate'`
+(1085), the six button-assignment combos on 139, the two `'SPDT:'` combos on 153
+— are filled from code, so the code contains their item lists. That is where a
+LIST 3 pass should look for the enumerations behind those wire values.
+
+### 12.3 Amendment to §10.4 — "tab index 0..6" does not fit a four-tab control
+
+Recorded on noticing, not on resolving (`CLAUDE.md` §1.7).
+
+§10.4 reads the `buf[1] == 0x06` event as a one-hot `buf[2]` mapped through the
+jump table at `0x413be4` to **tab indices 0..6**, seven values, driving
+`TCM_SETCURSEL` on the tab control at `obj+0x13b8`. §12.2 establishes
+mechanically that **the only tab control in cfg107 has four tabs**, inserted by
+the only four call sites of `0x0041c350`, and that the resource set contains
+exactly one `SysTabControl32`.
+
+Seven arms cannot select among four tabs. Both observations may still be
+correct — a jump table can have unreachable arms, and `TCM_SETCURSEL` with an
+out-of-range index is a no-op — but at least one of these is mislabelled, and
+the candidates are: `obj+0x13b8` is not control 1060; or the seven values are
+not tab indices; or three of the seven arms are dead. **Unresolved.** It is
+config-side and does not touch the flasher.

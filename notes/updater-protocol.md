@@ -1495,6 +1495,10 @@ has a blind spot it is named rather than left implied.
 | **any network capability at all** | all 9 binaries — import table, delay-import table, and every DLL-name string in ASCII and both UTF-16 phases | **0** | Three routes. No binary imports or delay-imports `wininet`, `winhttp`, `ws2_32`, `wsock32`, `urlmon`, `httpapi`, `iphlpapi`, `netapi32`, `mswsock`, `dnsapi` or `rasapi32`; and none of those names occurs as a *string* either, so there is no name for `LoadLibrary` to take. The only `.dll` string in any binary that is not an imported DLL is cfg107/cfg100's `hid.dll`, already documented in `config-protocol.md` §2. **Blind spot:** a DLL name assembled at runtime from pieces, and COM-brokered networking — for the latter, no `WinHttp`/`XMLHTTP`/`MSXML`/`ServerXMLHTTP` ProgID string exists in any binary either. |
 | **a fourth route to the device** — any user-mode API that could reach a USB or HID endpoint other than HID.DLL, SETUPAPI.dll and KERNEL32 handle I/O | all 9 binaries: full import directory, the delay-import directory, and every module-name string ending `.dll`/`.drv`/`.sys` in ASCII and UTF-16 | **0** | The import directory lists 17–20 DLLs per binary and the **delay-import directory is empty in all nine**. Across every module-name string in every binary — 28 to 36 distinct names each — the only device-capable ones are `hid.dll` and `setupapi.dll`. No `winusb`, `cfgmgr32`, `newdev`, `libusb*`, `ftdi*`, no `.sys`. So the three routes `closure.py` seeds on are the three that exist. **Blind spot, and it is real:** fw110 contains the format string `%s%s.dll`, so a name *can* be built at runtime — the names it builds are MFC's language-satellite modules (`acomctl32.dll`, `eshell32.dll`, `wuser32.dll` are all present as literals), but the method cannot prove that is all it builds. |
 | a URL of any kind | all 9 binaries, ASCII and UTF-16 | **0 outside the manifest** | The only `http://` strings are `http://schemas.microsoft.com/SMI/2005/WindowsSettings` in the embedded application manifest. The only `connect` hits are MFC's shell-restriction name table (`NoNetConnect`/`Disconnect`). |
+| a menu, a context menu or an accelerator table in any updater | full resource directory of fw110/107/106/104 | **0** | `rsrc.py`; the walk is the same one whose partition closes to zero in `filemap.py`, so a missing branch is not available as an explanation. A command reachable only from a menu therefore does not exist — there is no menu. |
+| vendor text in the updaters' `RT_STRING` tables | all 88 non-empty entries × 4 updaters | **0** | `dlgdump.py --strings`. Every entry is stock MFC framework text. Says nothing about `.rdata` literals, which is the next row. |
+| a vendor string in the updater band beyond the 13 flow messages, `'FWFILE'` and 4 MFC artefacts | every 4-byte window of 1.10's `[0x401000,0x4040ad)` and 1.04's `[0x401bc0,0x405200)` | **0** | `bandlit.py`; scans at every byte offset rather than at instruction boundaries, so it over-reports. Blind to a string address computed at runtime and to one reached via a resource id — the latter is covered by the two rows above. |
+| a firmware-update capability in the config tools' *user surface* | all 11 dialogs × cfg100/101/104/107, every control and caption | **1 dialog, and it is unreachable** | `dlgdump.py` + `dlgref.py`. `DIALOG 131` is a firmware-update dialog and no code in any of the four instantiates it; see `config-protocol.md` §12. This row is in the "not found" table on purpose — the honest statement is that the surface exists and the code to reach it does not. |
 
 Two of these were **not** zero when first computed, and both changed because the
 method was wrong rather than because the binary was:
@@ -1690,11 +1694,51 @@ global — it is corrected below. The conclusion did not change.
 | found flag `0x0056a0f8` | **7** | **0** |
 | mode flag `0x0056a0fc` | **6** | **0** |
 | `bcdDevice` `0x0056a0f4` | **3** | **0** |
-| HID GUID `0x0056a11c` | **5** | **0** |
-| devinfo `0x0056a120` | **3** | **0** |
+| `HDEVINFO` `0x0056a11c` | **5** | **0** |
+| HID GUID `0x0056a120` | **3** | **0** |
 | `caps.Usage` `0x0056a130` | **2** | **0** |
 | `caps.UsagePage` `0x0056a132` | **1** | **0** |
-| `0x0056a118` | **1** | **0** |
+| `RequiredSize` out-param `0x0056a118` | **1** | **0** |
+| device path `CStringW` `0x0056a1a0` | **3** | **2**, and both are the CRT's |
+| `0x00569ff0` — write-only, see below | **1** | **0** |
+
+**Two corrections to this table, 2026-09-04.** Both were found by re-reading
+`FUN_00401000` line by line rather than by any new tool, which is the argument
+for §6.4 continuing to exist.
+
+1. **`0x0056a11c` and `0x0056a120` were labelled the wrong way round.** The
+   order of the two SetupAPI calls settles it and nothing else is needed:
+   `0x401015` pushes `0x56a120` into `HidD_GetHidGuid` (`*0x51b1dc`), so
+   `0x56a120` *receives* the GUID; `0x401032` then passes that same `0x56a120`
+   as `ClassGuid` to `SetupDiGetClassDevsW` (`*0x51b498`, with
+   `Flags = 0x12 = DIGCF_PRESENT|DIGCF_DEVICEINTERFACE`) and stores the returned
+   handle to `0x56a11c` at `0x401044`. `0x56a11c` is then passed first-argument
+   to `SetupDiEnumDeviceInterfaces` at `0x401073`. So `0x56a11c` is the
+   `HDEVINFO` and `0x56a120` is the GUID. The occurrence counts were right; only
+   the names were wrong. Nothing downstream depended on either name.
+2. **Two device globals were missing from the table entirely** — the very thing
+   this table exists to make impossible. `0x56a1a0` is a global ATL `CStringW`
+   assigned the winning `DevicePath` at `0x4011c1`–`0x4011c6`
+   (`mov $0x56a1a0,%ecx; call 0x4016e0`, the `(PCWSTR,int)` assign, with the
+   length computed by the inline `wcslen` at `0x4011ab`–`0x4011bd`).
+   `0x569ff0` is a static dword set to **5** at `0x401095` and **never read
+   anywhere in `.text`** — the exhaustive 4-byte scan finds exactly one
+   occurrence, that store. It is the discarded `cbSize` of a static
+   `SP_DEVICE_INTERFACE_DETAIL_DATA`: the value the code actually uses is
+   written to the *heap* struct at `0x4010bc` (`movl $0x6,(%esi)`), which is the
+   correct 32-bit `SP_DEVICE_INTERFACE_DETAIL_DATA_W` size, whereas 5 is the
+   ANSI one. Dead, and harmless because dead.
+
+**The one non-zero "outside band" cell, stated rather than rounded away.**
+`0x56a1a0` is referenced twice outside the band, at `0x519245` and `0x51a3a1`.
+Neither is vendor code and neither reaches the device: `0x519244` is
+`movl %eax,0x56a1a0` inside the CRT static-initialiser run, immediately followed
+by `push $0x51a3a0; call 0x4f755c` registering `0x51a3a0` with `atexit`; and
+`0x51a3a1` is the first instruction of `0x51a3a0` itself, the matching
+destructor, which does an interlocked decrement of the string's reference count.
+That is the compiler constructing and destroying a global `CStringW`. It is
+reported here rather than filtered out because a table of zeroes that quietly
+excludes its own exceptions is worth nothing.
 
 ### The vendor never validates report lengths [D]
 The same scan run over the rest of `HIDP_CAPS` returns **zero**:
@@ -2449,3 +2493,146 @@ raw-edge closure and is unread. The XM1r figure overstates the gap — those not
 cite *sites inside* bodies rather than entry addresses, so the check is a poor
 proxy there — but it is not zero either, and it is not being claimed as read.
 None of this touches the flasher. It is config-side and XM1r-side work.
+## 11. The user-visible surface — the other half of every negative in §6.3  [D]
+
+`CLAUDE.md` §1.2a: *"Check the user-visible surface before concluding a
+capability is missing: strings in both encodings, `.rsrc` dialogs and their
+control captions, menus, message maps. A feature the vendor ships has a button
+somewhere."*
+
+Every negative in §6.3 was argued from code — a scan found no eighth command, no
+network import, no fourth device route. Those arguments are only as good as the
+set they ran over, and §1.2a exists because this project has twice had a scan
+that was exhaustive over the wrong set. This section is the independent half:
+**what the program offers its user, enumerated from the resources and from the
+literals, with no reference to any of the code arguments.** It was produced
+after those arguments, and it agrees with all of them.
+
+Tools: `Tools/ghidra-export/dlgdump.py` (dialog templates, DLGINIT, string
+table), `Tools/ghidra-export/dlgref.py` (is a dialog reachable at all),
+`Tools/ghidra-export/bandlit.py` (every constant in a VA range, resolved).
+
+### 11.1 The updater's entire user interface is one button  [D]
+
+`dlgdump.py fw110` and `dlgdump.py fw104` produce **identical** output.
+One vendor dialog, four controls:
+
+| id | class | caption |
+|---|---|---|
+| 1000 | `msctls_progress32` | — |
+| 1001 | `BUTTON` / `PUSHBUTTON` | `'Update Firmware'` |
+| −1 | `STATIC` | `'Status:'` |
+| 1017 | `EDIT` | — |
+
+The dialog's own caption is `'Endgame Gear OP1 8k v2 Firmware Updater'`. The
+only other two dialogs in the file are MFC's stock `30721` (`'New'`) and the
+empty `30734`, and `dlgref.py` shows **neither is referenced by any code** — a
+useful control, because it means "0 immediate sites" is a signal this method can
+actually produce, not an artefact of looking in the wrong place.
+
+The rest of the surface, from the resource directory (`rsrc.py`):
+
+| resource type | fw110 | fw107 | fw106 | fw104 |
+|---|---|---|---|---|
+| `RT_MENU` | **0** | **0** | **0** | **0** |
+| `RT_ACCELERATOR` | **0** | **0** | **0** | **0** |
+| `RT_DIALOG` | 3 | 3 | 3 | 3 |
+| `RT_STRING` blocks | 13 | 13 | 13 | 13 |
+| `FWFILE` | 6 | 5 | 5 | 5 |
+
+**No menu bar, no context menu, no accelerator table, in any of the four.** All
+88 non-empty `RT_STRING` entries are stock MFC framework text (`'Open'`,
+`'Print'`, the `AFX_IDP_*` diagnostics); **not one is vendor text.** The vendor
+put its own strings in `.rdata`, which is where §11.2 finds them.
+
+So the updater has exactly one control the user can press, one progress bar, and
+one read-only status line. There is no second flow to have missed.
+
+### 11.2 The thirteen messages, and the flow told in the vendor's own words  [D]
+
+Every string the vendor band can reference, exhaustively: `bandlit.py` reads
+every 4-byte window of the band as a little-endian dword, keeps the ones landing
+inside the image, and resolves each. Over 1.10's band `[0x401000,0x4040ad)` and
+1.04's `[0x401bc0,0x405200)` the result is **18 distinct strings each, and the
+same 18** — a fact worth its own line, since the two are different code bases
+compiled fifteen years apart:
+
+- 4 are MFC/ATL build artefacts. Three are shared verbatim
+  (`'Local AppWizard-Generated Applications'`, `'Exception thrown in
+  destructor'`, and the `ASSERT` format — `'%s (%s:%d)'` in 1.10 against
+  `'%Ts (%Ts:%d)'` in 1.04). The fourth is the compiler's own path to
+  `afxwin1.inl`, and it is `…Visual Studio 10.0\VC\atlmfc…` in 1.10 against
+  `…Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\atlmfc…` in 1.04 —
+  independent corroboration of §0.1's two-code-base finding, from a string
+  neither analysis went looking for.
+- 1 is `'FWFILE'`, the resource type name (§8).
+- **13 are the flow.** They sit in one contiguous `.rdata` run in both binaries,
+  with nothing else inside it, and each is referenced from exactly one place
+  (the first from two):
+
+| # | message | referenced from | function's role |
+|---|---|---|---|
+| 1 | `'Loading firmware file failed'` | `0x40321f`, `0x403262` | `0x403200` — `FWFILE` load (§8.3) |
+| 2 | `'Read firmware file failed'` | `0x40345f` | `0x4033b0` — the Update button (§5.1) |
+| 3 | `'Mouse firmware current version %.2f'` | `0x4034ce` | " |
+| 4 | `'Device not found'` | `0x40352e` | " |
+| 5 | `'send bldr request failed'` | `0x40388e` | `0x403750` — enter bootloader (§5.3) |
+| 6 | `'Open bldr device request failed'` | `0x403949` | " |
+| 7 | `'send bldr start request failed'` | `0x4039df` | `0x403960` — flash (§5.4) |
+| 8 | `'send firmware block data...'` | `0x403a31` | " |
+| 9 | `'send block data request failed'` | `0x403ad0` | " |
+| 10 | `'get all check sum error'` | `0x403bb6` | " |
+| 11 | `'send bldr complete request failed'` | `0x403c6b` | " |
+| 12 | `'Update Succeed, current firmware version is V%.2f'` | `0x403e2a` | " |
+| 13 | `'Update failed, try again'` | `0x403e8c` | " |
+
+**Read the middle column as a derivation in its own right.** The messages are
+laid out in `.rdata` in flow order, they land in exactly four functions, and
+those are the same four functions and the same order that §5.1–§5.4 derived from
+the code. Nothing in this section used the code path; it used the string table
+and a literal scan. Two independent routes to the same sequence.
+
+It also puts a ceiling on the protocol from a direction the command scans
+cannot: **there are messages for entering the bootloader, starting, sending
+blocks, checksumming, completing, succeeding and failing, and for nothing
+else.** No message mentions erase as a separate step, a mode the user can
+select, a device to choose between, a file to open, or a recovery path. That is
+consistent with seven commands and one flow, and it is what a *user* would have
+had to be told about had there been more.
+
+Three absences worth naming, because they are design inputs for us, not just
+corroboration:
+
+- **No cancel, and no warning.** There is no `'Cancel'`, no `'Do not
+  unplug'`, no `'Please wait'` — anywhere in either band. The vendor's tool
+  neither offers an abort nor warns the user off one. Our §4.2 rule that the
+  post-erase phase is non-abortable is therefore *ours*; it is not a behaviour
+  we are copying, and the vendor's UI does not enforce it.
+- **`'Update failed, try again'` is the vendor's entire recovery story**, and it
+  is emitted from inside `0x403960` at `0x403e8c` — that is, after the point of
+  no return. "Try again" is in fact the correct advice, but the tool does not
+  say so and does not distinguish a pre-erase failure from a post-erase one.
+- **`'get all check sum error'`** is the only message for a verification
+  failure, which matches §3.5's single whole-image checksum command; there is no
+  per-block verification message even though §5.5 shows a per-block repair loop
+  exists. The vendor repairs silently.
+
+### 11.3 The rest of the band's constants, so the string list is a partition  [D]
+
+`bandlit.py`'s other buckets over 1.10's band, stated so that "18 strings" is a
+result of an exhaustive pass rather than the output of a filter:
+
+| bucket | 1.10 | what they are |
+|---|---|---|
+| `STR-U` | 18 | §11.2 |
+| `STR-A` | **0** | the vendor band contains no ASCII string reference at all |
+| `FUNC` | 2 | `0x402f00`, `0x402f10` |
+| `DATA` | 64 | dominated by `0x51b1c4`–`0x51b4a4`, the IAT slots, and `0x5623c0`, the `/GS` cookie (651 sites image-wide — every function prologue) |
+| `CODE` | 45 | jump-table entries and byte-aligned false positives |
+
+The method scans at **every** byte offset, not at instruction boundaries, so it
+over-reports rather than under-reports; that is the safe direction and it is why
+`CODE` has 45 entries. What it cannot see is stated in the tool's docstring: an
+address computed at runtime, and a string reached only through a resource id.
+Both are covered from the other side — resource ids by §11.1, and runtime
+computation by the fact that §11.1 finds no resource for one to reach.
