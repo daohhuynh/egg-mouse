@@ -945,6 +945,68 @@ calls the type is convention, and nothing downstream depends on the name.
 **Nothing in the range touches HID or SetupAPI**, by the exhaustive slot scan of
 §6.2.3.
 
+### 6.2.5 The 474 bodies unique to 1.10 were read, and the readers were checked [D]
+
+Of fw110's 5,232 functions that `microread.py` could not settle mechanically,
+**474 have a normalised body that appears in no other binary in the corpus** —
+the slice where vendor code, if any is left unfound, has to be. All 474 were
+read, in 22 batches, and every batch returned.
+
+**The readers were verified, not trusted** (`CLAUDE.md` §6.2). Each was required
+to return two fields checkable against the bytes, and the prompt stated no
+expected answer, gave no protocol context, and told them the Ghidra names are
+sometimes wrong:
+
+| check | result |
+|---|---|
+| functions reported vs. functions sent | 474 / 474, none missing |
+| function ids not present in any batch (invention) | **0** |
+| call targets reported that do not appear in the body | **1 of 4,686** (0.02%) — `0x4fd6d`, a dropped digit |
+| import slots reported that do not appear in the body | **0 of 876** |
+
+**The planted positives produced a real failure, and it was mine.** fw110's
+three seed functions were in the batches, unlabelled. Two were flagged
+`touches_device: true`; `0x004012a0` — the `HidD_SetFeature` sender, the single
+most important function in the flasher — was flagged **false**, with
+`confidence: low`. The reader was right to. The disassembly it was given carries
+**no symbol names**, so `calll *0x51b1d4` is unidentifiable as HID from the input
+alone; the question was unanswerable from what I supplied. It said so instead of
+guessing. False positives across all 474: **0**.
+
+The lesson is about harness design, not about readers: **do not ask a reader a
+question the input cannot answer.** "Which functions touch the device" is
+already settled mechanically and exhaustively by `closure.py` (§9), and that
+answer is authoritative. Nothing a reader says overrides it.
+
+**What the pass corroborates.** The command byte maps in §3 were re-derived
+independently, by readers with no access to these notes:
+
+| §3 | independently reported |
+|---|---|
+| `A0 03` start (§3.2) | "dword `0x3a0` at offset 0" |
+| `A0 06` write block (§3.3) | "word `0x06a0` at offset 0, 16-bit checksum at 4–5, `0x400` bytes copied to offset `0x10`" |
+| `A0 07` read block (§3.4) | "two-byte header `0xA0 0x07`" |
+| `A1 08 34` whole-image checksum (§3.5) | "bytes `0xa1, 0x08, 0x34` and the caller's byte at offsets 0..3, `Sleep(0x64)`, 64-byte read" |
+| `A1 3A … 5A A5 32` enter bootloader (§3.1) | "first eight bytes `A1 3A 00 00 00 5A A5 32`, sent up to nine times with increasing delay, then polls `0x401000(0x1977)`" |
+| busy-poll (§2) | "`buffer[1] == 4` … delay grows 0, `0x64`, `0xc8` … up to `0x7d0`" |
+| retry error set (§2) | "only for codes `0x15, 0x17, 0x1d, 0x57, 0x65b`" |
+
+Including the bootloader PID `0x1977`, which appears in that reader's summary
+without ever having been mentioned to it.
+
+**Composition of the 474**, which is itself the answer to "is there vendor code
+hiding here": windows-ui 210, mfc-atl-framework 150, string-or-container 39,
+c-runtime 16, cpp-runtime-eh 16, unclear 13, **device-io 10**, math-or-float 10,
+thread-or-sync 4, registry 3, file-io 3. The ten device-io are exactly the
+functions §3 and §5 already document. Nothing else in the set touches the device,
+and the mechanical scan of §9 says the same thing independently.
+
+One reader also flagged `0x004c0043` as "three bytes decoding as `subl
+%ebx,(%esi)` followed by `hlt`, with no prologue, no control flow" — arriving at
+the same conclusion as §6.2.2's separate analysis, that Ghidra defined a function
+at an address that is not an instruction boundary, without being prompted to look
+for one.
+
 ### 6.2.2 The DARK residue is fully accounted for [D]
 
 `gapscan.py` partitions `.text` into KNOWN/CALLED/PTR/PAD/DARK, where DARK means
