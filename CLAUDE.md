@@ -11,29 +11,32 @@ protocol findings.** See §7.
 ## 1. Hard rules
 
 ### 1.1 Third-party projects are OFF LIMITS
-Two community projects exist: `qsxcv/UnofficialEGGWebConfig` and
-`niansa/UnofficialEGGMouseConfig`, plus a hosted build at
-`ueggcfg.elinlyze.com`.
+Two community projects exist (`qsxcv/UnofficialEGGWebConfig`, AGPL-3.0, which
+ships reverse-engineered protocol notes; and `niansa/UnofficialEGGMouseConfig`,
+Unlicense, plus its hosted WASM build at `ueggcfg.elinlyze.com` — same
+codebase). **Both are config-only. Neither covers firmware flashing.**
 
-**Do not open, fetch, cite, or reason from them.** Not the code, not any notes,
+**Do not open, fetch, cite, or reason from them.** Not the code, not the notes,
 not the hosted build. If a question appears to require them, say so and stop —
 the user decides.
 
-Nothing further about their contents, licences, authors or scope is recorded
-here, because nothing further could be known without breaking the rule above.
-Any description of them that appears in this project is unverified by
-construction.
+These are excluded *because* they are credible, not because they aren't. The
+first author writes production firmware for their own mouse built on the same
+MCU and sensor as this one, and Endgame's 1.10 changelog credits them for
+features in this very firmware. The second repo credits an Endgame employee as a
+contributor. So they may contain protocol knowledge that originated inside
+Endgame and cannot be derived from the `.exe` files at all.
 
-They are excluded *because* they may be credible, not because they are not. They
-may contain knowledge that cannot be derived from the `.exe` files at all. That
-cuts both ways: it makes them valuable if we get truly stuck, and it makes
-reading them early fatal to an independent derivation, because the temptation is
-to defer rather than verify. The user will decide if and when to consult them.
+That cuts both ways. It makes them valuable if we get truly stuck, and it makes
+reading them early fatal to an independent derivation — the temptation is to
+defer to the more experienced author rather than verify. The user will decide if
+and when to consult them.
 
-One legal note, independent of which project is which. Protocol facts about
-hardware are not copyrightable, so an independent implementation from documented
-facts is clean. Copying *code* is a different matter and could bind this project
-to that project's licence.
+Two further notes. The second repo marks OP1 8k v2 support as **experimental**
+and warns that experimental features can potentially brick the mouse. And the
+AGPL project's licence is copyleft: copying its *code* would bind this project.
+Protocol facts about hardware are not copyrightable; an independent
+implementation from documented facts is clean.
 
 `OpenNuvoton/*` is the chip vendor, not one of these. Fine to use.
 
@@ -295,9 +298,13 @@ than repaired. Any replacement must extract structure without encoding a belief
 about what the structure means.
 
 **The prose.** §1b asserted vendor documentation and user preferences that were
-not sourced, and part of it was confirmed false. §1.1 described the contents and
-licences of projects §1.1 itself forbids opening. §4.2 and §4.4 asserted protocol
-details in a file that opens by claiming it holds none. All of it is gone.
+not sourced, and part of it was confirmed false. §4.2 and §4.4 asserted protocol
+details in a file that opens by claiming it holds none. All of that is gone.
+
+§1.1 was reviewed and kept in full. It describes the two community projects
+themselves — their names, licences, scope, authorship — and never reproduces
+anything found inside them. Repository metadata is not protocol knowledge, and
+knowing what to avoid requires knowing what it is.
 
 The lesson generalises. **Contamination hides in whatever is not treated as a
 claim**: a scoring heuristic, a variable name, a section that sounds like

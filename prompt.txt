@@ -1,0 +1,132 @@
+I am reverse engineering the firmware updater and config software for an Endgame
+Gear OP1 8k v2 mouse, as they have no Mac version. I have 8 executables, 4 of
+each type. 1.10 is the latest firmware updater, and 1.07 is the latest config
+software — these hold the most weight. I want you to do whatever it takes to
+extract and document every function that the programmer of these files, Endgame
+Gear, actually wrote themselves.
+
+**Start with the firmware updaters. The flashing side is the priority.**
+
+Read `CLAUDE.md` first. It has hard rules I need followed, including two
+third-party projects that are strictly off limits, the provenance tagging scheme
+for every claim, the reading policy, and the safety design and threat model for
+the software I am building afterwards. Read §7 and §7.1 before you start work,
+not after.
+
+The binaries are in the repo root and in `old-config-executables/` and
+`old-firmware-executables/`. They are gitignored, because they are Endgame's
+proprietary software and I am not redistributing them. `notes/binaries.md` has
+the SHA-256 and size of all eight so you can confirm you are looking at the same
+files I am. Never execute them.
+
+Some context on what "wrote themselves" means in practice.
+
+**These are statically-linked MFC applications.** Microsoft's C++ GUI framework
+and the C runtime were compiled into the executables rather than imported, so
+most of the functions in each binary are Microsoft's, not Endgame's. You can
+confirm this yourself in one command: the import table names no MFC or CRT DLL,
+while the binary is full of MFC-internal strings such as `AfxStringMgr`,
+`CWinApp`, `CWnd` and `CDialogEx`. Separating those two populations is most of
+the problem, and it is the part I want solved properly rather than approximated.
+Establish the function count and the vendor/library split yourself; I am not
+giving you a number to anchor on.
+
+**Three separation signals. Use them, or something better:**
+
+1. Ghidra's FunctionID analyser identifies known library functions by
+   fingerprint and gives them real names. Unnamed `FUN_` functions are the
+   candidate set. Match rates vary between builds, so establish the rate per
+   binary rather than assuming a consistent baseline.
+
+2. Cross-version diffing, **in one direction only.** "Differs between versions
+   ⇒ Endgame's" is valid. "Identical between versions ⇒ library" is **invalid
+   and must not be used.** The most important vendor code is likely to be the
+   most stable code, stable precisely because it is essential, so a
+   stability-based classifier would throw away the substance and keep UI churn.
+   The diff is also useful in reverse: a function Ghidra named as library but
+   which differs across versions is probably misidentified.
+
+3. Address locality. Compilers emit object files in link order, so vendor code
+   tends to cluster in a contiguous band while library code sits elsewhere.
+   Establish the band per binary from confirmed vendor functions rather than
+   assuming one.
+
+**Read every candidate function.** Not the top N by score. A relevance score is
+fine for choosing reading order, never for deciding what goes unread. If the
+candidate set turns out too large to read exhaustively, tell me the number and
+say so. Do not silently sample. Prior work on these binaries read a handful of
+functions out of thousands and drew conclusions from that; it is the failure
+mode I am paying to eliminate.
+
+**What I need documented per function:** what it does, every constant it uses,
+its callers and callees, and how it differs across the four versions. Tag every
+claim `[D]` derived with a cited address, or `[G]` guess. Nothing tagged `[G]`
+may ever inform code that writes to the device. I do not have a spare mouse.
+
+**Order of work.** Updater 1.10 to completion first, then updaters 1.07, 1.06
+and 1.04 for differential analysis. Config 1.07 and the older config tools after
+that. If the two tools turn out to share a transport layer, the config side gets
+much cheaper once the updater is done, but treat that as a question to settle
+rather than an assumption, and do not let config work delay the flashing side.
+
+For the updaters I want the complete picture: how the device is found and
+opened, how the tool puts the mouse into whatever update mode it uses, whether
+the device re-appears under a different USB identity and how the tool handles
+that if so, the full command sequence from erase through to completion, every
+retry count and delay, how each step is verified, what happens on every failure
+path, and how the firmware image is located and read out of the executable.
+Failure paths matter as much as the success path. I need to know what the
+vendor's own tool does when something goes wrong, because my tool has to do at
+least as well.
+
+**One process note.** I did prior analysis on these same binaries with another
+AI in an earlier session. It produced detailed protocol notes, but the work was
+done unreliably: it read a handful of functions out of thousands, drew
+conclusions from partial reads, and stated things confidently that later turned
+out to be wrong. Some of it is probably correct. I have no way to tell which
+parts without checking, and neither do you.
+
+So I am not giving you those notes, and they are not in this repo. I want your
+own broad, independent analysis first. Once yours is done and committed, I will
+hand the prior notes over and we compare. At that point disagreements are useful
+signal, because two independent derivations disagreeing tells me exactly where
+to look. If I gave them to you now you would end up checking someone else's
+homework instead of doing the work, and the errors would carry straight through.
+
+That contamination is not hypothetical and it was not confined to the notes. A
+Ghidra extraction script in this repo turned out to have the prior session's
+conclusions baked into its scoring and its pattern matching. It was deleted
+rather than repaired. §7.1 of `CLAUDE.md` has the detail. If you write a
+replacement, it must extract structure without encoding a belief about what the
+structure means.
+
+If you find you have already seen material from that prior analysis, tell me.
+Do not quietly work around it. I would rather reset the session than have
+contaminated results I cannot distinguish from clean ones.
+
+**On parallelism.** Thousands of functions genuinely do not fit in one context,
+so this is a case where fanning out across agents is the right call, and I would
+rather spend the compute than get a sampled answer. That is a judgement about
+this specific task, not a standing instruction. See `CLAUDE.md` §1.6: for
+anything that one careful pass handles, do it in one careful pass.
+
+---
+
+Tooling notes:
+
+- Ghidra 12.1.3 is already installed via Homebrew (`brew install ghidra`, a
+  formula, not a cask). `analyzeHeadless`, `ghidraRun` and `pyghidraRun` are on
+  `PATH`. It declares `application.java.min=21` with no maximum and runs fine on
+  the Java 24 installed here. `.claude/settings.json` allowlists it and the
+  adjacent tools so they run without prompting.
+- radare2 / `rabin2` is installed and is a fast way to get PE headers, imports,
+  sections and resources without launching Ghidra.
+- Any pattern matching over decompiler output has to handle a 16-bit constant
+  store appearing either as one constant or as two separate byte stores,
+  depending on how Ghidra typed the local. Matching only one form silently
+  misses things.
+- Linear disassembly desyncs on these binaries, since data is mixed into the
+  text section, and cannot establish function boundaries on its own. Byte-level
+  `E8 rel32` scanning for call targets is reliable; whole-section linear sweeps
+  are not.
+- No extraction or triage script is checked in. Write your own.
