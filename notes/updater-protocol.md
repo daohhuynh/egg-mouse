@@ -89,35 +89,125 @@ while `i < 4`, i.e. **at most 3 retries (4 attempts total)**, `Sleep(10)` betwee
 **Status byte values seen: `0x01` = ready/OK, `0x04` = busy** [D]. No other
 value is handled anywhere in the tool.
 
-## 3. Commands
+## 3. Commands — byte maps
 
-Byte offsets are into the buffer including the report ID at `[0]`.
+**Everything in this section was read from raw disassembly, not from the
+decompiler.** That distinction is not pedantry: Ghidra's output for these
+functions is wrong by omission in at least three places, and each omission is a
+byte that goes to the device. Specifically it drops the 32-bit register argument
+`FUN_00401890` writes to `buf[17..20]`, and it drops the block index
+`FUN_00401980` writes to `buf[2..3]` entirely.
 
-| Report | `[1]` | Other fixed bytes | Len | Derived at | What the tool does with it |
-| --- | --- | --- | --- | --- | --- |
-| `0xA1` | `0x3A` | `[5]=0x5A [6]=0xA5 [7]=0x32` | `0x40` | `0x00403750` | **enter bootloader** |
-| `0xA0` | `0x03` | `[16]` = argument | `0x411` | `0x00401890` | **bootloader start**; followed by `Sleep(3000)` |
-| `0xA0` | `0x06` | `[4..5]` = checksum, `[16..1039]` = 1024 data bytes | `0x411` | `0x00401980` | **write one block** |
-| `0xA0` | `0x07` | `[2]` = argument | `0x411` | `0x00401ad0` | **read one block back** |
-| `0xA1` | `0x08` | `[2]=0x34`, `[3]` = argument | `0x40` | `0x00401bb0` | **read whole-image checksum**; result is the dword at response `[16..19]` |
-| `0xA1` | `0x09` | — | `0x40` | `0x00403960` | **bootloader complete** |
-| `0xA1` | `0x13` | — | `0x40` | `0x00403960` | issued after a successful update, then `Sleep(900)` and one `0xA1` read |
+In every builder the true buffer base is the pointer handed to `memset`, which
+is **not** the lowest local Ghidra names. All offsets below are from that base,
+with the report ID at `[0]`.
 
-The 16-bit constants are stored by the compiler as one `mov` of a word or dword
-(e.g. `local_48 = 0x3aa1` → bytes `A1 3A`), so they must be read
-little-endian; both encodings appear and both were checked.
+### 3.1 Enter bootloader — built in `FUN_00403750` @ `0x00403750` [D]
+```
+[0] = 0xA1      [1] = 0x3A      [2..4] = 0
+[5] = 0x5A      [6] = 0xA5      [7] = 0x32      rest 0     len 0x40
+```
+Sent up to 9 times (`i = 1..9`, `Sleep(i*2)` between), each followed by a 64-byte
+`0xA1` read; any successful read ends the loop [D].
 
-### Per-block checksum [D]
-`FUN_00401980` @ `0x00401980` sums bytes `[0x10 .. 0x40F]` — the 1024 payload
-bytes — into a **16-bit** accumulator and stores it at `[4..5]`. The loop uses
-four interleaved adds and terminates at `0x410`, so the range is exactly the
-1024 payload bytes and nothing else.
+### 3.2 Bootloader start — `FUN_00401890` @ `0x00401890` [D]
+Base `-0x458(%ebp)` (`memset` at `0x4018bc`), length `0x411`.
+```
+[0] = 0xA0   [1] = 0x03   [2..3] = 0   [4..7] = 0
+[16]     = block_count & 0xFF                    ; store at 0x4018c4
+[17..20] = whole-image checksum, 32-bit LE       ; stores at 0x4018ce..0x40190f
+rest 0
+```
+Arguments at the call site `0x4039a0`–`0x4039ae` [D]:
+`stack = (byte)*(dword*)(dlg+0x21c)` = block count; `ECX = *(dword*)(dlg+0x25a20)`
+= the whole-image checksum computed by `FUN_00403580`.
 
-### Whole-image checksum [D]
-`FUN_00403580` @ `0x00403580` sums **every byte of every block** into a
-**32-bit** accumulator (four interleaved adds, `block_count × 1024` bytes) and
-the result is stored at dialog offset `+0x25a20`. It is compared against the
-dword the device returns for `0xA1/0x08/0x34`.
+**So the start command declares up front how many blocks are coming and what
+the total checksum must be.** Writing zeros there, which is what a
+decompiler-only reading produces, would be wrong.
+
+After sending: `Sleep(3000)`, then a 64-byte `0xA1` read; the function returns
+that response's `[1]`.
+
+### 3.3 Write one block — `FUN_00401980` @ `0x00401980` [D]
+Base `-0x458(%ebp)` (`memset` at `0x4019b9`), length `0x411`.
+```
+[0] = 0xA0   [1] = 0x06                          ; movw $0x6a0 at 0x4019d5
+[2] = block_index & 0xFF                         ; 0x4019be
+[3] = (block_index >> 8) & 0xFF                  ; 0x4019de
+[4] = payload_sum & 0xFF                         ; 0x401a54
+[5] = (payload_sum >> 8) & 0xFF                  ; 0x401a5a
+[6..15] = 0
+[16..1039] = 1024 payload bytes                  ; rep movsl, 0x100 dwords, 0x4019ee
+```
+`ECX` = block index, `EDX` = source pointer, stack arg = the report ID used for
+the follow-up read [D].
+
+`payload_sum` is a **16-bit** sum of `[0x10..0x40F]` — exactly the 1024 payload
+bytes — accumulated over the loop at `0x401a00`–`0x401a34` [D].
+
+After sending: `Sleep(50)`, then a **64-byte** read whose report ID is the stack
+argument; returns that response's `[1]` [D].
+
+### 3.4 Read one block back — `FUN_00401ad0` @ `0x00401ad0` [D]
+Base `-0x418(%ebp)` (`memset` at `0x401af7`), length `0x411`.
+```
+[0] = 0xA0   [1] = 0x07                          ; movw $0x7a0 at 0x401b0b
+[2] = block_index & 0xFF                         ; 0x401b14  -- ONE byte only
+[3..7] = 0
+```
+**Asymmetry worth carrying**: the write command puts a 16-bit index at `[2..3]`,
+the read command puts an 8-bit index at `[2]` [D]. With the indices this tool
+actually uses (`0x34..0x74`) the difference never shows, but it is real.
+
+`ECX` = destination buffer. After `Sleep(50)` it reads a **1041-byte** `0xA0`
+response and, if `resp[1] == 0x01`, copies all 1041 bytes to `ECX`
+(`rep movsl` 0x104 + `movsb`, `0x401b96`) [D].
+
+### 3.5 Whole-image checksum — `FUN_00401bb0` @ `0x00401bb0` [D]
+Base `-0x44(%ebp)`, length `0x40`.
+```
+[0] = 0xA1   [1] = 0x08                          ; movw $0x8a1 at 0x401be5
+[2] = 0x34                                       ; 0x401beb -- first block
+[3] = last_block                                 ; 0x401bef -- from arg 2
+[4..5] = 0
+```
+Call site `0x403b6c`–`0x403b87`: `last_block = (byte)block_count + 0x33` [D].
+With 65 blocks that is `0x74`. So the command asks the device to checksum the
+**block range `0x34 … 0x74` inclusive — 65 blocks**, which is the whole image.
+
+Response: `Sleep(100)`, 64-byte `0xA1` read, require `resp[1] == 0x01`, then the
+result is assembled at `0x401c55`–`0x401c7a` as
+`resp[19]<<24 | resp[18]<<16 | resp[17]<<8 | resp[16]` — a **little-endian
+32-bit value at `resp[16..19]`** [D].
+
+### 3.6 Bootloader complete — built inline in `FUN_00403960` [D]
+```
+[0] = 0xA1   [1] = 0x09   [2..5] = 0     len 0x40
+```
+
+### 3.7 Post-success command — built inline in `FUN_00403960` [D]
+```
+[0] = 0xA1   [1] = 0x13   [2..5] = 0     len 0x40
+```
+Sent only after the update has already succeeded, then `Sleep(900)` and one
+64-byte `0xA1` read. **What it does is not derivable from the tool.** `[G]`.
+
+### 3.8 Block numbering — the single most important derived fact
+The flash loop at `0x403a70`–`0x403b5f` computes the block index as
+**`i + 0x34`** for `i = 0 … block_count-1` [D]:
+- `0x403a8b`: `leal 0x34(%ebx), %ecx` → `ECX` for the write
+- `0x403aff`: `leal 0x34(%ebx), %eax` → argument for the verify
+
+With 65 blocks the indices run **`0x34` to `0x74` inclusive**. The checksum
+command's range (§3.5) independently confirms the same two endpoints, derived
+from a different expression at a different address.
+
+So the application region the updater writes begins at block `0x34` = 52. If the
+device's block size is the 1024 bytes the protocol uses throughout, that is byte
+offset `0xD000`, running to `0x1D400`. The `0x400`-byte block size is `[D]`; the
+mapping from block number to a flash address is **`[G]`** and must not be
+assumed.
 
 ## 4. Firmware image — §1.4
 
@@ -214,29 +304,77 @@ bootloader, with no application-mode handshake first.**
    `L"Update Succeed, current firmware version is V%.2f"`.
 
 ### 5.5 Per-block verify and repair — `FUN_00401c90` @ `0x00401c90` [D]
-1. Copy the 1024 source bytes locally and compute the 16-bit sum.
-2. Zero the 1041-byte response buffer.
-3. `FUN_00401ad0(block)` = `0xA0/0x07` read-back.
-4. If `resp[1] == 0x01`, compare the 1024 bytes at `resp[16…]` against the
-   source byte for byte.
-5. If the device's checksum at `resp[6..7]` differs from the computed sum, **or**
-   the byte compare failed, re-issue the write `FUN_00401980(0xA0)` in a loop
-   with `Sleep(d)`, `d = 0, 100 … 1900`, breaking when the response status
-   becomes `0x01`.
+`ECX` = pointer to the 1024 source bytes, stack arg = block index [D]
+(call site `0x403aff`–`0x403b0c`).
 
-So the vendor protocol **does** offer read-back and both a per-block and a
-whole-image checksum. Per §4.2 our flasher mirrors all three.
+1. Copy the 1024 source bytes to `-0x408(%ebp)` and compute the 16-bit sum
+   over them (`0x401ce1`–`0x401d15`).
+2. `memset(-0x418, 0, 0x411)`. **`-0x418 + 0x10 == -0x408`**, so this zeroes the
+   copy: the copy's address is deliberately the payload region of the response
+   buffer. The checksum was already taken.
+3. `FUN_00401ad0(block)` reads the block back into `-0x418`.
+   Returns 0 → this function returns 0 and the flash aborts.
+4. `Sleep(30)`. If `resp[1] != 0x01`, return `resp[1]`.
+5. Device's per-block checksum is `resp[7]<<8 | resp[6]` — **16-bit
+   little-endian at `resp[6..7]`** (`0x401d90`–`0x401dab`) [D].
+6. Compare the 1024 read-back bytes against the source, byte by byte
+   (`0x401dc0`–`0x401dd9`). Mismatch → flag 2.
+7. Checksum mismatch → flag 2.
+8. If flag == 2, **repair**: loop at `0x401e00`–`0x401e3d`, re-issuing
+   `FUN_00401980(ECX = block index, EDX = source, stack = 0xA0)`, with a sleep
+   accumulator starting at 0 and increasing by 100, while it is `< 2000`.
+
+### 5.6 A defect in the vendor's repair loop — read this before copying it
+In step 8 the loop decides whether the repair worked by reading
+**`source_pointer[1]`**, not the device's response:
+
+```
+401e19: movl  -0x424(%ebp), %eax      ; -0x424 was set to the incoming ECX
+401e1f: movzbl 0x1(%eax), %ebx        ;   at 0x401caa, i.e. the SOURCE pointer
+401e23: cmpl  $0x1, %ebx              ; treated as "ready"
+401e28: cmpl  $0x4, %ebx              ; treated as "busy"
+```
+
+`-0x424` is written once, at `0x401caa`, from the incoming `ECX`, and is never
+reassigned; at `0x401e00` the same slot is loaded into `EDX` as the source
+pointer for the rewrite. So byte 1 of the **firmware image data** is being tested
+against the protocol's ready/busy status values [D].
+
+Consequence: whether the repair loop reports success depends on the contents of
+the firmware block, not on the device. If a block's second byte happens to be
+`0x01`, the loop exits and `FUN_00401c90` returns 1 — a **verified-success
+report that verified nothing**. Every other status wrong-foots it the other way.
+
+This is `[D]` as to what the instructions do. That it is unintended is `[G]`,
+but the alternative reading — that the vendor meant to test firmware content
+against protocol status codes — has nothing to recommend it.
+
+**Our flasher must not copy this.** §4.2 requires the read-back and both
+checksums; it does not require the vendor's bug. Reproduce the *commands*
+exactly and the *verification* correctly. This is also a concrete reason not to
+treat the vendor tool as the reference for correctness, only for protocol.
 
 ## 6. Not yet derived — do not guess
 
-- The meaning of `FUN_00401890`'s argument, written to `[16]` of the `0xA0/0x03`
-  start command. Its value comes from a register at the `0x00403960` call site
-  and needs disassembly-level confirmation.
-- Likewise the register-passed arguments of `FUN_00401980`, `FUN_00401ad0` and
-  `FUN_00401c90`. Ghidra is losing a custom/`__fastcall` convention on these,
-  and the block index is exactly the byte a wrong reading would corrupt.
-  **These must be confirmed against raw disassembly before any write path.**
-- What `0xA1/0x13` does. It is only ever sent after a verified success.
-- Whether `0xA0/0x03` erases. The name "bldr start" and the 3-second sleep are
-  suggestive but the tool never says so. `[G]` — and §1.3 applies.
-- Whether the device's whole-image checksum covers 65 KiB or something else.
+Resolved since the first draft, by disassembly: the register-passed arguments of
+`FUN_00401890`, `FUN_00401980`, `FUN_00401ad0` and `FUN_00401c90`, and the block
+index. See §3. The first draft of this file, written from the decompiler alone,
+was missing the block index entirely — worth remembering as a calibration point.
+
+Still open:
+
+- **What `0xA0/0x03` actually does to the device.** "bldr start" and the
+  3-second sleep suggest an erase, and it carries the block count and total
+  checksum, which fits a "prepare to receive N blocks" reading. Both are `[G]`.
+  §1.3 applies: this command will be sent, but no *inference* about erasing may
+  drive any other decision.
+- **What `0xA1/0x13` does.** Only ever sent after a verified success.
+- **The mapping from block number to a flash address.** Block `0x34` is `[D]`;
+  `0x34 * 1024` is `[G]`.
+- **Which `FWFILE` belongs to which product.** The tool hardcodes 140 and says
+  nothing about the other five.
+- **What the device does with a `0xA0/0x06` whose `[2..3]` is outside
+  `0x34..0x74`.** The vendor tool never sends one, so its behaviour is
+  unconstrained by anything in the binary. Our flasher must never emit one.
+- **Everything in `CLAUDE.md` §5.** No `[O]` exists yet; the device is not in
+  hand. Nothing above has been checked against hardware.
