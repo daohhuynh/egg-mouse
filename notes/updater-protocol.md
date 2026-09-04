@@ -1215,6 +1215,44 @@ method was wrong rather than because the binary was:
 
 Which is the argument for writing the scope next to every zero.
 
+## 6.4 Re-derivation log — which claims were re-proven, and how
+
+`CLAUDE.md` §7 requires this analysis to stand on its own, and §1.2b requires
+Ghidra's derived views never to decide anything. A claim first written from a
+decompiler view or from a function-list argument is not retired by being
+plausible; it has to be re-derived. This records what has been, by what route,
+and — as importantly — **what has not**.
+
+**Re-derived from raw disassembly or a raw byte scan, 2026-09-04:**
+
+| claim | §  | independent route used |
+|---|---|---|
+| the seven commands and their byte layouts | 3 | whole-`.text` immediate scan (`cmdscan.py`) **and** caller enumeration of the two device APIs — two methods with no shared blind spot |
+| the same seven in the 1.04 code base | 5.7 | the same whole-`.text` scan on fw104 |
+| block index = `i + 0x34`, 5 write attempts, `Sleep(200)` | 3.8, 5.4 | read at `0x403a48`–`0x403b5f`: `xorl %ebx,%ebx`, `leal 0x34(%ebx),%ecx` at `0x403a8b` for the write and `0x403aff` for the verify, `cmpl $0x5` at `0x403aae`, loop bound `0x21c(%esi)` |
+| `A1 08 34 <last>` whole-image checksum, result at `resp[16..19]` | 3.5 | re-read, and independently reproduced by a reader with no access to these notes (§6.2.5) |
+| busy-poll: `resp[1]==0x04`, +100 ms, 2000 ms budget | 2 | read at `0x40135d`–`0x40139d`; fw104 `0x401ed0` agrees (`cmpb $0x4`, `cmpl $0x7d0`) |
+| the enumerator's sole ownership of every HID/SetupAPI slot | 5.8 | exhaustive 4-byte slot scan attributing each hit to a function — 1 function per slot in both updaters |
+| send/recv wrapper call sites | 3.7a | raw `E8` scan: 7 sites each, resolving to the same 6 functions |
+| only resource 140 is reachable | 8.2 | the type string's address occurs **once in the whole file**, plus closure of the other three resource-API routes |
+| the device closure is 14 and 10, all in band | 9 | raw call edges (`closure.py`), replacing Ghidra's call graph |
+| every DARK byte belongs to a known function | 6.2.2 | per-function re-disassembly (`darkclass.py`) |
+| `0x5c69a8` is the device-path `CString` | 6.2.4 | read at `0x401000` and `0x401d20`–`0x401d36` |
+
+**Not re-derived, and still resting on their original derivation:**
+
+- §3.7b's response byte offsets beyond those named above.
+- §4's `FWFILE` entropy figures and the load path in §8.3–§8.5 (read once,
+  carefully, but not re-derived by a second route).
+- §5.6's account of the vendor's repair-loop defect — load-bearing, because we
+  deliberately deviate from it. **This one should be re-derived before any code
+  copies or avoids it.**
+- The XM1r file in its entirety; it is analogy, not evidence (§1 there).
+
+The distinction is the point. A note that says everything is verified is
+indistinguishable from a note that has not checked, so the second list has to
+exist for the first to mean anything.
+
 ## 7. Scope of the search — what was read, and what was not
 
 `CLAUDE.md` §6 forbids silent sampling, so here are the numbers.
