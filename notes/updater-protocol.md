@@ -699,7 +699,19 @@ Still open:
   checksum, which fits a "prepare to receive N blocks" reading. Both are `[G]`.
   §1.3 applies: this command will be sent, but no *inference* about erasing may
   drive any other decision.
-- **What `0xA1/0x13` does.** Only ever sent after a verified success.
+- ~~What `0xA1/0x13` does.~~ **RESOLVED 2026-09-03 — it is FACTORY RESET.**
+  Derived from the config tool, not this one: cfg107's main dialog control
+  `1039` is captioned `Factory Reset`, its handler `0x00413f90` opens the device
+  and calls `0x00404720`, which builds a 64-byte frame `movl $0x13a1` at
+  `0x40479f` and sends it (`notes/config-protocol.md` §2.4). The frame carries
+  no payload, so the two tools' `A1 13` are byte-identical.
+
+  **Consequence for the flasher, and it is user-facing:** the updater sends
+  `A1 13` unconditionally after a verified flash (§5.4 step 7), so **a firmware
+  update resets the mouse's settings to factory defaults.** Our flasher must
+  either warn before flashing or capture the settings blob first (`A1 12` read,
+  §config §2.2) so the user can restore afterwards. Currently `[D]` for the
+  frame and the send; `[G]` only for what the device does on receipt.
 - **The mapping from block number to a flash address.** Block `0x34` is `[D]`;
   `0x34 * 1024` is `[G]`.
 - **Which `FWFILE` belongs to which product.** The tool hardcodes 140 and says
