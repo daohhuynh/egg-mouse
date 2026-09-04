@@ -1205,8 +1205,18 @@ why that distinction had to be forced.
    a tail call is a call, and excluding them is what understated the config-tool
    closures below.
 
-**Regenerate, do not quote.** Member lists — not just counts — are in
-`.analysis/device_closure_rawedges.json`, so every number here is auditable.
+**Regenerate, do not quote:**
+
+```
+for t in fw110 fw104 cfg107 cfg104 cfg101 cfg100 xm1r; do
+  .analysis/venv/bin/python Tools/ghidra-export/calledges.py $t \
+      --out .analysis/edges/${t}_edges.json
+done
+.analysis/venv/bin/python Tools/ghidra-export/closure.py
+```
+
+Member lists — not just counts — go to `.analysis/device_closure_rawedges.json`,
+so every number in this section is auditable rather than merely asserted.
 
 **Results.**
 
