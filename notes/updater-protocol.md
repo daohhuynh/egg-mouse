@@ -193,6 +193,34 @@ result is assembled at `0x401c55`–`0x401c7a` as
 Sent only after the update has already succeeded, then `Sleep(900)` and one
 64-byte `0xA1` read. **What it does is not derivable from the tool.** `[G]`.
 
+### 3.7a The command table above is complete, and that is checkable
+
+`FUN_004012a0` is the **only** function in the binary that calls
+`HidD_SetFeature` (§7). Disassembling the whole `.text` — all 1,154,048 bytes,
+`0x00401000`–`0x0051b000` — finds exactly **seven** call sites for it, and
+exactly seven for the `HidD_GetFeature` wrapper `FUN_00401330` [D]:
+
+| call site | command |
+| --- | --- |
+| `0x0040190f` | `A0 03` bootloader start (§3.2) |
+| `0x00401a60` | `A0 06` write block (§3.3) |
+| `0x00401b26` | `A0 07` read block (§3.4) |
+| `0x00401bf6` | `A1 08 34` whole-image checksum (§3.5) |
+| `0x004037a1` | `A1 3A` enter bootloader (§3.1) |
+| `0x00403bf2` | `A1 09` complete (§3.6) |
+| `0x00403ddd` | `A1 13` post-success (§3.7) |
+
+Independently, scanning every immediate stored to a stack slot across the whole
+vendor band yields exactly these report/command pairs and no others — `0x3a0`,
+`0x6a0`, `0x7a0`, `0x3aa1` with `0x32a55a00`, `0x8a1` with `0x34`, `0x9a1`,
+`0x13a1` — plus the four bare report IDs used for reads (`0xA1` three times,
+`0xA0` once) and two Windows structure sizes (`0x1c` for
+`SP_DEVICE_INTERFACE_DATA`, `0xC` for `HIDD_ATTRIBUTES`) [D].
+
+**So the updater knows seven commands and this table is all of them.** Any
+eighth command the device may implement is invisible here, and would have to
+come from somewhere other than these binaries.
+
 ### 3.8 Block numbering — the single most important derived fact
 The flash loop at `0x403a70`–`0x403b5f` computes the block index as
 **`i + 0x34`** for `i = 0 … block_count-1` [D]:
