@@ -221,6 +221,34 @@ vendor band yields exactly these report/command pairs and no others — `0x3a0`,
 eighth command the device may implement is invisible here, and would have to
 come from somewhere other than these binaries.
 
+### 3.7b Responses — every byte the tool actually reads
+
+The tool never reads a response field this table does not list. Verified by
+looking at each read buffer's stack slots in the disassembly [D].
+
+| after | read with | length | bytes the tool reads | used for |
+| --- | --- | --- | --- | --- |
+| `A1 3A` enter bootloader | report `0xA1` | `0x40` | none — only whether `HidD_GetFeature` succeeded | breaks the 9-attempt retry loop (`0x403793`) |
+| `A0 03` start | report `0xA1` | `0x40` | `[1]` | returned; caller requires `== 0x01` (`0x40195b`) |
+| `A0 06` write block | report = caller's arg | `0x40` | `[1]` | returned; caller requires `== 0x01` (`0x401aac`) |
+| `A0 07` read block | report `0xA0` | `0x411` | `[1]`, `[6..7]`, `[16..1039]` | status; **LE16 per-block checksum**; the 1024 bytes to compare (`0x401b7f`, `0x401d90`, `0x401dc0`) |
+| `A1 08 34 74` checksum | report `0xA1` | `0x40` | `[1]`, `[16..19]` | status; **LE32 whole-image checksum** (`0x401c49`, `0x401c55`–`0x401c7a`) |
+| `A1 09` complete | report `0xA1` | `0x40` | `[1]` | requires `== 0x01` before re-enumerating (`0x403c2c` region) |
+| `A1 13` post-success | report `0xA1` | `0x40` | **none** | the return value is discarded; fire and forget |
+
+Two things follow that matter for our implementation:
+
+1. **`[1]` is the only status the protocol has**, and the tool only ever
+   distinguishes `0x01` (ready) and `0x04` (busy). Every other value is treated
+   as "not ready" and simply retried or failed on. There is no error code, no
+   reason byte, nothing to log. Whatever the device says when it is unhappy, the
+   vendor tool cannot tell you. Ours should capture the whole response on any
+   non-`0x01` status so a failure is at least diagnosable.
+2. **The `A0 07` read-back is the only way to get data out of the device**, and
+   it returns the payload at `[16]`, the same offset the write command puts it.
+   That is what makes `CLAUDE.md` §4.4 stage 3 — flash read-back with zero
+   writes — possible.
+
 ### 3.8 Block numbering — the single most important derived fact
 The flash loop at `0x403a70`–`0x403b5f` computes the block index as
 **`i + 0x34`** for `i = 0 … block_count-1` [D]:
