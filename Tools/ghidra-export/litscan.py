@@ -17,6 +17,9 @@ TAGS = {
  "cfg104": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.04.exe",
  "cfg101": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.01.exe",
  "cfg100": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.00.exe",
+ # Different product (XM1r) and a different vendor's code base. Kept apart from
+ # the OP1 tags on purpose; see CLAUDE.md 1.4 and notes/xm1r-flasher.md.
+ "xm1r": "XM1r_Flash_Upgrade_1.9.46.exe",
 }
 
 def sections(d):

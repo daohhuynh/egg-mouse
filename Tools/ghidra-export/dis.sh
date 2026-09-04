@@ -11,6 +11,7 @@ case "$1" in
   cfg104) F="old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.04.exe";;
   cfg101) F="old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.01.exe";;
   cfg100) F="old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.00.exe";;
+  xm1r) F="XM1r_Flash_Upgrade_1.9.46.exe";;   # different product AND different vendor code base
   *) echo "unknown tag $1" >&2; exit 2;;
 esac
 cd "$(dirname "$0")/../.."

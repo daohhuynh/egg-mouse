@@ -60,3 +60,18 @@ old-firmware-executables/                             # v1.04, v1.06, 1.07
 ```
 
 Per CLAUDE.md 1.5, these are never executed. Static analysis only.
+
+## Not an OP1 binary — kept here only so the file is complete
+
+`XM1r_Flash_Upgrade_1.9.46.exe` — **a different product (Endgame Gear XM1r) and
+a different vendor's code base** (Ruling Technologies Sdn. Bhd., per the string
+table). Analysed in `notes/xm1r-flasher.md` under its own `[D-X]`/`[V]` tags so
+that nothing from it can be mistaken for an OP1 finding. See `CLAUDE.md` §1.4.
+
+| size | sha256 |
+| --- | --- |
+| 5,664,256 | `670230936df1d54067f4d85e5b88df2d3ad426c0efd136852b1a129e873569b1` |
+
+**Provenance is weaker than the eight above.** Supplied from a Discord channel
+on 2026-09-03, not downloaded from Endgame. Not independently verified as
+genuine Endgame-distributed software. Never executed.
