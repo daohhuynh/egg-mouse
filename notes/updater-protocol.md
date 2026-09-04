@@ -398,6 +398,32 @@ out of a register — it still has to be handed to `FUN_004012a0`, whose seven c
 sites come from a raw `E8` scan of the whole section and whose six calling
 functions have all been read in full.
 
+**fw104 agrees, by the same whole-`.text` scan.** Its 37 hits reduce to the same
+seven commands — `0x3a0`, `0x6a0`, `0x7a0`, `0x8a1`, `0x3aa1`, `0x9a1`, `0x13a1`
+— inside its four command-building functions `0x402a90`, `0x402c00`, `0x404760`,
+`0x404980`. So the command set is identical across the two code bases, checked
+the same way in both.
+
+**Two classes of false positive, both worth knowing before trusting such a
+scan.** First, pointers whose low byte happens to be a report id
+(`movl $0x5779a0`, `$0x57e1a0`, `$0x57e5a0`, `$0x53c7a0`, `$0x5443a0`). Second,
+and more convincing at a glance: fw104 `0x004a99c5` and `0x004a99fe` store
+`$0xa0` and `$0xa1` **as bytes**, which is precisely the shape of a report-id
+store —
+
+```
+4a99c5  movb $-0x60, -0x4(%ebp)     ; 0xa0
+4a99fe  movb $-0x5f, -0x4(%ebp)     ; 0xa1
+```
+
+— but the destination is `-0x4(%ebp)`, the **MSVC C++ exception-handling state
+slot**, and the surrounding code is constructing and destroying `CString`
+temporaries. They are EH state numbers that happen to equal `0xa0`/`0xa1`. Two
+things separate them from real commands and both are mechanical: the destination
+is the EH slot rather than a frame buffer that is later passed to the send
+wrapper, and the containing function `0x004a704e` is **not in the device
+closure** and references no HID import at all.
+
 **So the updater knows seven commands and this table is all of them.** Any
 eighth command the device may implement is invisible here, and would have to
 come from somewhere other than these binaries.
