@@ -361,12 +361,42 @@ exactly seven for the `HidD_GetFeature` wrapper `FUN_00401330` [D]:
 | `0x00403bf2` | `A1 09` complete (§3.6) |
 | `0x00403ddd` | `A1 13` post-success (§3.7) |
 
-Independently, scanning every immediate stored to a stack slot across the whole
-vendor band yields exactly these report/command pairs and no others — `0x3a0`,
-`0x6a0`, `0x7a0`, `0x3aa1` with `0x32a55a00`, `0x8a1` with `0x34`, `0x9a1`,
-`0x13a1` — plus the four bare report IDs used for reads (`0xA1` three times,
-`0xA0` once) and two Windows structure sizes (`0x1c` for
-`SP_DEVICE_INTERFACE_DATA`, `0xC` for `HIDD_ATTRIBUTES`) [D].
+Independently, scanning every immediate stored to memory **across all of
+`.text`** — re-run 2026-09-04 with `Tools/ghidra-export/cmdscan.py`, previously
+scoped only to the vendor band — yields exactly **13** instructions whose stored
+immediate has a report id in its low byte, and every one is inside the six
+functions above:
+
+```
+4018e9  movl $0x3a0   -> -0x458(%ebp)   in 0x401890   A0 03 start
+40194d  movb $0xa1    -> -0x44(%ebp)    in 0x401890   response report id
+4019d5  movw $0x6a0   -> -0x458(%ebp)   in 0x401980   A0 06 write block
+401b0b  movw $0x7a0   -> -0x418(%ebp)   in 0x401ad0   A0 07 read block
+401b6d  movb $0xa0    -> -0x82c(%ebp)   in 0x401ad0   response report id
+401be5  movw $0x8a1   -> -0x44(%ebp)    in 0x401bb0   A1 08 checksum
+401c36  movb $0xa1    -> -0x84(%ebp)    in 0x401bb0   response report id
+403793  movl $0x3aa1  -> -0x44(%ebp)    in 0x403750   A1 3A enter bootloader
+4037d2  movb $0xa1    -> -0x84(%ebp)    in 0x403750   response report id
+403be4  movl $0x9a1   -> -0x50(%ebp)    in 0x403960   A1 09 complete
+403c1d  movb $0xa1    -> -0x90(%ebp)    in 0x403960   response report id
+403dcf  movl $0x13a1  -> -0x50(%ebp)    in 0x403960   A1 13 post-success
+403e09  movb $0xa1    -> -0x90(%ebp)    in 0x403960   response report id
+```
+
+Three further hits are **addresses, not commands** — `movl $0x53c7a0` twice and
+`movl $0x5443a0` once, pointers whose low byte happens to be `0xa0`. Note also
+that objdump prints `movb $0xa1` as **`$-0x5f`**, which is exactly how a naive
+text search for `$0xa1` finds nothing and looks like a clean negative.
+
+**Two genuinely independent methods, converging on the same six functions.** One
+enumerates the callers of the only two APIs that can move a byte to or from the
+device; the other scans for immediates and never looks at a call graph. Unlike
+the cross-check retracted in §9, these two share no blind spot. And the API bound
+is the stronger of the pair, because it does not depend on the command byte being
+an immediate at all: however a frame were built — byte at a time, from a table,
+out of a register — it still has to be handed to `FUN_004012a0`, whose seven call
+sites come from a raw `E8` scan of the whole section and whose six calling
+functions have all been read in full.
 
 **So the updater knows seven commands and this table is all of them.** Any
 eighth command the device may implement is invisible here, and would have to
