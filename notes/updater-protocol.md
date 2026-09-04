@@ -711,7 +711,7 @@ treat the vendor tool as the reference for correctness, only for protocol.
 
 There is a second oddity in the same loop. `FUN_00401980`'s follow-up status
 read uses the report ID it is handed on the stack, with a **fixed 64-byte
-length** (`pushl $0x40` at `0x401a8a`). On the normal path `FUN_00403960` passes
+length** (`pushl $0x40` at `0x401a89`). On the normal path `FUN_00403960` passes
 `0xA1` (`pushl $0xa1`, `0x403a86`), which matches a 64-byte report. On the repair
 path `FUN_00401c90` passes **`0xA0`** (`pushl $0xa0`, `0x401e06`) — the 1041-byte
 report ID, read into a 64-byte buffer [D]. Whatever that returns, it is not a
@@ -719,6 +719,27 @@ well-formed `0xA0` response.
 
 Both defects sit on the repair path and nowhere else. The main write-and-verify
 path is sound.
+
+> **RE-DERIVED 2026-09-04 from raw bytes, because we deliberately deviate from
+> this and a deviation built on a misreading is worse than copying the bug.**
+> Every element checks out:
+>
+> - `0x401ca7 movl %ecx,%esi` then `0x401caa movl %esi,-0x424(%ebp)` — the slot
+>   takes the incoming `ECX`.
+> - **`-0x424(%ebp)` is written exactly once.** Scanning the whole body
+>   `0x401c90`–`0x401e61` for the displacement finds one store (`0x401caa`) and
+>   three loads (`0x401d9e`, `0x401e00`, `0x401e19`). It is never reassigned, so
+>   the pointer tested at `0x401e19` is unambiguously the source buffer.
+> - `0x401e19 movl -0x424(%ebp),%eax` / `0x401e1f movzbl 0x1(%eax),%ebx` /
+>   `0x401e23 cmpl $0x1` / `0x401e28 cmpl $0x4` — byte 1 of the **image data**
+>   compared against the protocol's ready and busy values.
+> - `0x401e06 pushl $0xa0` on the repair path against `0x403a86 pushl $0xa1` on
+>   the normal one, into a follow-up read whose length is the fixed `pushl $0x40`
+>   at `0x401a89` (cited as `0x401a8a` before this check — corrected).
+>
+> So §5.6 stands exactly as written, and `notes/build-design.md` §2.3's
+> deliberate deviation rests on a re-derived reading rather than a remembered
+> one.
 
 ## 5.7 Cross-version confirmation: code base B agrees with code base A
 
