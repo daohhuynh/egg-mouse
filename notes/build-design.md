@@ -31,7 +31,7 @@ most damage.
 | the busy-poll shape: +100 ms per pass, 2000 ms budget | **updater only** — cfg107's budget is 1000 ms | §2; `config-protocol.md` §1 |
 | the transport retry set `0x15 0x17 0x1D 0x57 0x65B`, 4 attempts, 50 ms | updater 1.10 **and** cfg107 — shared | §2; `config-protocol.md` §1 |
 | block numbering and the `0x34` base | updater 1.10 | §3.8 |
-| the device-selection predicate | **cfg107** — the updater's enumerator is a different function | `config-protocol.md` §3a |
+| the device-selection predicate — VID + PID + UsagePage `0xFF01` + Usage `0x02` | **both, independently**: updater 1.10 `0x401000` (`0x4010ff`, `0x401109`, `0x40113c`, `0x401145`) and cfg107 `0x4035f0` (§3a). Different functions, identical four-part test | `config-protocol.md` §3a; `updater-protocol.md` §1 |
 | that exactly **14** functions can reach the device | **updater 1.10** (raw call edges; 1.04's closure is 10, cfg107's is 38) | §9 |
 | that the device presents a **second** vendor collection, `0xFF02`/`0x01`, carrying 8-byte input reports | **cfg100/101/104/107** — no updater touches it | `config-protocol.md` §10 |
 | that the config tools cannot flash (no `FWFILE` resource in any of the four) | cfg100/101/104/107 | §6.2.1 |

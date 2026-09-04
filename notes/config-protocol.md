@@ -871,6 +871,32 @@ function. Recorded as observed; do not build on it.
    **`0x0a`**. That identifies two fields of the config blob for free and is the
    thread to pull for the rest of it — LIST 3, not here.
 
+### 10.5a Every usage-page literal in the corpus, enumerated [D]
+
+The claim "there are exactly two vendor collections" is a negative, so it gets
+§1.2a treatment. Exhaustive 4-byte scan of `.text` for `0xFF01` and `0xFF02` in
+all eight Endgame binaries, every hit disassembled at the site:
+
+| binary | site | what it actually is |
+| --- | --- | --- |
+| fw110 / fw107 / fw106 | `0x401138` | `cmpw` against `HIDP_CAPS.UsagePage` — the matcher |
+| fw110 / fw107 / fw106 | `0x4dc5bc` | `movl $0xff01,-0x34(%ebp)` in library code, byte-identical to cfg107's `0x4ec849` |
+| fw104 | `0x401cde` | the matcher |
+| fw104 | `0x4ce581` | the same library body |
+| cfg107 | `0x403778` | the matcher (§3a) |
+| cfg107 | `0x402eb6` | **`hid_open`'s `0xFF02` — the second collection** |
+| cfg107 | `0x413e90` | `movl $0xff01, 0x66(%eax)` — a **settings-record default**, offset `0x66`, in the default writer `0x413db0` (cfg104's is §9.1's `0x4138f0`). Not a usage page |
+| cfg107 | `0x4ec849` | library |
+| cfg104 / cfg101 | `0x402ec6`, `0x4035d0`+`0x758`, `0x4138f0`/`0x4137e0` band, library | same four roles |
+| cfg100 | `0x404be9` matcher; `0x403f0a`+`0x403f70` `hid_open` (constant reloaded in the loop); `0x415611` settings default; `0x52af45` library | same four roles |
+| cfg100 | `0x417543` | **not a literal at all** — the bytes `02 ff 00 00` are the displacement of `e8` `calll 0x427449` at `0x417542`. A 4-byte literal scan cannot tell an immediate from a displacement, and this is what that looks like |
+
+**Two usage pairs, and no third.** No updater contains `0xFF02` in any form.
+The scan's blind spot is the usual one: a usage page built arithmetically, or
+compared as two 8-bit halves, would not appear as a 4-byte literal. Nothing in
+the corpus does that — every comparison found is a single `cmpw` against a
+16-bit field — but the method could not have seen it if one did.
+
 ### 10.6 The residue that hid it
 
 §3a.1 counted seven `0x1978` immediates in cfg107 and named five. It never
