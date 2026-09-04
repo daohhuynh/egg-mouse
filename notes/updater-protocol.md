@@ -435,13 +435,31 @@ looking at each read buffer's stack slots in the disassembly [D].
 
 | after | read with | length | bytes the tool reads | used for |
 | --- | --- | --- | --- | --- |
-| `A1 3A` enter bootloader | report `0xA1` | `0x40` | none — only whether `HidD_GetFeature` succeeded | breaks the 9-attempt retry loop (`0x403793`) |
-| `A0 03` start | report `0xA1` | `0x40` | `[1]` | returned; caller requires `== 0x01` (`0x40195b`) |
-| `A0 06` write block | report = caller's arg | `0x40` | `[1]` | returned; caller requires `== 0x01` (`0x401aac`) |
-| `A0 07` read block | report `0xA0` | `0x411` | `[1]`, `[6..7]`, `[16..1039]` | status; **LE16 per-block checksum**; the 1024 bytes to compare (`0x401b7f`, `0x401d90`, `0x401dc0`) |
-| `A1 08 34 74` checksum | report `0xA1` | `0x40` | `[1]`, `[16..19]` | status; **LE32 whole-image checksum** (`0x401c49`, `0x401c55`–`0x401c7a`) |
-| `A1 09` complete | report `0xA1` | `0x40` | `[1]` | requires `== 0x01` before re-enumerating (`0x403c2c` region) |
-| `A1 13` post-success | report `0xA1` | `0x40` | **none** | the return value is discarded; fire and forget |
+| `A1 3A` enter bootloader | report `0xA1` | `0x40` | none — only whether `HidD_GetFeature` succeeded | `testl %eax,%eax; jne` at `0x4037e1` leaves the retry loop, whose bound is `cmpl $0xa,%ebx; jl` at `0x4037f0` — `ebx` runs 1…9, so **9 attempts** |
+| `A0 03` start | report `0xA1` | `0x40` | `[1]` | returned; caller requires `== 0x01`. Read at `0x40195b` (`movb -0x43(%ebp),%al`, buffer base `-0x44`) |
+| `A0 06` write block | report = caller's arg (`0x401a9f`) | `0x40` | `[1]` | returned; caller requires `== 0x01`. Read at `0x401aac` |
+| `A0 07` read block | report `0xA0` | `0x411` | `[1]` in `0x401ad0`; `[6..7]` and `[16..1039]` in the **caller** | see the note below — `0x401ad0` copies the whole response out |
+| `A1 08 34 74` checksum | report `0xA1` | `0x40` | `[1]`, `[16..19]` | status at `0x401c49`; **LE32 whole-image checksum** assembled at `0x401c55`–`0x401c78` as `[19]<<24 \| [18]<<16 \| [17]<<8 \| [16]` and written through the out-parameter at `0x401c7a` |
+| `A1 09` complete | report `0xA1` | `0x40` | `[1]` | `cmpb $0x1, -0x8f(%ebp)` at `0x403c30`, buffer base `-0x90`; retried while `ebx <= 0xa` (`0x403c49`), so **10 attempts**, before the PID `0x1978` re-enumeration |
+| `A1 13` post-success | report `0xA1` | `0x40` | **none** | a `GetFeature` **is** issued (`0x403e10`, after `Sleep(0x384)` = 900 ms) and then neither its return value nor any byte of its buffer is examined — see below |
+
+**`A0 07` reads more than `0x401ad0` looks at.** `0x401ad0` checks the wrapper's
+return (`cmpl $0x1`) and `resp[1]` (`0x401b7f`), and on success copies the
+**entire 1041-byte response** to the caller's buffer — `movl $0x104,%ecx` then
+`rep movsl` plus one `movsb` at `0x401b96`, i.e. `0x104*4 + 1 = 0x411`. So the
+offsets `[6..7]` and `[16..1039]` are read by `0x401c90`, not here. The
+distinction matters for a reimplementation: the transport function must hand the
+whole frame up, not a parsed subset, or the caller's checks cannot be written.
+
+**`A1 13`'s response is fetched and thrown away.** `0x403ddd` sends it;
+`testl %eax,%eax; je 0x403e18` skips the read on a **failed send**; on success it
+sleeps 900 ms and issues the `GetFeature` at `0x403e10` — and then falls into
+`0x403e18`, the success-message formatting, which is the *same* continuation the
+failed-send path jumps to. Nothing between the two paths differs. So the vendor
+cannot distinguish "factory reset acknowledged" from "factory reset command never
+reached the device", and does not try. `build-design.md` §2.4 says that if we
+send `A1 13` at all we should use the config tool's checked form; this is the
+evidence for that sentence — the updater already has the read and discards it.
 
 Two things follow that matter for our implementation:
 
@@ -1323,10 +1341,13 @@ and — as importantly — **what has not**.
 | the load path performs no transform | 8.3 | re-read `0x403200`–`0x403313`: `shrl $0xa` → `obj+0x21c`, `LockResource` → `obj+0x25a3c`, `movl $0x1,%ebx` as the copy stride, then four `movzbl`/`movb`/`addl %ebx` groups per iteration into `obj+0x220` |
 | the checksum is a plain 32-bit additive sum | 8.4 | re-read `0x403580`–`0x4035f4`: four accumulators, `movzbl` at `+(-1,0,1,2)`, `addl $0x4`, `cmpl $0x400`, partials summed at `0x4035d8`, `addl $0x400` per chunk |
 | §4's entropy, §8.1's census, §8.5's chunk structure | 4, 8.1, 8.5 | resource tree re-walked from the PE data directory by a second parser: all `FWFILE` are 66560 = 65×1024 remainder 0, H 7.941–7.952; 140 has 31 distinct chunks of 65 with exactly one repeat run, chunks **29–63**, `cefe77fb6c23f0d4…`, byte-identical in all four updaters; 133/135/137 frozen, 140/142 change every release, 143 only in 1.10 |
+| §3.7b's response offsets, every row | 3.7b | each response buffer re-read from raw disassembly and every displacement off its base enumerated: `0x401890`, `0x401980`, `0x401ad0`, `0x401bb0`, `0x403750`, `0x403bc7`, `0x403dcf`. Three refinements resulted (the `A0 07` bulk copy, the discarded `A1 13` read, and three citation fixes) — the table's content stands |
 
 **Not re-derived, and still resting on their original derivation:**
 
-- §3.7b's response byte offsets beyond those named above.
+*(Nothing in `updater-protocol.md` is left on this list as of 2026-09-04. The
+entry that stood here — §3.7b's response byte offsets — was re-derived; see the
+row above and the corrections in §3.7b itself.)*
 - The XM1r file — substantially re-derived 2026-09-04 (`notes/xm1r-flasher.md`
   §3.1, §3.2a, §5.1, and the §6.9 correction), but it is analogy, not evidence
   (§1 there), so it is not held to this standard and nothing in it may inform an
