@@ -64,13 +64,27 @@ across two code bases, not read once.
 **A transport that hardcodes one busy byte is wrong for the other tool.** It is
 a parameter, not a constant.
 
-## 2. Device-facing surface — 13 functions, not 9 references [D]
+## 2. Device-facing surface — 17 functions, in three routes [D]
 
-> **CORRECTED 2026-09-04.** This section previously said "nine references" and
-> listed only IAT-slot users. That was an undercount with a specific cause: the
-> config tools resolve eleven HID entry points through `GetProcAddress` and call
-> them via `.data` slots, which no IAT scan can see. Full account of the error
-> and the corrected method: `notes/updater-protocol.md` §9.3.
+> **CORRECTED TWICE, and the shape of both errors is the same.**
+>
+> *First*, 2026-09-04: the section said "nine references" and listed only
+> IAT-slot users. Undercount, because the config tools resolve eleven HID entry
+> points through `GetProcAddress` and call them via `.data` slots, which no IAT
+> scan can see. That took the seed from 9 to 13. Account: `updater-protocol.md`
+> §9.3.
+>
+> *Second*, 2026-09-04, later the same day: 13 was **still** an undercount,
+> because the HID imports are not the only route to the device. The config
+> tools' hidapi is vendor-patched and its read/write/feature paths go through
+> **kernel32 on the device handle**, referencing no HID import at all. That is
+> route three, it takes the seed to **17** and the closure from 32 to 38, and it
+> was hiding a live device-read channel nobody had noticed — §10.
+>
+> Both errors were "exhaustive scan of the wrong search space", which is the
+> failure `CLAUDE.md` §1.2a names. The scan was never wrong; the set it ran over
+> was. Regenerate with `Tools/ghidra-export/closure.py`; do not quote these
+> numbers from prose.
 
 **Two ways in, and both must be scanned.**
 
@@ -106,17 +120,62 @@ rather than `pushl %eax` for the handle).
 `0x00403320` executes `ff 15 74 f1 57 00` = `calll *0x57f174` at `0x403333`.
 That is a `HidD_SetFeature` call which references **no IAT slot at all**.
 
-**The corrected seed set is 13 functions** for every config version — the union
-of static-IAT users and dynamic-slot users:
+### 2.1 Route three — kernel32 on the device handle [D]
+
+The vendor's hidapi does not use `HidD_*` for the bulk paths. Four functions
+per config tool do device I/O through kernel32 and reference no HID import:
+
+| hidapi function | cfg107 / 104 / 101 | cfg100 | kernel32 route |
+| --- | --- | --- | --- |
+| `hid_write` | `0x403100` | `0x404290` | `WriteFile` + `GetOverlappedResult` |
+| `hid_read_timeout` | `0x4031c0` | `0x4043e0` | `ReadFile` + `CancelIo` |
+| `hid_get_feature_report` | `0x403350` | `0x404610` | `DeviceIoControl`, code `0xB0192` = `IOCTL_HID_GET_FEATURE` (`0x40337f`) |
+| `hid_close` | `0x4033d0` | `0x404720` | `CancelIo` |
+
+Only the four config tools import `DeviceIoControl`; the four updaters and the
+XM1r do not. In the updaters every `ReadFile`/`WriteFile` reference belongs to
+the CRT or MFC file classes, so **route three does not exist in the flasher's
+binaries and the updater closures are unchanged at 14 (1.10) and 10 (1.04)**.
+
+**The seed is 17 functions** for every config version — static-IAT users,
+dynamic-slot users, and route three:
 
 ```
-cfg107  0x4027d0 0x402980 0x402f60 0x403320 0x403420 0x403460 0x4034a0
-        0x4034e0 0x403550 0x4035f0 0x403850 0x403920 0x404180
-cfg100  0x4038a0 0x403a30 0x403fe0 0x404590 0x404770 0x404800 0x404890
-        0x404920 0x4049c0 0x404a50 0x404ce0 0x404db0 0x405660
+cfg107  0x4027d0 0x402980 0x402f60 0x403100 0x4031c0 0x403320 0x403350
+        0x4033d0 0x403420 0x403460 0x4034a0 0x4034e0 0x403550 0x4035f0
+        0x403850 0x403920 0x404180
+cfg100  0x4038a0 0x403a30 0x403fe0 0x404290 0x404590 0x404610 0x4043e0
+        0x404720 0x404770 0x404800 0x404890 0x404920 0x4049c0 0x404a50
+        0x404ce0 0x404db0 0x405660
 ```
 
-Device handle global: cfg107 `0x0057f338`.
+Device handle globals: cfg107 `0x0057f338` (the `CreateFileW` handle from the
+§3a matcher) and `0x00580188` (the `hid_device*` from §10's `hid_open`).
+
+**How route three is separated from ordinary file I/O.** `ReadFile` and
+`WriteFile` are also the CRT's and MFC's, and seeding on them wholesale would
+drag in every file operation in the program. `closure.py` admits a kernel32
+handle-I/O function only if it lies inside the hidapi span (lowest to highest
+HID-slot user) **or** is already in the HID-only closure. The second arm exists
+because the XM1r's device read `0x643b80` sits *below* its span and would
+otherwise have been filed as generic file I/O. Every function the rule rejects
+is printed, per binary, rather than dropped silently.
+
+**Blind spot, stated:** a device-I/O call outside the hidapi span and outside
+the HID-only closure would still be missed. `closure.py` prints that residue
+for every binary (`devio_out_of_span`); in all seven it is the CRT's
+`_read`/`_write` and the ATL/MFC file classes, whose handles come from
+`CreateFile*` on filesystem paths.
+
+**A hazard this method cannot fix, recorded rather than hidden.** A function
+whose address is only ever *taken* — a thread procedure, a callback stored to a
+`.data` slot — has no incoming call edge, so no call-graph closure in either
+direction can reach it. §10's poll thread `0x412c60` is in the closure only
+because it *calls* a seeded function; its sibling `0x412c40`, the event
+callback stored to `*0x0057f298` and invoked indirectly, has no such edge and
+is invisible to the method. `closure.py` therefore audits the case that would
+matter — an address-taken function that does device I/O and is absent from the
+closure — and reports it empty for all seven binaries.
 
 **Method, and its blind spot.** Exhaustive 4-byte scan of the whole `.text` for
 every static IAT slot *and* every dynamic slot address; dynamic slots are found
@@ -200,6 +259,12 @@ awareness**: it cannot open PID `0x1977`, because nothing ever asks it to.
 This is a `CLAUDE.md` §1.2a case worth keeping as calibration — the original
 negative was *stated over the wrong search space*. It happened to reach the
 right conclusion, which is the dangerous kind of near-miss.
+
+> **And it was not finished.** Five call sites were named against a count of
+> seven and the two-site residue was never enumerated. One of the two is the
+> entry to a second device channel nobody had seen. The conclusion above
+> survives unchanged — no `0x1977` anywhere in cfg107 — but the method did not.
+> §10.6.
 
 ## 4. The four commands cfg107 sends [D]
 
@@ -532,13 +597,24 @@ function-list argument is not retired by being plausible.
 | the device-select predicate's five call sites | 3a.1 | raw `E8` scan for callers of `0x4035f0`: exactly **5** (`0x4130b8 0x413849 0x413ee0 0x413fa2 0x41404b`), each disassembled at the site and each pushing `$0x1978`. Four have the push immediately before the call; `0x4130b8`'s is at `0x4130ac` with an unrelated `movl` between, which is why an adjacency test would have found only four |
 | the shared-transport table | 1 | re-read at the cited addresses: `0x404238 movl $0x411,%esi`; `rep movsl` of `0x100` dwords `0x404222`–`0x404233` into `-0x45c` = base `-0x46c` + `0x10`; `0x404292 movb -0x53(%ebp),%bl` against base `-0x54`; `0x404264 movb $0x2,%al` |
 | the config busy convention | 1 | re-read `0x403920`–`0x4039dc`: `cmpl $0x1,%eax` on the **return**, then `movzbl 0x1(%edi)`; `cmpl $0x3` at `0x40396e` enters the busy loop, `Sleep(0x64)` at `0x403980`, accumulator `+0x64` at `0x4039d1`, budget `cmpl $0x3e8` at `0x4039d7` — so at most **10 passes**, and the 100 ms sleep happens only on the busy path |
+| the device-facing seed | 2 | Independent 4-byte scan for the five kernel32 handle-I/O slots, attributing every hit to an owning function: `DeviceIoControl` is referenced **once** per config tool and the owner is hidapi's `hid_get_feature_report`. The updaters do not import it at all. Seed 13 → 17, closure 32 → 38; **fw110 unchanged at 14** |
+| the `0x1978` literal count | 3a.1, 10.6 | Re-scanned and this time *partitioned*: 7 = 5 matcher call sites + 1 event-channel `hid_open` + 1 library coincidence. The unenumerated residue was the finding |
+
+| §2's *dynamic* slot table | 2 | Re-derived 2026-09-04 by the opposite route, which never looks for a `HidD_` string: start at the import table's `GetProcAddress` slot, find **every** occurrence of that slot address in `.text` in any encoding, attribute each to an owner, and inside each owner pair every `ff d?` indirect call with the preceding `push imm32` name and the following `a3` store. cfg107 yields exactly the same **11** names and slots `0x57f160`–`0x57f188`; cfg104 `0x57e160`–`0x57e188`; cfg101 `0x57f200`–`0x57f228`; cfg100 `0x5dcb74`–`0x5dcb9c` |
+| no updater resolves HID dynamically | 2 | Same route on fw110: 49 owners reference the `GetProcAddress` slot, 45 name/store pairs recovered, **none** a HID entry point. Corroborated independently: the HidD_/HidP_ **name strings present anywhere in the file** are 7 in each of fw110/107/106/104 and match the static import set exactly, so there is no name for a dynamic resolution to use |
 
 **Not re-derived, and still resting on their original derivation:**
 
-- §2's *dynamic* slot table (the eleven `GetProcAddress` names and their `.data`
-  addresses). The method and its blind spot are stated in §2; a second route
-  would be to walk the `GetProcAddress` call sites rather than the name strings.
-- Everything in §6's "not yet derived" list is not a claim at all.
+- Nothing. Everything in §6's "not yet derived" list is not a claim at all.
+
+> Two method notes worth keeping. First, an `ff 15 <slot>` scan for
+> `GetProcAddress` call sites finds **none** of the eleven: cfg107's resolver
+> loads the slot once (`0x4027e9 movl 0x52d250,%esi`) and calls `*%esi`
+> eleven times. A scan keyed on the call encoding rather than on the slot
+> address would have reported zero and looked thorough doing it. Second, the
+> `push imm32` name-recovery step is a heuristic; it recovered 45 pairs in
+> fw110 but **zero** in fw104 and the XM1r, which means it says nothing about
+> those two. Their negative rests on the name-string check, not on this.
 
 ### 8.1 Device access is serialised by a critical section  [D]
 
@@ -668,3 +744,150 @@ config tool *is* mostly application code, whereas the updater is mostly MFC.
 **What this does NOT settle**, and the §6 list stands unchanged: the record's
 field meanings, which control writes which offset, and what the 1024-byte `A0 11`
 payload contains beyond the ~0x73 bytes the host serialises. Those are LIST 3.
+
+## 10. The second HID collection — an input-report event channel [D]
+
+**Found 2026-09-04.** The device presents (at least) **two vendor HID
+collections on the same PID**, and every published note until now described
+only one of them.
+
+| collection | usage page | usage | how it is used |
+| --- | --- | --- | --- |
+| command | `0xFF01` | `0x02` | feature reports `0x411` / `0x40`, §1, §3a, §4 |
+| **event** | **`0xFF02`** | **`0x01`** | **8-byte input reports, report id `0x03`, polled** |
+
+Both are VID `0x3367`, PID `0x1978`. Nothing here touches the bootloader PID
+`0x1977`; §3a.1's conclusion is unaffected.
+
+### 10.1 The open — vendor-patched `hid_open` [D]
+
+`hid_open` is **not stock hidapi.** cfg107 `0x00402e70`, after matching VID at
+`+0x4` and PID at `+0x6` on each `hid_enumerate` entry, adds two comparisons
+that upstream hidapi does not have:
+
+```
+402eb5  movl  $0xff02, %ecx
+402eba  cmpw  %cx, 0x18(%esi)     ; usage_page must equal 0xFF02
+402ec0  cmpw  $0x1, 0x1a(%esi)    ; usage      must equal 0x01
+```
+
+cfg104 and cfg101 at `0x00402e80`; cfg100 at `0x00403ee0` (`0x403f20`,
+`0x403f26`), where the constant is reloaded into `%ecx` inside the loop, which
+is why cfg100 shows three `0xFF02` literals and the others one.
+
+`hid_open` has exactly **one caller in each binary** — the starter below — so
+this is the only thing hidapi's own open path is used for.
+
+### 10.2 The starter — `0x00412d00` (cfg107) [D]
+
+```
+412d19  movl  $0x412c40, 0x57f298     ; event callback pointer
+412d0d  pushl $0                      ; serial = NULL
+412d0f  pushl $0x1978                 ; PID
+412d14  pushl $0x3367                 ; VID
+412d23  calll 0x402e70                ; hid_open
+412d2b  movl  %eax, 0x580188          ; hid_device* global; NULL -> return 0xFF
+412d4e  movb  $0x1, 0x57f196          ; "channel running" flag
+412d45  pushl $0x412c60               ; thread proc
+412d55  calll 0x508697                ; _beginthreadex(NULL,0,proc,1,0,&tid)
+412d5d  movl  %eax, 0x58018c          ; thread handle; 0 -> clear flag, return 0x14
+412d75  calll *0x52d268               ; CloseHandle(thread)  -> return 5
+```
+
+Two callers: `0x413191` inside `0x412fb0`, and `0x413955` inside `0x413600` —
+the same two dialog functions that call the §3a matcher (`OnInitDialog` and the
+`WM_DEVICECHANGE` handler). cfg100's starter is `0x00414700`, callers
+`0x414c18` in `0x414a70` and `0x415360` in `0x414fe0`.
+
+### 10.3 The poll thread — `0x00412c60` (cfg107) [D]
+
+```
+412c7e  movb  $0x3, -0xc(%ebp)        ; buf[0] = report id 3, before the read
+loop:
+412c90  movl  0x580188, %eax          ; device; NULL -> exit thread
+412c99  movl  0x4(%eax), %ecx
+412c9c  negl %ecx ; sbbl %ecx,%ecx    ; -> 0 or -1, hidapi's blocking flag
+412ca8  calll 0x4031c0                ; hid_read_timeout(dev, buf, 8, ms)
+412cb3  cmpb  $0x3, -0xc(%ebp)        ; require buf[0] == 3
+412cbc  <buf[1] == 0x02 || 0x06 || 0xB4>
+412cde  calll *0x57f298               ; callback(&buf[1], &buf[2])
+412ce4  pushl $0x50 ; call *0x52d22c  ; Sleep(80 ms), repeat
+```
+
+`hid_read_timeout` (`0x004031c0`) is stock hidapi Windows: `ResetEvent`,
+`ReadFile` on the device handle with `OVERLAPPED`, `GetLastError` vs
+`ERROR_IO_PENDING` (`0x3E5`), `CancelIo` on failure. **Eight bytes requested,
+report id `0x03`, 80 ms between polls.**
+
+Same thread in cfg104 `0x004128f0`, cfg101 `0x004127e0`, cfg100 `0x00414660`.
+**One version-to-version difference:** cfg100 has **no `buf[0] == 3` check** —
+it dispatches on `buf[1]` whatever report arrived. cfg101 onward added the
+guard. Treat cfg100 as the buggy one.
+
+The thread procedure's address is taken exactly once in the whole file and
+never called, which is precisely why the HID-only closure did not contain it.
+
+### 10.4 What the events mean [D]
+
+The callback `0x00412c40` forwards to `0x004139e0`, which switches on `buf[1]`:
+
+**`buf[1] == 0x06` — profile / bank selection.** `buf[2]` is a **one-hot mask**;
+the switch at `0x413a8d` (jump table `0x413be4`, index byte table `0x413c04`,
+input `buf[2]-1` bounded to `0..0x3f`) maps it to a tab index, sends
+`TCM_SETCURSEL` (`0x14E`) to the tab control at `obj+0x13b8`, and stores the
+mask byte to globals `0x0057f216` and `0x0057f2a6`:
+
+| `buf[2]` | `0x40` | `0x20` | `0x10` | `0x08` | `0x04` | `0x02` | `0x01` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| tab index | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+
+Seven values, one-hot, no others: every other index in `1..0x40` maps to the
+default arm and is ignored.
+
+**`buf[1] == 0x02` — a four-way setting.** `0x0040f750` stores `buf[2]` to
+globals `0x0057f21a` / `0x0057f2aa`, bounds it to `0..3`, and drives four radio
+buttons (`BM_SETCHECK`, `0xF1`) at `obj+0xc8+0x13f4 / +0x1468 / +0x14dc /
++0x1550`, checking exactly the one selected.
+
+**`buf[1] == 0xB4` — formats `buf[2]` with `L"%d"`** (`0x5567b4`) into a local
+`CStringT` which is then released without being read. No other use found in the
+function. Recorded as observed; do not build on it.
+
+### 10.5 Why this matters to us
+
+1. **`EGGCore`'s enumerator must not stop at the first vendor collection.**
+   §3a's four-part predicate selects `0xFF01`/`0x02`. A device that also
+   presents `0xFF02`/`0x01` means matching on VID/PID plus *any* usage pair can
+   open the wrong one, in either direction.
+2. **The mouse pushes state at the host unprompted.** Any read-modify-write in
+   `EGGConfigCore` races a device-side change the user just made on the mouse
+   itself. The vendor's answer is to poll and update the UI; ours has to be to
+   re-read before writing, which §4.1 of `CLAUDE.md` already requires.
+3. **The flasher is unaffected.** No updater imports `DeviceIoControl`, none
+   contains a `0xFF02` literal, and neither updater closure changed.
+4. **`0x0057f2a0` is the base of a byte-for-byte shadow of the settings
+   record.** `0x00404830` copies `src[k]` to `0x57f2a0+k` for scattered `k`, so
+   `0x57f2a6` and `0x57f2aa` above are settings-record bytes **`0x06`** and
+   **`0x0a`**. That identifies two fields of the config blob for free and is the
+   thread to pull for the rest of it — LIST 3, not here.
+
+### 10.6 The residue that hid it
+
+§3a.1 counted seven `0x1978` immediates in cfg107 and named five. It never
+enumerated the other two. They are:
+
+| site | owner | what |
+| --- | --- | --- |
+| `0x4130ad` | `0x412fb0` | §3a matcher — OnInitDialog |
+| `0x413845` | `0x413600` | §3a matcher — `WM_DEVICECHANGE` |
+| `0x413edc` | `0x413ea0` | §3a matcher — APPLY |
+| `0x413f9e` | `0x413f90` (orphan) | §3a matcher — Factory Reset |
+| `0x414047` | `0x414010` | §3a matcher — sub-dialog live-apply |
+| **`0x412d10`** | **`0x412d00`** | **§10.2, the event channel — unaccounted for until now** |
+| `0x507853` | `0x507847` | library code, coincidental constant |
+
+`CLAUDE.md` §6 says to state coverage as a partition with the residue
+enumerated. Five of seven was stated as a fact and the two-function residue was
+not written down, so a whole device channel sat in plain sight for a day. This
+is the second time in this project that a correct count with an unenumerated
+remainder concealed the finding.

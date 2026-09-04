@@ -1352,7 +1352,7 @@ and — as importantly — **what has not**.
 | the enumerator's sole ownership of every HID/SetupAPI slot | 5.8 | exhaustive 4-byte slot scan attributing each hit to a function — 1 function per slot in both updaters |
 | send/recv wrapper call sites | 3.7a | raw `E8` scan: 7 sites each, resolving to the same 6 functions |
 | only resource 140 is reachable | 8.2 | the type string's address occurs **once in the whole file**, plus closure of the other three resource-API routes |
-| the device closure is 14 and 10, all in band | 9 | raw call edges (`closure.py`), replacing Ghidra's call graph |
+| the device closure is 14 and 10, all in band | 9 | raw call edges (`closure.py`), replacing Ghidra's call graph. Re-confirmed 2026-09-04 after the seed gained the kernel32 device-I/O route: **both updater closures are byte-for-byte the same set**, because no updater imports `DeviceIoControl` and every `ReadFile`/`WriteFile` in them belongs to the CRT or MFC |
 | every DARK byte belongs to a known function | 6.2.2 | per-function re-disassembly (`darkclass.py`) |
 | `0x5c69a8` is the device-path `CString` | 6.2.4 | read at `0x401000` and `0x401d20`–`0x401d36` |
 | the repair-loop defect (we deviate from it) | 5.6 | re-read `0x401c90`–`0x401e61`; the `-0x424` slot proven single-assignment by scanning the body for its displacement |
@@ -1873,8 +1873,16 @@ fw104's, 10 members, likewise all in band: `0x401bc0 0x401e30 0x401ed0 0x402a90
 >
 > The seed numbers survive this unchanged: 3, 3, 13, 13, 13, 13, 7.
 >
+> **Superseded 2026-09-04, later the same day.** Those seed numbers were
+> themselves an undercount for the config tools and the XM1r: the seed was
+> built from HID/SetupAPI slots only, and the vendor's hidapi reaches the
+> device through kernel32 on the device handle instead. Seeds are now
+> 3, 3, 17, 17, 17, 17, 8 and closures 14, 10, 38, 38, 38, 36, 31.
+> **The two updater rows are unchanged in both columns.** Full account and the
+> live read channel it was hiding: `config-protocol.md` §2.1 and §10.
+>
 > **(b) The config-tool closures were understated by 7–8 each.** Published as
-> 25/24/24/23; they are 32/32/32/30. Two causes, both now fixed: the closure was
+> 25/24/24/23; then 32/32/32/30; now 38/38/38/36 after the kernel32 route above. Two causes, both now fixed: the closure was
 > taken from Ghidra's incomplete call graph, and it counted only `call` edges
 > while the artifact recorded a separate, larger `call`+`jmp` figure (33 for
 > cfg107) that was never published. The prior artifact

@@ -32,7 +32,8 @@ most damage.
 | the transport retry set `0x15 0x17 0x1D 0x57 0x65B`, 4 attempts, 50 ms | updater 1.10 **and** cfg107 — shared | §2; `config-protocol.md` §1 |
 | block numbering and the `0x34` base | updater 1.10 | §3.8 |
 | the device-selection predicate | **cfg107** — the updater's enumerator is a different function | `config-protocol.md` §3a |
-| that exactly **14** functions can reach the device | **updater 1.10** (raw call edges; 1.04's closure is 10, cfg107's is 32) | §9 |
+| that exactly **14** functions can reach the device | **updater 1.10** (raw call edges; 1.04's closure is 10, cfg107's is 38) | §9 |
+| that the device presents a **second** vendor collection, `0xFF02`/`0x01`, carrying 8-byte input reports | **cfg100/101/104/107** — no updater touches it | `config-protocol.md` §10 |
 | that the config tools cannot flash (no `FWFILE` resource in any of the four) | cfg100/101/104/107 | §6.2.1 |
 
 **What we do not know, and must not invent**, is in §6 "Not yet derived" and §5
@@ -60,6 +61,14 @@ out of the several a gaming mouse presents; **matching VID/PID alone opens the
 wrong interface**, and on macOS `IOHIDManager` will happily hand us that wrong
 interface. This is the single most likely way to send a correct frame to the
 wrong endpoint.
+
+**And this is not hypothetical.** `config-protocol.md` §10: the same VID/PID
+carries a *second* vendor collection, `UsagePage 0xFF02` / `Usage 0x01`, which
+the config tool opens separately and polls for 8-byte input reports. Two vendor
+collections on one PID means an enumerator that stops at the first VID/PID
+match has a coin-flip, not a bug it will notice. `EGGCore` must require all
+four fields and must **fail loudly if more than one interface matches**, rather
+than taking the first.
 
 ### 1.1 The busy convention is a parameter, not a constant
 
