@@ -22,7 +22,11 @@ Method
    instruction. Every candidate is therefore kept with the evidence that decides
    it, and callers choose the filter (see `classify` below). No candidate is
    silently discarded.
-4. Attribute each site to the function whose exported body range contains it.
+4. Attribute each site to the function whose exported body range contains it,
+   or, where no exported body does, to the orphan unit that does (see
+   `orphan_units`) -- the exported function list does not cover the whole code
+   section, so an attribution scheme that only knows about exported bodies
+   silently drops call sites.
 5. Emit the forward map (site -> target) and the reverse map (target -> sites).
 
 The function boundaries are the only thing taken from the export, and they are
@@ -177,6 +181,38 @@ def load_functions(tag):
     return ents, ivals, exported
 
 
+def orphan_units(pe, ivals):
+    """Maximal runs of code-section bytes that lie outside every exported
+    function body and are not 0xCC.
+
+    They exist because the exported function list does not cover the whole code
+    section. Splitting on 0xCC is a structural rule, not a judgement about what
+    the runs contain: it is where the compiler's inter-function padding is, and
+    nothing here asserts that a run is code, is data, or is one function.
+    """
+    out = []
+    for s in code_sections(pe):
+        lo = pe.image_base + s["vaddr"]
+        n = s["rsize"]
+        raw = pe.buf[s["rptr"]:s["rptr"] + n]
+        cov = bytearray(n)
+        for a, b, _e in ivals:
+            if lo <= a < lo + n:
+                for x in range(a, min(b + 1, lo + n)):
+                    cov[x - lo] = 1
+        i = 0
+        while i < n:
+            if cov[i] or raw[i] == 0xCC:
+                i += 1
+                continue
+            j = i
+            while j < n and not cov[j] and raw[j] != 0xCC:
+                j += 1
+            out.append((lo + i, lo + j - 1))
+            i = j
+    return out
+
+
 def owner_lookup(ivals):
     import bisect
     los = [x[0] for x in ivals]
@@ -230,7 +266,10 @@ def main():
     path = os.path.join(ROOT, TAGS[tag])
     pe = PE(path)
     ents, ivals, exported = load_functions(tag)
-    own = owner_lookup(ivals)
+    orphans = orphan_units(pe, ivals)
+    oivals = ivals + [(a, b, a) for a, b in orphans]
+    oivals.sort()
+    own = owner_lookup(oivals)
     cands = classify(scan(pe), ents, own)
     imports = pe.imports()
 
@@ -268,6 +307,9 @@ def main():
                        vsize=s["vsize"], rsize=s["rsize"], chars=hex(s["chars"]))
                   for s in pe.sections],
         n_functions=len(ents),
+        n_orphan_units=len(orphans),
+        orphan_bytes=sum(b - a + 1 for a, b in orphans),
+        orphan_units=[[hex(a), hex(b)] for a, b in orphans],
         n_candidates=len(cands),
         n_rel32=sum(1 for c in cands if c["enc"] == "rel32"),
         n_rel32_to_entry=sum(1 for c in cands if c["enc"] == "rel32" and c["target_is_entry"]),
