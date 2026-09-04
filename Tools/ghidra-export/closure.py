@@ -176,6 +176,31 @@ def analyse(tag, edir):
             "in_band": (sum(1 for a in clo if b[0] <= int(a, 16) <= b[1]) if b else None)}
 
 
+# A planted positive, per CLAUDE.md 6.2: a harness that cannot produce a bad
+# result is not evidence. These are the functions that caused the retracted
+# factory-reset conclusion -- 0x413f90 is the Factory Reset button's handler and
+# 0x404720 is the A1 13 sender it calls. NEITHER EXISTS IN GHIDRA'S EXPORT
+# (0x413f90 is reachable only through an MFC message map, so no function node was
+# ever created and 0x404720's exported `callers` field is empty). Any closure
+# method built on that export misses both and concludes, wrongly, that the config
+# tool has no factory reset. This method finds them by attributing call sites to
+# orphan units, so if it ever stops finding them the method has regressed to the
+# one that was wrong.
+SELFTEST = {"cfg107": ["0x413f90", "0x404720", "0x4035f0"]}
+
+
+def selftest(out):
+    bad = []
+    for tag, musts in SELFTEST.items():
+        if tag not in out:
+            continue
+        have = set(out[tag]["closure"])
+        for m in musts:
+            if m not in have:
+                bad.append(f"{tag}: {m} missing from closure")
+    return bad
+
+
 def main():
     edir = (sys.argv[sys.argv.index("--edges") + 1] if "--edges" in sys.argv
             else os.path.join(ROOT, ".analysis", "edges"))
@@ -196,6 +221,15 @@ def main():
         if r["n_hid_thunks"]:
             print("        HID/SetupAPI thunks %d, calls into them %d"
                   % (r["n_hid_thunks"], len(r["calls_into_thunk"])))
+    bad = selftest(out)
+    if bad:
+        print("\nSELFTEST FAILED -- this method has regressed to the one that was wrong:")
+        for b in bad:
+            print("   ", b)
+        sys.exit(1)
+    print("selftest: cfg107 closure contains the message-map-only Factory Reset "
+          "handler 0x413f90 and its A1 13 sender 0x404720 (both absent from "
+          "Ghidra's export) -- OK")
     p = os.path.join(ROOT, ".analysis", "device_closure_rawedges.json")
     json.dump(out, open(p, "w"), indent=1)
     print("->", p)

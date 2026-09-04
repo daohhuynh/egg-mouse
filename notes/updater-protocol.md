@@ -1218,6 +1218,25 @@ done
 Member lists — not just counts — go to `.analysis/device_closure_rawedges.json`,
 so every number in this section is auditable rather than merely asserted.
 
+**The method carries a planted positive** (`CLAUDE.md` §6.2 — a harness that
+cannot produce a bad result is not evidence). `closure.py` asserts that cfg107's
+closure contains `0x413f90` and `0x404720`, and exits non-zero if it does not.
+Those two are the functions behind the retracted factory-reset conclusion:
+`0x413f90` is the Factory Reset button's handler, `0x404720` is the `A1 13`
+sender it calls at `0x413faf`, and **neither exists in Ghidra's export at all** —
+`0x413f90` is reachable only through an MFC message map, so no function node was
+ever created for it and `0x404720`'s exported `callers` field is empty. A closure
+built on that export misses both and concludes the config tool has no factory
+reset, which is exactly the error that was made. The raw-edge method finds both,
+by attributing call sites to orphan units. Verified both ways: the check passes
+on the real data and fails when a member is removed.
+
+This also bounds the blast radius of the export's message-map hole. The known
+message-map-only functions in cfg107 are `0x413f90 0x4110a0 0x4111e0 0x411320
+0x411460 0x411e40 0x411e60 0x412000`; the first five are in the closure and the
+last three are not, because they do not reach the device — not because they were
+missed.
+
 **Results.**
 
 | binary | functions | seed | closure | closure span |
