@@ -354,6 +354,45 @@ checksums; it does not require the vendor's bug. Reproduce the *commands*
 exactly and the *verification* correctly. This is also a concrete reason not to
 treat the vendor tool as the reference for correctness, only for protocol.
 
+## 5.7 Cross-version confirmation: code base B agrees with code base A
+
+Updater 1.04 is a separately compiled program — different toolchain, 1,459 KiB
+of `.text` against 1,127 KiB, 10,763 functions against 9,076, built 14 months
+earlier — and its vendor code sits at completely different addresses. It is
+therefore an independent check on every constant above, and it agrees on all of
+them [D].
+
+| Fact | code base A (1.06/1.07/1.10) | code base B (1.04) |
+| --- | --- | --- |
+| Vendor ID `0x3367` | `0x4010fa` | `0x401ca2` |
+| Usage page `0xFF01` | `0x401137` | `0x401cdd` |
+| PID `0x1978` application | `0x403603` … | `0x4045b6` … |
+| PID `0x1977` bootloader | `0x4036c4` … | `0x404686` … |
+| `FWFILE` name `0x8c` | `0x00403200` | `0x00404330` |
+| enter bootloader `A1 3A` + `5A A5 32` | `0x00403750` | `0x00404760` |
+| start `A0 03`, `Sleep(3000)` | `0x4018e9` | `0x4049xx` (inlined) |
+| checksum at start cmd `buf[17..20]` | `0x4018ce`–`0x40190f` | `0x404a34`–`0x404a4e` |
+| write block `A0 06` | `0x4019d5` | `movw $0x6a0` |
+| read block `A0 07` | `0x401b0b` | `movw $0x7a0` |
+| checksum query `A1 08`, `buf[2]=0x34` | `0x401be5`, `0x401beb` | `0x404c68`, `0x404c73` |
+| complete `A1 09` | `0x00403960` | `movl $0x9a1` |
+| post-success `A1 13` | `0x00403960` | `movl $0x13a1` |
+| **block base `+0x34`** | `0x403a8b`, `0x403aff` | `0x404b82`, `0x404bd2` |
+| **checksum end `+0x33`** | `0x403b72` | `0x404c5d` |
+| write retries: 5, `Sleep(200)` | `0x403aae` | `0x404bac` |
+| per-block pacing `Sleep(90)`, stride `0x400` | `0x403b43`, `0x403b47` | `0x404c11`, `0x404c25` |
+| progress `(100*i)/count + 2` | `0x403b1e` | `0x404bed` |
+
+Two independently compiled builds agreeing byte for byte on the command set,
+the block base and every retry bound is the strongest confirmation static
+analysis alone can produce. It does not make any of it `[O]`.
+
+**Where B differs from A:** 1.04 inlines the "bldr start" and per-block
+sequences into its flash driver (`FUN_00404980`, 1728 bytes) instead of calling
+out to small builders, and its dialog member offsets differ (`+0x25c` block
+count, `+0x25a60` checksum, `+0x25a7c` resource cursor, versus A's `+0x21c`,
+`+0x25a20`, `+0x25a3c`). Those are layout, not protocol.
+
 ## 6. Not yet derived — do not guess
 
 Resolved since the first draft, by disassembly: the register-passed arguments of
