@@ -21,6 +21,12 @@ so they resurface looking like established fact. Regenerate; do not quote.
 
 Evidence sets, weakest last:
   R  read        - an agent or a human actually read the body
+  S  settled     - microread.py tiled the body exactly and matched a template
+                   whose semantics are total (added 2026-09-04). This is the
+                   STRONGEST set here: no judgement is involved. It was missing,
+                   which made cfg107 report 877 unaccounted functions that were
+                   in fact settled from their bytes, and made this tool disagree
+                   with readpartition.py for no reason.
   M  byte match  - normalised body occurs in another product's binary (see
                    classify.py, whose premise is an assumption, not a proof)
   N  Ghidra FID  - named by Ghidra's FunctionID signature database, ALONE
@@ -113,16 +119,25 @@ def main():
     refs = used
 
     R = readset(tag) & ALL
+    mp = os.path.join(AN, f"microread_{tag}.json")
+    if os.path.exists(mp):
+        S = {int(k, 16) for k in json.load(open(mp))["settled"]} & ALL
+    else:
+        print(f"  (no microread_{tag}.json -- run microread.py {tag}; "
+              f"until then S is empty and the residue is overstated)")
+        S = set()
+
     M = {a for a, r in byadr.items() if bodyhash(r) in lib}
     N = {a for a, r in byadr.items() if not r['name'].startswith('FUN_')}
 
-    acc  = R | M | N
+    acc  = R | S | M | N
     resid = ALL - acc
     print(f"\n{tag}: {len(ALL)} functions;  refs actually used: {','.join(refs)}")
     print(f"  R read ................. {len(R)}")
+    print(f"  S microread settled .... {len(S)}")
     print(f"  M cross-binary match ... {len(M)}")
     print(f"  N Ghidra FID name ...... {len(N)}")
-    print(f"  accounted (R|M|N) ...... {len(acc)}")
+    print(f"  accounted (R|S|M|N) .... {len(acc)}")
     print(f"  UNACCOUNTED ............ {len(resid)}")
 
     # SCOPE. Everything above partitions GHIDRA'S FUNCTION LIST, not the binary.
@@ -148,7 +163,7 @@ def main():
     print( "         A residue of 0 here means the LIST is accounted for. It is")
     print( "         not a claim about the binary. See CLAUDE.md 6 and 1.2b.")
 
-    weak = N - M - R
+    weak = N - M - R - S
     big  = sorted(a for a in weak if byadr[a]['size'] >= 32)
     print(f"\n  resting on Ghidra's name ALONE ... {len(weak)}"
           f"  (>=32 bytes: {len(big)})")
