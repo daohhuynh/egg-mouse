@@ -49,21 +49,6 @@ Normalisation, so the same library function in two builds hashes the same:
   * NOTE: an earlier version of this docstring claimed .reloc sites are masked.
     They are not. No .reloc parsing happens here. Claim removed rather than
     implemented, because the E8/E9 + VA masking is what was actually validated.
-"""Positively identify statically-linked library code by cross-binary presence.
-
-The updaters and the configuration tools are different programs by the same
-vendor, statically linked against the same MFC and MSVC CRT. So a function body
-that occurs in BOTH an updater and a configuration tool is library code: the
-vendor's own updater code is not in the config tool and vice versa.
-
-This is positive identification, not an address-locality heuristic, and it is
-one-directional: a match proves library, a non-match proves nothing and leaves
-the function in the candidate set to be read.
-
-Normalisation, so the same library function in two builds hashes the same:
-  * every 4-byte immediate inside the image's VA range is masked
-  * the rel32 operand of E8/E9 is masked
-  * relocation sites recorded in .reloc are masked
 """
 import json, sys, os, struct, hashlib, collections
 
@@ -102,10 +87,23 @@ def sigs(tag):
 def main():
     fw = sys.argv[1]
     cfgs = sys.argv[2:]
+    if not cfgs:
+        sys.exit("usage: classify.py <target-tag> <reference-tag>...")
     a = sigs(fw)
     lib = set()
     for c in cfgs:
-        lib |= set(sigs(c))
+        cs = sigs(c)
+        # A reference that shares nearly every body with the target is the same
+        # code, not an independent witness: it self-matches and inflates the
+        # library count while proving nothing. fw106/fw107 have .text
+        # byte-identical to fw110 and are exactly this case. coverage.py refuses
+        # it for the same reason; refusing it here too keeps the rule mechanical
+        # rather than something a reader has to remember.
+        share = len(set(cs) & set(a)) / max(1, len(a))
+        if share > 0.90:
+            sys.exit(f"REFUSED: reference '{c}' shares {share:.1%} of '{fw}' bodies. "
+                     f"That is the same code base, not an independent witness.")
+        lib |= set(cs)
     recs = [json.loads(l) for l in open(os.path.join(EXP, f"{fw}.jsonl"))]
     by = {r['entry']: r for r in recs}
     matched = set()
@@ -122,5 +120,14 @@ def main():
         json.dump(sorted(r['entry'] for r in un_left), f)
     lo = [r for r in un_left if int(r['entry'],16) < 0x410000]
     print(f"  of those, below 0x410000: {len(lo)}")
+    # State the partition, not a headline number: CLAUDE.md 6 requires the cells
+    # to sum to the total in one place, so a scope slip cannot hide in prose.
+    tiny = [r for r in un_left if r['size'] < 16]
+    sub  = [r for r in un_left if r['size'] >= 16]
+    print(f"  PARTITION: {len(tiny)} under 16 bytes + {len(sub)} substantive "
+          f"= {len(tiny)+len(sub)} (must equal {len(un_left)})")
+    assert len(tiny) + len(sub) == len(un_left)
+    print(f"  reference set: {' '.join(cfgs)}")
 
-main()
+if __name__ == "__main__":
+    main()

@@ -827,10 +827,22 @@ rather than something to paper over.
 `CLAUDE.md` §6 forbids silent sampling, so here are the numbers.
 
 ### Candidate sets
-| binary | functions | named by Ghidra | unnamed `FUN_` | positively library¹ | left as candidates |
+
+**Regenerated 2026-09-04. Do not quote these; re-run the command.**
+
+```
+.analysis/venv/bin/python Tools/ghidra-export/classify.py <tag> cfg100 cfg101 cfg104 cfg107
+```
+
+Reference set is all four config tools and nothing else. Adding `fw104` or
+`xm1r` changes nothing for 1.10; adding `fw106`/`fw107` is **forbidden** — their
+`.text` is byte-identical to 1.10, so they self-match and inflate the library
+count from 881 to 969 while proving nothing (`coverage.py` refuses this case).
+
+| binary | functions | named by Ghidra | unnamed `FUN_` | positively library¹ | candidates |
 | --- | --- | --- | --- | --- | --- |
-| 1.10 (= 1.07 = 1.06) | 9,076 | 7,388 | 1,688 | 921 | **767** |
-| 1.04 | 10,763 | 4,043 | 6,720 | 2,873 | **3,847** |
+| 1.10 (= 1.07 = 1.06) | 9,076 | 7,388 | 1,688 | 881 | **807** |
+| 1.04 | 10,763 | 4,043 | 6,720 | 2,831 | **3,889** |
 
 ¹ by `Tools/ghidra-export/classify.py`: a normalised function body that also
 occurs in a program with different vendor code is MFC/CRT. One-directional — a
@@ -842,16 +854,61 @@ normalised bodies, and `{1.04, cfg 1.00}` share 3,686, while across the families
 the overlap collapses to ~100. 1.04 therefore has only one useful reference
 binary instead of four.
 
-Of 1.10's 767 candidates, **703 are under 16 bytes** (thunks and stubs; the
-classifier deliberately does not hash bodies that small because they collide)
-and only **64 are substantive**. Of 1.04's 3,847, 743 are tiny and 3,104 are
-substantive.
+**The candidate set as a partition** — every candidate lands in exactly one cell,
+and the cells sum to the total, which is the form `CLAUDE.md` §6 requires:
+
+| | 1.10 | 1.04 |
+| --- | --- | --- |
+| under 16 bytes (thunks/stubs; classifier declines to hash them) | 719 | 761 |
+| substantive, **inside** the vendor band | 24 | 24 |
+| substantive, **outside** the vendor band | 64 | 3,104 |
+| **total candidates** | **807** | **3,889** |
+
+> **CORRECTION (2026-09-04).** This section previously gave 921/767 for 1.10 and
+> 2,873/3,847 for 1.04, with "703 tiny, 64 substantive" and "743 tiny, 3,104
+> substantive". **The totals were unreproducible.** Neither the current
+> `classify.py` nor its pre-break revision produces them under any legitimate
+> reference set. The reproducible values are the ones tabled above.
+>
+> Cause, now fully accounted for: **64 and 3,104 were right but mislabelled.**
+> They are the *outside-the-band* substantive counts, not the substantive totals
+> (88 and 3,128). The totals were then back-solved so that
+> `tiny + substantive = total` would hold — 767 = 703 + 64 — which is how a
+> 40-function discrepancy got absorbed into prose instead of being resolved.
+> Every figure above is now regenerated and the partition closes exactly.
+>
+> **Two process failures made this survive.** First, the numbers were written
+> into prose and thereafter quoted rather than recomputed — the exact hazard
+> §6 names. Second, the commit that wrote them (`3602d95`, "Resolve the
+> 40-function gap and validate `classify.py` before relying on it") **left
+> `classify.py` with a syntax error**: a corrected docstring was pasted above
+> the stale one and the two collided, so the file has not parsed since. The
+> commit that claimed to validate the tool is the commit that made it
+> unrunnable, and the numbers it reported could not be re-derived by anyone who
+> tried. Repaired in the same change as this correction; the stale docstring,
+> which still asserted `.reloc` masking that the file does not do, is deleted.
+
+**The consequence that matters** is that 1.10 has **88** substantive candidates,
+not 64, and 1.04 has **3,128**, not 3,104 — 24 more each, all inside the vendor
+band and all already read and documented in this file. So no function was
+actually unread because of this. The error was in the accounting, not the
+coverage, but an accounting error that understates the read-set is the kind that
+would hide a real gap next time, which is why it is written up rather than
+quietly patched.
 
 ### The vendor band
-1.10's vendor code occupies `[0x00401000, 0x004040ad)` — **95 functions**, the
-first objects the linker emitted, ending exactly where `AfxSetNewHandler` and
-the MFC/ATL/CRT bodies begin. 1.04's occupies `[0x00401bc0, 0x00405200)` —
-**89 unnamed functions**, interleaved with ATL template instantiations.
+1.10's vendor code occupies `[0x00401000, 0x004040ad)`, the first objects the
+linker emitted, ending exactly where `AfxSetNewHandler` and the MFC/ATL/CRT
+bodies begin. 1.04's occupies `[0x00401bc0, 0x00405200)`, interleaved with ATL
+template instantiations. Stated on one basis for both, since the two were
+previously quoted on different ones (1.10 as a total, 1.04 as unnamed-only):
+
+| band contents | 1.10 | 1.04 |
+| --- | --- | --- |
+| functions, total | 95 | 94 |
+| of those, named by Ghidra | 4 | 5 |
+| of those, unnamed `FUN_` | 91 | 89 |
+| of those, body ≥ 16 bytes | 79 | 76 |
 
 The band was **not** assumed from address locality. It was fixed from confirmed
 vendor anchors (the HID enumerator, the two feature-report wrappers, the

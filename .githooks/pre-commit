@@ -1,0 +1,18 @@
+#!/bin/sh
+# Refuse a commit that leaves an analysis tool unparseable.
+#
+# Why this exists: commit 3602d95, titled "validate classify.py before relying
+# on it", committed classify.py with a syntax error (a corrected docstring
+# pasted above the stale one, delimiters colliding). It did not parse for a
+# day. Numbers derived from it went into notes/ and were then quoted rather
+# than regenerated, and nobody could re-run the tool to check them.
+# CLAUDE.md 6 says regenerate numbers, never quote them -- which is impossible
+# if the generator is broken. This makes that failure loud at commit time.
+set -e
+fail=0
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true); do
+  [ -f "$f" ] || continue
+  python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" || {
+    echo "pre-commit: $f does not parse" >&2; fail=1; }
+done
+exit $fail
