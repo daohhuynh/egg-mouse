@@ -62,10 +62,21 @@ def truth(fn):
     return calls, imps, jmps
 
 
+# Readers report the address in whatever shape the field description suggested.
+# The xm1r prompt's example was written as `calll *0x66f534`, and readers copied
+# the whole instruction, which made 257 functions "disagree" when every one of
+# them had the right address. Pull the last hex literal out of whatever arrived
+# rather than scoring the packaging.
+ADDR = re.compile(r'(-?0x[0-9a-fA-F]+)')
+
+
 def norm(xs):
     out = set()
     for x in xs or []:
         x = str(x).strip().lower().lstrip('*')
+        m = ADDR.findall(x)
+        if m:
+            x = m[-1]
         if x.startswith('0x'):
             try:
                 out.add(hex(int(x, 16)))
@@ -85,7 +96,12 @@ def main():
     # so the allowance is visible rather than silent.
     byid = {}
     for name in sorted(os.listdir(batchdir)):
-        if not name.startswith("batch_"):
+        # Agents write scratch files into the batch directory -- read6 gained
+        # ann.py, out.json, calls_033.json and, fatally for a prefix-only test,
+        # batch_000.txt. Require the exact shape the generator emits. (No batch
+        # input was ever overwritten: every batch_*.json in all four directories
+        # shares a single mtime, the generator's.)
+        if not re.fullmatch(r"batch_\d{3}\.json", name):
             continue
         for fn in json.load(open(os.path.join(batchdir, name))):
             byid.setdefault(fn["id"].lower(), []).append(fn)
