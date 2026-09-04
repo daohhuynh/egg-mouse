@@ -43,3 +43,7 @@ compile_commands.json
 # Analysis working directory: Ghidra logs, resource dumps of vendor firmware,
 # exported decompilation. Scripts live in Tools/; this holds only their output.
 .analysis/
+
+# Python bytecode
+__pycache__/
+*.pyc

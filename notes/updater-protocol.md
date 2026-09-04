@@ -881,3 +881,152 @@ otherwise separated. `[G]` as to mechanism.
 - Roughly 30 KiB of the 65 KiB is content and 35 KiB is filler, but the updater
   sends **all 65** blocks and the device's whole-image checksum covers all 65
   (§3.5). Do not "optimise" by skipping the filler.
+
+## 8. The `FWFILE` resources — census, selection, and what is actually sent
+
+Work-plan item 5. The question this had to settle: **which blob reaches the
+mouse, is it transformed on the way, and what happens when Endgame changes the
+set.** Method is `Tools/ghidra-export/rsrc.py`, which walks the PE resource
+directory and reports type/name/lang/RVA/size/SHA-256/entropy for every leaf. It
+ranks and filters nothing (CLAUDE.md §7.1).
+
+### 8.1 Census across the four updaters  [D]
+
+Every `FWFILE` in every version is **exactly 66560 bytes** = `0x10400` =
+65 × 1024, at Shannon entropy 7.94–7.95.
+
+| name | 1.04 | 1.06 | 1.07 | 1.10 |
+|---|---|---|---|---|
+| 133 | `09ba5297…` | `09ba5297…` | `09ba5297…` | `09ba5297…` |
+| 135 | `4fb2c174…` | `4fb2c174…` | `4fb2c174…` | `4fb2c174…` |
+| 137 | `9cf31ca8…` | `9cf31ca8…` | `9cf31ca8…` | `9cf31ca8…` |
+| 140 | `41d5397e…` | `9f01d732…` | `3922b141…` | `8148ebe9…` |
+| 142 | `b09b0ac0…` | `defb2243…` | `05c051d9…` | `42660cc0…` |
+| 143 | — | — | — | `13c13a62…` |
+
+- **133, 135, 137 are byte-identical across all four releases.** Frozen.
+- **140 and 142 both change in every release.** Two blobs track the version.
+- **143 exists only in 1.10** — the same build whose CodeView PDB path names an
+  **EL1 8k** project (§0.1.1).
+
+### 8.2 Only resource 140 is reachable  [D]
+
+The `FWFILE` type string is UTF-16 in `.rdata`. An exhaustive `.text` scan finds
+**exactly one reference to it in each of the four binaries** — therefore exactly
+one `FindResourceW` call site, therefore exactly one resource name can ever be
+requested.
+
+| | string VA | ref site | pushed name |
+|---|---|---|---|
+| 1.04 | `0x5a1cd8` | `0x40433a` | `pushl $0x8c` @ `0x40433e` |
+| 1.06 | `0x5447c0` | `0x403208` | `pushl $0x8c` @ `0x40320c` |
+| 1.07 | `0x5447c0` | `0x403208` | `pushl $0x8c` @ `0x40320c` |
+| 1.10 | `0x5447c0` | `0x403208` | `pushl $0x8c` @ `0x40320c` |
+
+`0x8c` = **140**, a compile-time immediate in all four. In 1.10:
+```
+403207: pushl $0x5447c0        ; lpType  = L"FWFILE"
+40320c: pushl $0x8c            ; lpName  = MAKEINTRESOURCE(140)
+403211: pushl $0x0             ; hModule = NULL
+403213: calll *0x51b230        ; KERNEL32!FindResourceW
+```
+
+**So 133, 135, 137, 142 and 143 are dead resources.** No code path in any of the
+four binaries can load them. This satisfies CLAUDE.md §1.4 by derivation rather
+than by assumption — and note it had to be *derived*: that 142 changes in
+lockstep with 140 is exactly the pattern that would tempt a reader into
+"the updater must use both".
+
+Why dead blobs ship at all is **[G]** and stays [G]. What matters is the shape of
+the risk: a build carrying five unreachable firmware images, one of which
+(143) appeared in the same release that was linked from another product's
+project, is a build where "which resource is the OP1 image" is a property of
+*this* binary and not a law. Our gate must therefore check the resource set, not
+just `.text` identity — 1.10's `.text` is byte-identical to 1.06/1.07, so a
+code-only gate would have accepted 1.10 without ever noticing the new blob.
+
+### 8.3 The load path does not transform the image  [D]
+
+```
+40323a  SizeofResource                 -> size
+403242  shrl $0xa                      -> chunk count  = size >> 10  -> obj+0x21c
+40324b  shll $0xa ; subl               -> remainder    = size & 1023 -> edi
+403258  LoadResource
+40327b  LockResource                   -> src pointer  -> obj+0x25a3c
+403295  movl $0x1, %ebx                -> COPY STRIDE = 1
+4032a6  memset(dst, 0, 0x400)          per chunk, dst base = obj+0x220
+4032c0..403313  byte copy, 4x unrolled, 0x400 bytes per chunk
+403323  loop while chunk < obj+0x21c
+403332..403386  the `remainder` tail path
+```
+
+For a 66560-byte resource the chunk count is **65** and the remainder is **0**,
+so the tail path at `0x403336`–`0x403386` never executes.
+
+The copy is `movzbl (src)` / `movb` with `ebx = 1`. **It is a verbatim
+byte-for-byte copy. There is no decryption, no unpacking, no transformation of
+any kind** between the resource and the buffer at `obj+0x220`. [D]
+
+That single fact retires the whole question of the blob's cipher: the host never
+needs to understand it. **Our flasher extracts resource 140 and ships those bytes
+unmodified**, exactly as the vendor's tool does.
+
+### 8.4 The checksum is computed by the host over the image  [D]
+
+`0x403580`, called at `0x40338e` immediately after the load, result stored to
+`obj+0x25a20`:
+```
+4035b0..4035d6   four accumulators, bytes summed 4 at a time, 0x400 per chunk
+4035d8..4035df   the four partial sums are added together
+4035e2           dst += 0x400 ; decl chunk counter ; loop
+4035ed           return the 32-bit sum
+```
+A **plain 32-bit additive sum of every byte of the image**. Not a CRC, not a hash.
+
+This is the code behind the posture in CLAUDE.md §2. The host computes the
+checksum from the same bytes it is about to send, so any device-side comparison
+can only ever establish **received == sent**. A wrong-but-well-formed image
+produces a perfectly matching checksum. Nothing downstream of us catches it.
+
+### 8.5 Structure of the blob itself  [D] for the observations, [G] for the cause
+
+65 chunks of 1024. Per-chunk SHA-256 over each version gives **31 distinct chunks
+of 65** in every release, because:
+
+- **chunks 29–63 are one chunk repeated 35 times**, contiguous, and
+- **that repeated chunk is byte-identical in 1.04, 1.06, 1.07 and 1.10**
+  (`cefe77fb6c23f0d4…`).
+
+So a constant plaintext region — almost certainly erased flash — encrypts to the
+same ciphertext in every release, which means **the key is unchanged across the
+product's entire release history 1.04 → 1.10**. [D]
+
+The image is therefore ~29 KiB of content (chunks 0–28) plus a distinct final
+chunk 64, inside a 64 KiB + 1 KiB container.
+
+What is ruled out about the cipher, from the data alone:
+- **not a fixed-keystream XOR** — XORing any content chunk against the padding
+  chunk yields ~4 zero bytes per 1024 (chance), never a run;
+- **not ECB with a ≤512-byte block** — the padding chunk has no internal
+  repetition at 8/16/32/64/128/256/512;
+- **not chained across chunks** — 1.04→1.06 changes only chunks 8, 27, 28, 64
+  and leaves 9–26 identical.
+
+What is observed but not explained: within each changed chunk, ~99.6% of bytes
+differ, i.e. a localized plaintext edit rewrites its whole 1024-byte chunk.
+
+**The cipher is not identified and is deliberately not guessed.** Per §8.3 it
+does not need to be: the host never decrypts. Recording it here as a bounded
+unknown rather than an open question that looks like a task.
+
+### 8.6 Consequences for the ingest design
+
+1. Extract `FWFILE`/**140** only. The name stays a hardcoded constant (§1.4).
+2. Ship those bytes **verbatim**. Never transform, re-checksum, or "normalise".
+3. Expect exactly 66560 bytes = 65 × 1024, remainder 0. A resource whose size is
+   not an exact multiple of 1024 exercises a vendor path that has never run in
+   any shipped version; refuse it rather than emulate it.
+4. Gate on the **resource-set fingerprint**, not only on `.text` identity, and
+   refuse an updater whose set does not match one we have read.
+5. Treat the additive checksum as a transport integrity check only. It is not
+   evidence that the image is the right image.
