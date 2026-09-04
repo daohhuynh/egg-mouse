@@ -1022,6 +1022,65 @@ calls the type is convention, and nothing downstream depends on the name.
 **Nothing in the range touches HID or SetupAPI**, by the exhaustive slot scan of
 §6.2.3.
 
+### 6.2.5a Wave 2 — the other 4,343 bodies, and what reading them settled [D]
+
+The 474 of §6.2.5 were the bodies unique to fw110. The remaining **4,343**
+distinct bodies each appear byte-identically in at least one other binary, which
+is what `classify.py` calls library code. `CLAUDE.md` §6.1 as amended says a
+match is **no longer an alternative to reading it**, on the grounds that reading
+the matched set is the only empirical check on that classifier's premise. So
+they were read too — 64 batches, all 64 returned.
+
+| check | result |
+|---|---|
+| functions reported vs. sent | 4,343 / 4,343 |
+| invented function ids | **0** |
+| call targets not present in the body | **4 of 17,522** (0.023%) |
+| import slots not present in the body | **1 of 3,727** |
+
+The readers were asked a different question this time — not "does this touch the
+device" (§6.2.5 showed that was unanswerable from the input) but **"does this
+read as application code written for one product, or as general-purpose framework
+code?"**, judged on the instructions rather than on the `also_in` list they were
+shown.
+
+**Result: 1 of 4,343 flagged as vendor-specific, at low confidence, and it is a
+false positive.** `0x0049d694` is `GetMDITabsContextMenuAllowedItems` — MFC's
+`CMDIFrameWndEx`, present in cfg104 and cfg107 as well, building a bit-mask of
+which context-menu items are allowed on MDI tabs. It reads as application policy
+because it *is* policy; it is just MFC's, not Endgame's.
+
+**And the category distribution contains no `device-io` at all**: mfc-atl 2,043,
+windows-ui 1,466, string-or-container 236, c-runtime 219, cpp-runtime-eh 88,
+math 85, file-io 64, thread 42, allocator 35, registry 33, unclear 32.
+
+So the amended §6.1's empirical check has been carried out and `classify.py`'s
+premise survived it: **4,343 bodies it called library, read, and none of them is
+vendor code.** Together with §6.2.6 — none of the 14 device functions matches
+anything elsewhere — the classifier is now bounded from both sides.
+
+### 6.2.5b Updater 1.10 is read — the partition [D]
+
+`CLAUDE.md` §6.1 requires every one of 1.10's functions to end in a known state,
+and §6 requires it stated as a partition computed in one place:
+
+```
+total sized functions .......................... 9076
+  settled mechanically (microread.py) .......... 3844
+  required a reader ............................ 5232      3844 + 5232 = 9076
+     distinct normalised bodies ................ 4817
+        unique to fw110      (wave 1, read) ....  474
+        shared with another  (wave 2, read) .... 4343       474 + 4343 = 4817
+     duplicate bodies within fw110 .............  415   covered by reading one instance
+```
+
+Both identities close. Every function of updater 1.10 is now either settled from
+its bytes with no judgement involved, or read.
+
+Beyond the function list, the rest of the file is accounted for by §6.2 (whole-file
+partition, zero residue), §6.2.2 (every DARK byte belongs to a known function),
+and §6.2.3 (no recovered start references a HID/SetupAPI slot).
+
 ### 6.2.6 `classify.py`'s worst case is empirically excluded for the flasher [D]
 
 `classify.py` identifies library code by cross-binary body match, and its own
