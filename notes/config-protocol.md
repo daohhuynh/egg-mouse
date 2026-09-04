@@ -513,3 +513,46 @@ never rest only on what its command encoder looks like.
 The second, more dangerous cause was trusting the exported `callers` field, which
 said `0x00404720` was uncalled. That field is now known unreliable (§7.1
 correction) and an audit of every claim depending on it is under way.
+
+## 8. Re-derivation log  [D]
+
+The same discipline `notes/updater-protocol.md` §6.4 applies to the flasher.
+A claim first written from a decompiler view, from Ghidra's names, or from a
+function-list argument is not retired by being plausible.
+
+**Re-derived by an independent route, 2026-09-04:**
+
+| claim | § | independent route used |
+|---|---|---|
+| every IAT slot cited here is the API it is called | 2, 3a | resolved from the **import table**, the loader-authoritative source, never from Ghidra's slot names: `0x52d1d0` `HidP_GetCaps`, `0x52d1d4` `HidD_GetPreparsedData`, `0x52d1d8` `HidD_GetFeature`, `0x52d1dc` `HidD_SetFeature`, `0x52d1e0` `HidD_GetAttributes`, `0x52d270` `CreateFileW`, `0x52d250` `GetProcAddress`, `0x52d258` `LoadLibraryA`. All four tools import exactly **15** `HID`/`SetupAPI` entries |
+| the four commands, and that four is all | 7.1 | whole-`.text` immediate scan **and** send-wrapper caller enumeration from raw `E8` edges — two methods, no shared blind spot (§7.1) |
+| `hid_send_feature_report` is unreachable | 7.1a | 0 direct callers **and** 0 occurrences of its address as a 4-byte value anywhere in the file, in all four tools |
+| the device-select predicate's five call sites | 3a.1 | raw `E8` scan for callers of `0x4035f0`: exactly **5** (`0x4130b8 0x413849 0x413ee0 0x413fa2 0x41404b`), each disassembled at the site and each pushing `$0x1978`. Four have the push immediately before the call; `0x4130b8`'s is at `0x4130ac` with an unrelated `movl` between, which is why an adjacency test would have found only four |
+| the shared-transport table | 1 | re-read at the cited addresses: `0x404238 movl $0x411,%esi`; `rep movsl` of `0x100` dwords `0x404222`–`0x404233` into `-0x45c` = base `-0x46c` + `0x10`; `0x404292 movb -0x53(%ebp),%bl` against base `-0x54`; `0x404264 movb $0x2,%al` |
+| the config busy convention | 1 | re-read `0x403920`–`0x4039dc`: `cmpl $0x1,%eax` on the **return**, then `movzbl 0x1(%edi)`; `cmpl $0x3` at `0x40396e` enters the busy loop, `Sleep(0x64)` at `0x403980`, accumulator `+0x64` at `0x4039d1`, budget `cmpl $0x3e8` at `0x4039d7` — so at most **10 passes**, and the 100 ms sleep happens only on the busy path |
+
+**Not re-derived, and still resting on their original derivation:**
+
+- §2's *dynamic* slot table (the eleven `GetProcAddress` names and their `.data`
+  addresses). The method and its blind spot are stated in §2; a second route
+  would be to walk the `GetProcAddress` call sites rather than the name strings.
+- Everything in §6's "not yet derived" list is not a claim at all.
+
+### 8.1 Device access is serialised by a critical section  [D]
+
+Found while re-deriving §1 and not previously recorded. Every send and every read
+in cfg107 is bracketed by a critical section on the object at **`0x00578c08`**:
+`0x4042a7` and `0x40425e` both call `LeaveCriticalSection` (`*0x0052d27c`) on it,
+on the success and the send-failure path respectively.
+
+Two consequences, and the second is the one that bears on our design:
+
+1. A command and its response read are **one atomic unit** to the vendor tool.
+   That is a fact about the host, not about the device, so it does not tell us
+   the device requires it.
+2. `EGGCore` serving two executables (§1) does not inherit this for free —
+   separate processes do not share a critical section. Whatever the device's
+   real constraint is, **our flasher and our config tool can be running at the
+   same time**, which the vendor's two tools also can. `[G]` whether that is
+   safe; it is a question for the device, and it belongs on the device-gated
+   list in `CLAUDE.md` §5 rather than being designed around by guesswork.
