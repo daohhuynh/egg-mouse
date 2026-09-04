@@ -6,8 +6,16 @@
   qfunc.py <tag> --grep REGEX          list functions whose decompilation matches
   qfunc.py <tag> --list                list every function: entry, size, ns, name
 
-<tag> is one of fw110 fw107 fw106 fw104 cfg107 cfg104 cfg101 cfg100.
+<tag> is one of fw110 fw107 fw106 fw104 cfg107 cfg104 cfg101 cfg100 xm1r.
 Reads .analysis/export/<tag>.jsonl. Prints facts only; it ranks nothing.
+
+WARNING, CLAUDE.md 1.2b. CALLERS/CALLEES and the decompiled C in these records
+are Ghidra's DERIVED views and all have been caught wrong here. CALLERS is
+INCOMPLETE: cfg107 0x00404720 is recorded with zero callers and is called
+directly at 0x413faf (e8 6c 07 ff ff). Believing that field cost this project a
+retracted safety conclusion. Use these fields to FIND things; never to rule
+anything out. To show something is uncalled/unreachable/absent, recover it from
+raw bytes with dis.sh or a call-edge map built from E8/E9 targets.
 """
 import json, sys, os, re
 
@@ -23,7 +31,9 @@ def show(r, full=True):
     print(f"  sig: {r['sig']}")
     print(f"  source={r['source']} thunk={r['is_thunk']}"
           + (f" thunks_to={r.get('thunks_to')}" if r['is_thunk'] else ""))
-    print(f"  CALLERS ({len(r['callers'])}): {r['callers']}")
+    warn = "  <- INCOMPLETE, see CLAUDE.md 1.2b; never conclude 'uncalled' from this" \
+           if not r['callers'] else "  (may be incomplete, CLAUDE.md 1.2b)"
+    print(f"  CALLERS ({len(r['callers'])}): {r['callers']}{warn}")
     print(f"  CALLEES ({len(r['callees'])}): {r['callees']}")
     sc = sorted(r['scalars'].items(), key=lambda kv: (-kv[1], kv[0]))
     print(f"  SCALARS: {sc}")
