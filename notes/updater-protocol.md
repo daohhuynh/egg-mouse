@@ -1180,33 +1180,98 @@ This is the "hay" argument. It finds no new protocol facts. Its whole purpose is
 to earn the right to say the protocol surface is *completely* enumerated, and it
 is stated as a partition so a hole cannot hide as a shortfall (§6 of CLAUDE.md).
 
-**Method.** Two independent ways of asking "which functions touch the device?":
+**Method.** Everything below is regenerated from **raw bytes and raw call
+edges**. Ghidra supplies function *boundaries* only, used as intervals, never as
+edges — `CLAUDE.md` §1.2b, and see the correction at the end of this section for
+why that distinction had to be forced.
 
-1. **Raw literal scan.** Exhaustive 4-byte scan of every byte of `.text` for the
-   addresses of the HID/SetupAPI IAT slots. Structure only; no call graph.
-2. **Ghidra data-refs + call graph.** For each of the N functions, does its
-   record reference a HID/SetupAPI import; then the upward closure of callers.
+1. **Seed — exhaustive 4-byte scan of every byte of `.text`** for the address of
+   any HID/SetupAPI entry-point slot. Two kinds of slot, and both must be in the
+   set or the count is wrong:
+   - **static IAT slots**, from the import directory;
+   - **`GetProcAddress`-filled `.data` slots**. Found by locating each
+     `HidD_*`/`HidP_*` name string, finding the `.text` site that pushes its
+     address, and taking the following `a3` (`mov %eax,<abs>`) store. Keying on
+     the *name string* is load-bearing: a shape-matched regex found 1 of
+     cfg100's 11.
 
-Cross-check: on the XM1r these agree exactly — 7 direct-touch functions and a
-31-function closure spanning `[0x643b80,0x64d000]`, by both methods. Two
-unrelated methods landing on the same numbers is the point of doing both.
+   Any function whose body contains such a 4-byte reference is in the seed. This
+   catches the resolver itself, which stores to the slots without ever calling
+   through them; a call-through-only criterion misses it and gives 12, not 13.
+
+2. **Closure — upward over call edges recovered from raw bytes** by
+   `Tools/ghidra-export/calledges.py` (`E8`/`E9` rel32 accepted when the target
+   is a function entry and the site is attributable). `jmp` edges are included:
+   a tail call is a call, and excluding them is what understated the config-tool
+   closures below.
+
+**Regenerate, do not quote.** Member lists — not just counts — are in
+`.analysis/device_closure_rawedges.json`, so every number here is auditable.
 
 **Results.**
 
-> ### CORRECTION 2026-09-04 — the config-tool rows below were WRONG
-> The original table said the config tools have **7** device-touching functions.
-> They have **13**. The updater rows were right, and are re-confirmed by a
-> corrected method. Superseded table, cause, and the meta-lesson: **§9.3**.
-
-| binary | functions | touch HID/SetupAPI | upward closure | closure span |
+| binary | functions | seed | closure | closure span |
 |---|---|---|---|---|
-| fw110 / fw107 / fw106 | 9,076 | **3** | 14 | `[0x401000,0x403960]` |
-| fw104 | 10,763 | **3** | 10 | `[0x401bc0,0x404980]` |
-| ~~cfg107~~ | 9,528 | ~~7~~ **13** | ~~18~~ **25** | see §9.3 |
-| ~~cfg104~~ | 9,495 | ~~7~~ **13** | ~~18~~ **24** | see §9.3 |
-| ~~cfg101~~ | 9,516 | ~~7~~ **13** | ~~18~~ **24** | see §9.3 |
-| ~~cfg100~~ | 11,071 | ~~7~~ **13** | ~~17~~ **23** | see §9.3 |
-| xm1r | 23,001 | 7 | 31 | `[0x643b80,0x64d000]` |
+| fw110 / fw107 / fw106 | 9,076 | **3** | **14** | `[0x401000,0x403960]` |
+| fw104 | 10,763 | **3** | **10** | `[0x401bc0,0x404980]` |
+| cfg107 | 9,528 | **13** | **32** | `[0x4027d0,0x414010]` |
+| cfg104 | 9,495 | **13** | **32** | `[0x4027e0,0x413b40]` |
+| cfg101 | 9,516 | **13** | **32** | `[0x4027e0,0x413a30]` |
+| cfg100 | 11,071 | **13** | **30** | `[0x4038a0,0x415860]` |
+| xm1r | 23,001 | **7** | **31** | `[0x643b80,0x64d000]` |
+
+fw110's closure, in full — 14 members, every one inside the vendor band:
+`0x401000 0x4012a0 0x401330 0x401890 0x401980 0x401ad0 0x401bb0 0x401c90
+0x402f00 0x402f10 0x4033b0 0x403600 0x403750 0x403960`.
+
+fw104's, 10 members, likewise all in band: `0x401bc0 0x401e30 0x401ed0 0x402a90
+0x402c00 0x404140 0x404150 0x4044f0 0x404760 0x404980`.
+
+> ### CORRECTION 2026-09-04 — two things were wrong here, one of them structural
+>
+> **(a) The cross-validation warrant was void.** This section used to say the
+> XM1r's 7 and 31 were confirmed "by both methods", and that "two unrelated
+> methods landing on the same numbers is the point of doing both". **Method 1
+> has no call graph**, so it cannot produce a closure at all. Only the seed was
+> ever cross-checked; the closure rested on one method, and that method was
+> Ghidra's call-graph field — the same field that reported cfg107 `0x404720`
+> uncalled when `0x413faf` is a direct `calll` to it. The claim has been removed
+> rather than softened, and the closure is now computed from raw edges.
+>
+> The seed numbers survive this unchanged: 3, 3, 13, 13, 13, 13, 7.
+>
+> **(b) The config-tool closures were understated by 7–8 each.** Published as
+> 25/24/24/23; they are 32/32/32/30. Two causes, both now fixed: the closure was
+> taken from Ghidra's incomplete call graph, and it counted only `call` edges
+> while the artifact recorded a separate, larger `call`+`jmp` figure (33 for
+> cfg107) that was never published. The prior artifact
+> `.analysis/device_closure_corrected.json` stored **counts with no member
+> lists**, so the discrepancy could not be audited from it — which is why the
+> replacement stores the addresses.
+>
+> **What survives, and it is the load-bearing part:** the updater closures
+> reproduce *exactly* — 3/14 and 3/10, all 24 members inside the vendor band —
+> and so does the XM1r's 7/31. **The flasher's confinement is unaffected.** The
+> error was confined to the config tools, in the safe direction (more functions
+> to read, not fewer).
+>
+> **(c) A route that had never been checked at all: IAT thunks.** A function can
+> reach an import by `call <thunk>` where the thunk is `jmp *<slot>`, and no
+> closure above would see it, because the thunk block is unattributed `.text`
+> that gets lumped into a single orphan unit referencing *every* import.
+> Checked exhaustively by byte scan for `E8` targeting a HID/SetupAPI thunk:
+>
+> | binary | HID/SetupAPI thunks | `E8` calls into one |
+> |---|---|---|
+> | fw110, fw104, cfg100/101/104/107 | 0 | 0 |
+> | xm1r | 14 | **0** |
+>
+> The XM1r has all 14 thunks and **nothing calls any of them** — every HID
+> access is a direct `FF 15`. So the route exists in the image and is dead, and
+> the closures lose nothing by not modelling it. Scope of that negative: linear
+> byte scan of all of `.text` for `E8` rel32 whose target is one of the 14 thunk
+> addresses. Not covered: a call reaching a thunk through a computed or
+> register-held target, which no byte scan can see.
 
 The three direct-touch functions of each updater code base correspond
 one-to-one, which is itself a structural corroboration across the two code bases:
@@ -1217,17 +1282,24 @@ one-to-one, which is itself a structural corroboration across the two code bases
 | `HidD_SetFeature` sender | `0x4012a0` | `0x401e30` |
 | `HidD_GetFeature` receiver | `0x401330` | `0x401ed0` |
 
-**The completeness statement.** For *both* updater code bases:
+**The completeness statement.** For *both* updater code bases, re-checked
+2026-09-04 against the regenerated raw-edge closures:
 
 - every function in the closure lies **inside the band** — 14 of 14 for 1.10,
   10 of 10 for 1.04 — and
-- **every one of them has been read.** Closure members not in the read set: **0**
-  for 1.10, **0** for 1.04.
+- **every one of them has been read**: all 24 addresses appear in this file with
+  derived content against them. Closure members absent from the notes: **0** for
+  1.10, **0** for 1.04.
 - Of the functions resting on Ghidra's FunctionID name alone with a body ≥32
   bytes, **zero** are in either closure.
 
-Regenerate rather than quote: the sets are written to
-`.analysis/device_closure.json`.
+**This holds for the updaters only.** The same check against the config-tool and
+XM1r closures does *not* pass and is not claimed to — see the gap note in §9.4.
+
+Regenerate rather than quote: member lists are in
+`.analysis/device_closure_rawedges.json`. The older
+`.analysis/device_closure.json` and `.analysis/device_closure_corrected.json`
+are **superseded** — they store counts without members and cannot be audited.
 
 ### 9.1 What this argument does and does not establish
 
@@ -1437,6 +1509,30 @@ corrected test rather than the flawed one:
 - Dynamic-slot users: **0**. Seed unchanged at **3**; closure unchanged at
   **14** (fw110) and **10** (fw104), member-for-member.
 
+Re-confirmed independently 2026-09-04 by the name-string method that found the
+config tools' 11 slots: dynamic HID slots recovered from fw110 **0**, fw104
+**0**, xm1r **0**, and 11 in every one of cfg100/101/104/107.
+
 So the confinement argument the flasher rests on survives intact, and now rests
 on a test that would have caught the config tools' dynamic resolution had it been
 present. The error was confined to the config-tool rows.
+
+**Open gap, recorded 2026-09-04 rather than resolved** (`CLAUDE.md` §1.7). The
+"every closure member has been read" check passes for the updaters and fails
+elsewhere. Against the regenerated closures, closure members with no mention
+anywhere in `notes/`:
+
+| binary | closure | unmentioned |
+|---|---|---|
+| fw110 | 14 | **0** |
+| fw104 | 10 | **0** |
+| cfg107 | 32 | 11 — `0x402900 0x402e70 0x412d00` and the evenly-spaced run `0x410be0 0x410d10 0x410e40 0x410f70 0x4110a0 0x4111e0 0x411320 0x411460` |
+| cfg100 | 30 | 16 |
+| xm1r | 31 | 29 |
+
+The cfg107 run at `0x410be0`–`0x411460` is eight functions spaced ~0x130 apart,
+which is the shape of a generated dispatch or handler table; it is new to the
+raw-edge closure and is unread. The XM1r figure overstates the gap — those notes
+cite *sites inside* bodies rather than entry addresses, so the check is a poor
+proxy there — but it is not zero either, and it is not being claimed as read.
+None of this touches the flasher. It is config-side and XM1r-side work.
