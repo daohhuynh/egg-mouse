@@ -889,6 +889,62 @@ one window helper at `0x403ee0`, which is
 standard trick for dragging a window by its client area. fw104's 7 in-band
 recovered starts are the same shapes.
 
+### 6.2.4 fw104 `[0x401000,0x401bb0)` is MFC init, not vendor code [D]
+
+Working memory carried this as "~3 KB of real vendor code adjacent to its device
+layer, touching `0x5c69b0`/`0x5c6a5c`, unanalyzed", and it sits immediately below
+fw104's vendor band, so it looked like the most likely place for device code to
+be hiding outside the band. **It is MFC framework initialization.**
+
+Ghidra defines exactly one function in the whole range — `guard_check_icall` at
+`0x401bb0`, three bytes, `retl` — while `gapscan.py` recovers **173** starts
+there by address-taken pointer. That gap is the whole reason the region looked
+unexamined.
+
+What it actually contains, from the strings its code references: the block of
+`RegisterWindowMessage` calls that create MFC's internal window messages —
+`AFX_WM_ON_AFTER_SHELL_COMMAND`, `AFX_WM_DRAW2D`, `AFX_WM_RECREATED2DRESOURCES`,
+`AFX_WM_PROPERTYCHANGED`, `AFX_WM_ON_CHANGE_RIBBON_CATEGORY`, the whole
+`TOOLBAR_*` family, `commctrl_DragListMsg`, and 40-odd more. One small function
+per message, each storing its result to a global, each referenced from an init
+table rather than called — which is exactly why 173 of them are pointer-recovered
+and none are in Ghidra's list.
+
+**The one genuine connection to the device layer, and it is worth having.**
+`0x5c69a8` is not a scalar. `FUN_00401000` initialises it:
+
+```
+401000  calll 0x40561d           ; get the framework's nil-string object
+40100d  calll *0xc(%eax)         ; virtual call, slot 3
+401010  addl  $0x10, %eax        ; skip the 16-byte CStringData header
+401018  movl  %eax, 0x5c69a8     ; -> the buffer pointer of a global CString
+```
+
+and the **enumerator** `FUN_00401bc0` writes the device path into it:
+
+```
+401d20  movw  (%eax), %cx        ; wide-string length loop
+401d23  addl  $0x2, %eax
+401d29  jne   0x401d20
+401d2b  subl  %edx, %eax
+401d2d  sarl  %eax               ; (end - start) / 2 = character count
+401d2f  pushl %eax               ; length
+401d30  pushl %ebx               ; pointer to the path
+401d31  movl  $0x5c69a8, %ecx    ; `this` -- thiscall
+401d36  calll 0x402810           ; assign
+```
+
+So **`0x5c69a8` is a global `CString` holding the path of the opened device**,
+and the updater keeps it for the lifetime of the process. cfg107 does the same
+thing at `0x00580190` (§9.3), so this is a house pattern across both tools, not
+an updater quirk. The `CString` identification rests on the MFC layout — a
+buffer pointer 16 bytes past a header object, assigned by a thiscall taking
+(pointer, character-count) — which is `[D]` as structure; what the framework
+calls the type is convention, and nothing downstream depends on the name.
+
+**Nothing in the range touches HID or SetupAPI**, by the exhaustive slot scan of
+§6.2.3.
+
 ### 6.2.2 The DARK residue is fully accounted for [D]
 
 `gapscan.py` partitions `.text` into KNOWN/CALLED/PTR/PAD/DARK, where DARK means
