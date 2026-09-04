@@ -108,6 +108,29 @@ def main():
     print(f"  accounted (R|M|N) ...... {len(acc)}")
     print(f"  UNACCOUNTED ............ {len(resid)}")
 
+    # SCOPE. Everything above partitions GHIDRA'S FUNCTION LIST, not the binary.
+    # Those are not the same set and the difference is not small: roughly a tenth
+    # of each .text is code that lies inside no exported function body, so a
+    # function reachable only through an MFC message map (cfg107 0x413f90, the
+    # Factory Reset handler) is not in ALL, is not in the residue, and cannot be
+    # reported here at all. "UNACCOUNTED 0" read as a statement about the binary
+    # is how a 10% hole stayed invisible; printing the scope every run is the
+    # cheapest guard against reading it that way again.
+    # The byte-level partition is gapscan.py. This number does not replace it.
+    try:
+        gp = os.path.join(AN, f"gapscan_{tag}.json")
+        d = json.load(open(gp))
+        dark = d.get("DARK_pct", d.get("dark_pct"))
+        extra = (f"; gapscan.py reports DARK {dark}% of .text bytes"
+                 if dark is not None else "")
+    except Exception:
+        extra = ("; gapscan.py has not been run for this tag -- the byte-level "
+                 "coverage is UNKNOWN, not zero")
+    print(f"\n  SCOPE: the {len(ALL)} above are Ghidra's exported functions. They do")
+    print(f"         NOT cover .text{extra}.")
+    print( "         A residue of 0 here means the LIST is accounted for. It is")
+    print( "         not a claim about the binary. See CLAUDE.md 6 and 1.2b.")
+
     weak = N - M - R
     big  = sorted(a for a in weak if byadr[a]['size'] >= 32)
     print(f"\n  resting on Ghidra's name ALONE ... {len(weak)}"

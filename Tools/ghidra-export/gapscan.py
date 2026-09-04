@@ -203,7 +203,14 @@ def analyse(tag):
         print("    largest dark runs:")
         for s, e, ln in dark[:5]:
             print(f"      {s:#010x}-{e:#010x}  {ln}")
-    json.dump({'missed_starts': [hex(a) for a in newstarts],
+    json.dump({'text_bytes': n,
+               'KNOWN_pct':  round(100*cnt[1]/n, 4),
+               'CALLED_pct': round(100*cnt[2]/n, 4),
+               'PTR_pct':    round(100*cnt[4]/n, 4) if len(cnt) > 4 else None,
+               'PAD_pct':    round(100*cnt[3]/n, 4),
+               'DARK_pct':   round(100*cnt[0]/n, 4),
+               'n_dark_runs': len(dark),
+               'missed_starts': [hex(a) for a in newstarts],
                'ptr_starts': [hex(a) for a in ptrstarts],
                'dark': [[hex(s), hex(e), l] for s, e, l in dark]},
               open(os.path.join(AN, f'gapscan_{tag}.json'), 'w'))
