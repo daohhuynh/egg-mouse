@@ -346,7 +346,33 @@ found none in cfg107; that is corroboration, not proof, and is recorded as such.
 > post-success `A1 13` (`notes/updater-protocol.md` §5.4 step 7) is the same
 > command, which is why it is sent after a flash.
 
-This corroborates §4's set as complete rather than merely as what was found.
+**The bound that does not depend on the instruction form at all** (added
+2026-09-04, the same argument §3.7a of `notes/updater-protocol.md` uses for the
+updater). Every byte cfg107 puts on the wire must pass through the send wrapper
+`0x00403850`, because that function contains the only two references to the
+`HidD_SetFeature` IAT slot `0x0052d1dc` in the whole of `.text` (§2's exhaustive
+4-byte scan). Recovering its callers from **raw `E8` edges** rather than Ghidra's
+call graph:
+
+| wrapper | call sites | calling functions |
+|---|---|---|
+| `0x00403850` send | 4 | `0x403b20`, `0x404180`, `0x4045e0`, `0x404720` |
+| `0x00403920` receive | 3 | `0x403b20`, `0x4045e0`, `0x404720` |
+
+Those four calling functions are exactly the four commands of §7.1, one each.
+`0x404180` does not appear in the receive row because it performs its own inline
+`HidD_GetFeature` rather than going through the polling wrapper (§4's table).
+
+**So however a frame were built — byte at a time with `movb`, from a table, out
+of a register — it still has to be handed to `0x00403850`, whose four callers are
+enumerated by a raw byte scan and all four read in full.** That closes the gap
+the immediate-scan alone leaves open, and it corroborates §4's set as complete
+rather than merely as what was found.
+
+**Still to do the same way: cfg100/101/104.** Their send wrappers have not been
+located by slot reference yet, so the four-command claim for those three rests on
+the immediate scan alone (which §7.1's whole-`.text` re-run does support, but by
+one method rather than two).
 
 ### 7.2 Read is a request plus a large GetFeature  [D]
 
