@@ -78,6 +78,41 @@ project. Most tasks are neither.
 The same instinct that says "use more machinery" is the one §1.2 warns about.
 Effort is not evidence, and volume is not rigour.
 
+### 1.7 Commit when something is actually finished, and keep working memory
+Two habits, because a session can die at any moment and everything held only in
+its head dies with it.
+
+**Commit when a thing is done, not when a thing is started.** Done means
+implemented and checked, or investigated and concluded. Not "the file compiles",
+not "I have a theory". One coherent unit per commit, and the message says what
+was verified and how, so the next reader can tell a checked claim from an
+unchecked one without rerunning anything. Never commit a state you know is
+broken without saying so in the message.
+
+**Keep `working-memory.md` at the repo root, and commit it with every commit.**
+It is the plan, the scratchpad and the current state in one file: what is being
+worked on right now, what is next, what was tried and ruled out, what is blocked
+and on what, and anything that would take an hour to re-derive.
+
+It only works if it is **trimmed, not just appended to**. Rules:
+
+- It is *state*, not a log. Git already has the log. Nothing belongs here
+  because it happened; things belong here because they are still true and still
+  needed.
+- The moment an item is done, delete it. If it is worth keeping, it belongs in a
+  commit message or in `notes/`, not here.
+- Rewrite entries in place as understanding changes. A file that only grows has
+  already failed.
+- Reconcile it with reality *before* every commit, in the same commit. If
+  nothing in it changed, that is a signal it is being ignored.
+- Write it for a stranger with none of your context. "Continue the analysis" is
+  useless. Name the binary, the address, the command, the file.
+- If it is longer than a screen or two, it has become a log. Cut it back.
+
+The test: if this session ends mid-sentence, can a fresh session read
+`working-memory.md` and pick the work up cold, without guessing? If not, the
+file is wrong.
+
 ---
 
 ## 1b. Product context
