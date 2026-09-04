@@ -24,8 +24,16 @@ DLGINIT (resource type 240). A dialog template says a control is a COMBOBOX; it
 does not say what is IN it. The list items live in a separate RT_DLGINIT
 resource sharing the dialog's id, as records
   WORD id; WORD msg; DWORD len; BYTE data[len]
-terminated by id == 0, where msg 0x0403 is CB_ADDSTRING and 0x0143 is
-LB_ADDSTRING. These are the vendor's own enumerations of its own settings --
+terminated by id == 0.
+
+MIND THE MESSAGE VALUES. rc.exe writes the SIXTEEN-BIT combo/list constants
+here, not the Win32 ones a disassembly would show: CB_ADDSTRING is 0x0403
+(WM_USER+3) and LB_ADDSTRING is 0x0401 (WM_USER+1), whereas the same messages
+sent by a running program are 0x0143 and 0x0180. Getting this backwards
+mislabels a combo as a listbox, which is the same class of error as reading
+0x14E as TCM_SETCURSEL when it is CB_SETCURSEL (notes/config-protocol.md
+§12.3): the constant decides the control class, and the control class is the
+meaning. These are the vendor's own enumerations of its own settings --
 the visible half of whatever the protocol encodes as an integer -- so leaving
 them undecoded would leave the user-visible surface only half read.
 
@@ -157,8 +165,9 @@ def main():
             recs = dlginit(d[fo:fo + dsz])
             print(f"\n  DLGINIT for dialog {path[1]}  ({len(recs)} records)")
             for cid, msg, dat in recs:
-                mn = {0x403: "CB_ADDSTRING", 0x143: "LB_ADDSTRING",
-                      0x401: "CB_INSERTSTRING"}.get(msg, "msg=0x%x" % msg)
+                # DLGINIT uses the 16-bit values; see the module docstring.
+                mn = {0x403: "CB_ADDSTRING", 0x401: "LB_ADDSTRING",
+                      0x1234: "OLE control data"}.get(msg, "msg=0x%x" % msg)
                 txt = dat.split(b"\0")[0].decode("latin-1")
                 print(f"     {cid:>6}  {mn:<16}{txt!r}")
         n = 0

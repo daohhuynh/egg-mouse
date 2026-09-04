@@ -831,18 +831,53 @@ never called, which is precisely why the HID-only closure did not contain it.
 
 The callback `0x00412c40` forwards to `0x004139e0`, which switches on `buf[1]`:
 
-**`buf[1] == 0x06` — profile / bank selection.** `buf[2]` is a **one-hot mask**;
-the switch at `0x413a8d` (jump table `0x413be4`, index byte table `0x413c04`,
-input `buf[2]-1` bounded to `0..0x3f`) maps it to a tab index, sends
-`TCM_SETCURSEL` (`0x14E`) to the tab control at `obj+0x13b8`, and stores the
-mask byte to globals `0x0057f216` and `0x0057f2a6`:
+**`buf[1] == 0x06` — the device reports its POLLING RATE.** `buf[2]` is a
+**one-hot mask**; the switch at `0x413a8d` (jump table `0x413be4`, index byte
+table `0x413c04`, input `buf[2]-1` bounded to `0..0x3f`) maps it to a combo-box
+index, sends **`CB_SETCURSEL` (`0x14E`)** to the window handle at `obj+0x13b8`,
+and stores the mask byte to globals `0x0057f216` and `0x0057f2a6`:
 
 | `buf[2]` | `0x40` | `0x20` | `0x10` | `0x08` | `0x04` | `0x02` | `0x01` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| tab index | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| index | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| **rate** | **125 Hz** | **250 Hz** | **500 Hz** | **1000 Hz** | **2000 Hz** | **4000 Hz** | **8000 Hz** |
 
 Seven values, one-hot, no others: every other index in `1..0x40` maps to the
 default arm and is ignored.
+
+**CORRECTED 2026-09-04.** This paragraph previously said `TCM_SETCURSEL` to a
+*tab control* and called the event "profile / bank selection". Both were wrong,
+and the error was caught by §12.2 — the mechanical count of tab items — rather
+than by re-reading the handler. `TCM_SETCURSEL` is `0x130C`; **`0x14E` is
+`CB_SETCURSEL`.** The chain, every step an instruction:
+
+1. `0x413404` is `leal 0xc8(%esi),%ecx` immediately before the `call *%eax` that
+   creates dialog `0x87` (135), so **the page-135 object is embedded in the main
+   dialog at `+0xc8`**, and the handler's `obj+0x13b8` — `obj` being the main
+   dialog, from the global `0x0057f754` written at `0x412ede` inside the main
+   dialog's constructor `0x00412d90` — is `page135 + 0x12f0`.
+2. `page135 + 0x12f0` is exactly the handle used at `0x40bbfe`, `0x40bc13` and
+   five more sites in `0x0040bbd0`, each doing
+   `SendMessageW(hwnd, 0x143 /* CB_ADDSTRING */, 0, <string>)` with, in order,
+   `'125Hz' '250Hz' '500Hz' '1000Hz' '2000Hz' '4000Hz' '8000Hz'`
+   (`0x557ea8`…`0x557efc`, contiguous, each referenced exactly once in the whole
+   `.text`). **So the target is a combo box holding seven polling rates, and the
+   seven one-hot values are its seven indices.**
+3. Cross-check on the base arithmetic: `DDX_Control` at `0x40bb65` binds control
+   **1085** — the `'Polling Rate'` combo of §12.2 — to `page135 + 0x12d0`, and
+   `0x12f0 − 0x12d0 = 0x20`. That `+0x20` is `m_hWnd`'s offset in this build's
+   `CWnd`, and it is *measured*, not remembered: the four radio buttons are
+   bound by `DDX_Control` to `+0x13d4 / +0x1448 / +0x14bc / +0x1530` (ids
+   **1062 / 1067 / 1068 / 1069**) and the `BM_SETCHECK` sites in `0x0040f750`
+   use `+0x13f4 / +0x1468 / +0x14dc / +0x1550` — the same `+0x20`, four
+   independent times.
+
+**What this is worth to us.** It is the first *decoded* field of the event
+channel: the device volunteers its polling rate, unsolicited, as a one-hot byte
+in which **bit 0 is 8000 Hz and bit 6 is 125 Hz**. It is `[D]` and cited, and it
+is a read, not a write, so §1.3 is not engaged. It also retires the reading of
+this event as "profile / bank selection", which was a `[G]` that had begun to
+read like a finding — exactly the drift `CLAUDE.md` §7.1 warns about.
 
 **`buf[1] == 0x02` — a four-way setting.** `0x0040f750` stores `buf[2]` to
 globals `0x0057f21a` / `0x0057f2aa`, bounds it to `0..3`, and drives four radio
@@ -1093,25 +1128,52 @@ Two controls are shipped **hidden** (`WS_VISIBLE` clear) on page 135:
 a capability the vendor built and then withheld from the UI; whether either has
 a live handler behind it is **not** determined here, and it is a LIST 3 question.
 
-Combo contents that have **no** DLGINIT — `'LOD'` (1024), `'Polling Rate'`
-(1085), the six button-assignment combos on 139, the two `'SPDT:'` combos on 153
-— are filled from code, so the code contains their item lists. That is where a
-LIST 3 pass should look for the enumerations behind those wire values.
+**DLGINIT is a starting point, not the list the user sees**, and at least one
+combo is overwritten at run time — recorded because the previous paragraph would
+otherwise read as an inventory of the UI rather than of the resource. Combo
+**1082** (`'CPI Downshift Tuning'`) carries a three-item DLGINIT
+(`'Force Off' / 'Medium' / 'Default'`) and is then filled from `0x00411980`
+with **four** items — `'Force Off'` `'Light Timer Only'` `'Medium Timer Only'`
+`'Default'` (`0x5582a8`, `0x5582bc`, `0x5582e0`, `0x558304`, each referenced
+exactly once in `.text`). The DLGINIT list is dead.
 
-### 12.3 Amendment to §10.4 — "tab index 0..6" does not fit a four-tab control
+Combos with **no** DLGINIT at all are filled the same way, and the code
+therefore holds their enumerations. Located so far, each string referenced
+exactly once unless noted:
 
-Recorded on noticing, not on resolving (`CLAUDE.md` §1.7).
+| combo | filled by | items |
+|---|---|---|
+| `'Polling Rate'` 1085 | `0x0040bbd0` | `125Hz 250Hz 500Hz 1000Hz 2000Hz 4000Hz 8000Hz` (§10.4) |
+| `'LOD'` 1024 | `0x0040bbd0` and `0x0040ee80` | `0.7mm`…`1.7mm` in 0.1 steps, then `2.0mm` — twelve |
+| unidentified, page 137 | `0x00405f30` | `OFF` `GX Speed Mode` `GX Safe Mode` |
 
-§10.4 reads the `buf[1] == 0x06` event as a one-hot `buf[2]` mapped through the
-jump table at `0x413be4` to **tab indices 0..6**, seven values, driving
-`TCM_SETCURSEL` on the tab control at `obj+0x13b8`. §12.2 establishes
-mechanically that **the only tab control in cfg107 has four tabs**, inserted by
-the only four call sites of `0x0041c350`, and that the resource set contains
-exactly one `SysTabControl32`.
+The six button-assignment combos on 139 and the two `'SPDT:'` combos on 153 are
+not yet traced. **This table is a LIST 3 starting point, not a derivation:**
+which wire byte each index corresponds to is not established by any of it.
 
-Seven arms cannot select among four tabs. Both observations may still be
-correct — a jump table can have unreachable arms, and `TCM_SETCURSEL` with an
-out-of-range index is a no-op — but at least one of these is mislabelled, and
-the candidates are: `obj+0x13b8` is not control 1060; or the seven values are
-not tab indices; or three of the seven arms are dead. **Unresolved.** It is
-config-side and does not touch the flasher.
+### 12.3 The gap this section opened, and closed the same hour
+
+Kept as a worked example of why §1.2a exists, not as an open item.
+
+§12.2's mechanical tab count — four — contradicted §10.4's reading of event
+`0x06` as selecting among **seven** tab indices. Seven arms cannot select among
+four tabs, so one of the two had to be wrong. The resolution is in §10.4's
+correction block: the message is `CB_SETCURSEL`, not `TCM_SETCURSEL`, the target
+is the `'Polling Rate'` combo and not the tab control, and the seven values are
+**125 / 250 / 500 / 1000 / 2000 / 4000 / 8000 Hz**.
+
+Two things about how it was caught are worth more than the finding.
+
+**Nothing about §10.4 looked wrong from inside §10.4.** The handler really does
+send `0x14E` to a window handle held in the dialog object, really does index
+`0..6`, and a mouse configurator really does have a tab control. The claim only
+failed against a fact from a *different kind of evidence* — a count of tab
+insertions in the resource-facing code. That is what §1.2a is asking for when it
+says to check the user-visible surface: not a second opinion on the same bytes,
+but a constraint from somewhere the first method could not see.
+
+**The mislabel was a plausible constant, which is the dangerous kind.** `0x14E`
+was read as `TCM_SETCURSEL`; it is `CB_SETCURSEL`, and `TCM_SETCURSEL` is
+`0x130C`. Nothing in the disassembly says which. Every Win32 message constant in
+these notes deserves the same treatment before it is leaned on — the value
+decides the *control class*, and the control class is what the wire byte means.
