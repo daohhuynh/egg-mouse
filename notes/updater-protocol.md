@@ -1271,6 +1271,41 @@ it. The frame itself is confirmed: `movl $0x3aa1,-0x44(%ebp)` +
 `movl $0x32a55a00,-0x40(%ebp)` = `A1 3A 00 00 00 5A A5 32`. The retry sleep is
 `Sleep(2k)` on pass `k` — 2 ms to 18 ms, not the hundreds used elsewhere.
 
+### 6.2.7a `0x004a704e`, fw104's largest function, is library — positively [D]
+
+Flagged during the fw104 read as a summary with nothing behind it (the reader
+called it "a ~29 KB settings-document loader over a path built from a global",
+which is not supported by anything in the bytes). Now settled the other way, and
+the argument needs no judgement at all:
+
+| | fw104 `0x004a704e` | cfg100 `0x00466e71` | XM1r `0x004e99e5` |
+| --- | --- | --- | --- |
+| size | **29,309** | **29,309** | 29,177 |
+| instructions | **6,940** | **6,940** | 6,922 |
+| `%eax` operands | 694 | 694 | 700 |
+| calls to one helper | 410 | 410 | 410 |
+| `-0x10(%ecx)` operands | 387 | 387 | 387 |
+| next three operand counts | 274 / 241 / 174 | 274 / 241 / 174 | 274 / — / 174 |
+
+Two Endgame programs **from different code bases** and one program from a
+**different vendor entirely** each contain a 29 KB function with the same
+instruction count and the same operand profile. It is framework code. Its head
+is an MFC `__EH_prolog` with a `0x404`-byte frame and a virtual call through
+vtable slot `+0x328`; it is not in fw104's device closure and it references no
+HID, SetupAPI or kernel32 device-I/O slot.
+
+**And it is a measured false negative for `classify.py`.** The three normalised
+body hashes all differ, so the cross-binary matcher does *not* pair them — the
+differences lie in operand bytes that `norm()` does not mask. The matcher is
+therefore conservative: it under-reports library code rather than over-reporting
+it, which is the safe direction, but "no cross-binary match" must not be read as
+"vendor". This is the first measured instance of that.
+
+The other three `movb $0xa0` / `movb $0xa1` sites `cmdscan.py` reports outside
+the command builders are inside this same body — a store of a single byte to
+`-0x4(%ebp)`, not to a report buffer. Same in cfg100 (`0x00466e71`) and the XM1r
+(`0x004e99e5`). They are noise in the scan, not an eighth command.
+
 ### 6.2.8 Three of the nine binaries were built with Control Flow Guard [D]
 
 Not a protocol fact, but it removes a large source of noise from every future

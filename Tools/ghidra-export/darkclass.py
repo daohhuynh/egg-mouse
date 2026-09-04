@@ -35,7 +35,7 @@ def dis(tag,a,b):
         if m: d[int(m.group(1),16)]=len(m.group(2).split())
     return d
 print("%-7s %5s %8s %11s %9s %12s"%("tag","runs","covered","interior","after-end","UNEXPLAINED"))
-for tag in ("fw110","fw104","cfg107","cfg104","cfg101","cfg100"):
+for tag in ("fw110","fw104","cfg107","cfg104","cfg101","cfg100","xm1r"):
     recs=[json.loads(l) for l in open(f'{R}/.analysis/export/{tag}.jsonl')]
     iv=sorted((int(r['entry'],16),int(r['entry'],16)+r['size']) for r in recs if r['size'])
     st=[x[0] for x in iv]
