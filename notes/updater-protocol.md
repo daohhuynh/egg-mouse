@@ -1085,18 +1085,46 @@ anything elsewhere — the classifier is now bounded from both sides.
 `CLAUDE.md` §6.1 requires every one of 1.10's functions to end in a known state,
 and §6 requires it stated as a partition computed in one place:
 
+> **CORRECTED 2026-09-04.** The second identity below was computed by
+> *subtraction* — "duplicates = 5232 − 4817" — and that is exactly the move
+> `CLAUDE.md` §6 forbids, in the section whose whole purpose is to show a
+> partition closing. The subtraction silently absorbed **39 functions that have
+> no normalised body hash at all**: `classify.py`'s `sigs()` skips bodies under
+> 16 bytes, so those 39 were never in the read queue and were never a
+> "duplicate" of anything. They have now been read, by hand, and are enumerated
+> below. The corrected partition:
+
 ```
 total sized functions .......................... 9076
   settled mechanically (microread.py) .......... 3844
-  required a reader ............................ 5232      3844 + 5232 = 9076
-     distinct normalised bodies ................ 4817
-        unique to fw110      (wave 1, read) ....  474
-        shared with another  (wave 2, read) .... 4343       474 + 4343 = 4817
-     duplicate bodies within fw110 .............  415   covered by reading one instance
+  required a reader ............................ 5232
+     with a normalised body (>= 16 bytes) ...... 5193
+        distinct .............................. 4780   every one in the read queue
+        duplicates within fw110 ...............  413   covered by reading one instance
+     TOO SMALL TO HASH (< 16 bytes) ............   39   read by hand, 2026-09-04
 ```
 
-Both identities close. Every function of updater 1.10 is now either settled from
-its bytes with no judgement involved, or read.
+`3844 + 5193 + 39 = 9076`, and `4780 + 413 = 5193`. Both identities close, and
+neither is a subtraction. The read queue holds 4,817 hashes, a **superset** of
+the 4,780 actually required, so the reading was over- not under-covered.
+
+**The 39, in full**, because a residue that is not enumerated is not accounted:
+
+| shape | members |
+| --- | --- |
+| member accessor, `mov eax,[ecx+N]; test; jne; mov eax,[eax+0x20]` | `0x0041347a` `0x00453e3a` `0x0048cb8b` `0x004e8de7` `0x00508c9e` `0x0048ebb3` |
+| conditional virtual call, `cmp [ecx+N],0; je; mov eax,[ecx]; push 1; call [eax+4]` | `0x00404da8` `0x0040bdca` `0x0040f3a2` `0x0041e428` `0x00432548` `0x00499111` |
+| bool-normalising virtual call, `call [eax+N]; neg; sbb; inc` | `0x00461c34` `0x004dcd4b` `0x004dcd5c` `0x0048793b` (`GiveFeedback`, masks to `0x40102`) |
+| predicate returning 0/1 | `0x00471014` `0x004c7233` |
+| conditional tail call | `0x0045759a` `0x004a643c` `0x004b39c8` `0x004edd58` `0x004cadf2` `0x004caf83` |
+| refcount / destructor | `0x00404206` (`lock xadd`) `0x0041c1d4` (`~CDialogTemplate`) |
+| CRT and compiler helpers | `0x004f735c` `__security_check_cookie`, `0x004fa1c3` `_ldiv`, `0x004f7c6a` `_CallMemberFunction1` thunk, `0x004fa5f8` `0x00502c52` EH cleanup funclets, `0x005086fc` `fstp/fld` |
+| Ghidra labels *inside* a larger function, not functions | `0x004c0043` (3 B `sub (%esi),%ebx`), `0x005052c8` `0x00505d58` `0x00506498` (6 B `movlpd 4(%esp),%xmm0`, no return), `0x005062bc` (`and byte [ebp-0x2c8],0xFE`), `0x00505643` (`or cl,cl; je`), `0x00508f04` (`call *%eax; ret`) |
+
+**None of the 39 touches the device**, which is not a judgement: none appears in
+§9's 14-member closure, and `closure.py`'s exhaustive scan attributes every
+HID/SetupAPI/kernel32 device-I/O slot reference in `.text` to an owner, so a
+device reference inside any of them would have put it in the seed.
 
 Beyond the function list, the rest of the file is accounted for by §6.2 (whole-file
 partition, zero residue), §6.2.2 (every DARK byte belongs to a known function),
