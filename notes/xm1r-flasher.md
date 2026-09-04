@@ -500,6 +500,135 @@ them loosely and its 91.75 KiB figure is the scan's artefact, not the image size
 `3 × 0x8000 = 0x18000` = 98,304 bytes is the derived total. The `.rdata` runs are
 not firmware.
 
+## 5.1 The flash sequence, end to end  [D-X]
+
+`FUN_006441c0` (`0x6441c0`–`0x644728`, thiscall, three stack arguments, returns
+`-0x38(%ebp)`). §6.9 covers its first half — image selection. This is the second
+half, the part §7 listed as "everything upstream: … the sequence".
+
+**Two commands do the whole job**, both sent through the §3 transport
+`0x00644730(port, cmd, buf, len, sleep_ms)`, which returns **0 on success**
+(`-0x2c(%ebp)`, initialised to 1 at `0x64473a`, cleared only at `0x644b64` and
+`0x64500f`):
+
+| step | command | frame | length | sleep arg | site |
+|---|---|---|---|---|---|
+| start | `0x08` | the descriptor below | `0x3b` = 59 | `0` | `0x644598` |
+| data × N | `0x09` | index + payload | `0x3b` = 59 | `0x1f4` = 500 | `0x64469c` |
+
+Both dispatch to case 0 in §4's table, so **neither arms the deferred `0x15`
+reply**; each frame is a single request/reply/ack.
+
+### Chunk arithmetic
+
+Fixed at `0x64442e`–`0x644458`, using `-0xc(%ebp)` = `0x39` = **57 payload bytes
+per frame** and `-0x24(%ebp)` = `0x8000` = the image size:
+
+```
+remainder = 0x8000 % 57      ; -0x30(%ebp)
+frames    = 0x8000 / 57      ; -0x1c(%ebp)
+if remainder > 0: frames++
+```
+
+`32768 = 574 × 57 + 50`, so **575 frames**, the last carrying 50 bytes. The
+progress bar range is `frames × obj+0xb0` (`0x644460`).
+
+57 is consistent with the report size derived twice in §3: 65 − 8 header bytes.
+
+### The start frame (command `0x08`), 59 bytes at `obj+0x254`
+
+Zeroed first (`0x644483`), then filled field by field:
+
+| offset | width | value | site |
+|---|---|---|---|
+| 0 | 1 | `0x01` | `0x644496` |
+| 1 | 4 | total payload size (`0x8000`) | `0x64449e` |
+| 3 | 4 | frame count | `0x6444bf` |
+| 7 | 1 | bytes per frame (`0x39` = 57) | `0x6444e0` |
+| 8 | 2 | **the per-image 16-bit constant** | `0x6444f5` |
+| 11 | 1 | `0x01`, only if an image was selected | `0x64451e` |
+| 12 | 1 | image version major (`obj+0x24c`) | `0x64453f` |
+| 13 | 1 | image version minor (`obj+0x24d`) | `0x64454c` |
+| 14 | 1 | image version patch (`obj+0x24e`) | `0x644567` |
+
+**Note the overlap at offsets 3 and 4**, which is in the bytes and not a
+transcription slip: the 4-byte size is written at 1..4 and the 4-byte frame count
+at 3..6, so the count's low half overwrites the size's high half. It is harmless
+for these magnitudes — `0x8000` and 575 both fit in 16 bits, so the frame carries
+size in 1..2, count in 3..4 and zeros in 5..6 — and it would stop being harmless
+for an image of 64 KiB or more. Recorded because a reimplementation that wrote
+non-overlapping fields would produce a *different* frame from the vendor's.
+
+**This is where the per-image 16-bit constant goes.** §6.9 established the three
+values (`0x8298`, `0x08b4`, `0xa59c`) and ruled out three CRC-16s and an additive
+sum over the raw blob. Its *role* is now derived even though its meaning is not:
+it is **transmitted to the device in the start frame**, at offset 8, 16-bit
+little-endian, once per flash. The host never computes it and never checks it.
+So whatever it is, the device is the only thing that can validate it — and `[G]`
+whether it does.
+
+### The data frames (command `0x09`)
+
+```
+for i in 0 .. frames-1:
+    memset(buf, 0, 59)                                 ; 0x6445d7
+    buf[0..1] = i                    (16-bit)          ; 0x6445ec
+    if last frame and remainder > 0:
+        memcpy(buf+2, image + off, remainder)          ; 0x64461f
+    else:
+        memcpy(buf+2, image + off, 57)                 ; 0x64464a
+    off += 57                                          ; 0x644674
+    send(0x09, buf, 59, sleep=500)                     ; 0x64469c
+```
+
+`off` is `-0x14(%ebp)` and is **16-bit** (`movw` at `0x64467e`), which is fine at
+32,768 but wraps at 65,536 — a second size-dependent limit, matching the one
+above.
+
+### Failure handling, and one asymmetry worth naming
+
+- **A data-frame failure aborts.** Nonzero return → `0x6446bf` → `-0x38 = 0` →
+  the function returns 0. (The intervening test `index == frames` at `0x6446c3`
+  can never be true: the loop guard at `0x6445ca` exits when `index >= frames`,
+  so inside the body `index ≤ frames-1`. That branch is unreachable.)
+- **A start-command failure does not.** Nonzero return at `0x64459f` jumps
+  straight to the epilogue at `0x6446e8` with `-0x38` still holding its initial
+  `1` from `0x6441c9`, so the function **returns the same value a completed flash
+  returns**, having sent no data frame at all. The caller `0x6479a0` stores that
+  return into global `0x72a5a4` (`0x647a42`) and carries on.
+
+We do not copy this. `CLAUDE.md` §4.2 already forbids treating a transport
+success as a device success; this is the mirror-image defect — treating a
+transport *failure* as a completed operation — and it is the same root cause,
+a status flag that defaults to the good value and is only ever cleared.
+
+### Dead code, recorded because it is easy to mistake for the live path
+
+`-0x1(%ebp)` is written five times (`0x6441d7`, `0x644237`, `0x64423d`,
+`0x6442bc`, `0x644327`, `0x64438a`) and **never read**; its address is never
+taken. The first two writes are the interesting ones:
+
+```
+64420a: movzbl 0x2d8(%edx), %eax   ; device version major
+644211: cmpl   $0x7, %eax
+644214: jl     0x64423d
+644219: movzbl 0x2d9(%ecx), %edx   ; minor
+644220: cmpl   $0x3, %edx
+644223: jl     0x64423d
+644228: movzbl 0x2da(%eax), %ecx   ; patch
+64422f: cmpl   $0xa5, %ecx
+644235: jl     0x64423d
+644237: movb   $0x38, -0x1(%ebp)   ; 56
+64423d: movb   $0x6,  -0x1(%ebp)   ; 6
+```
+
+A payload size of 56 or 6 chosen from the device version — superseded by the
+constant 57 in `-0xc(%ebp)` and left in place. Anyone reading this function
+looking for "how the chunk size is decided" will find this block first and it is
+the wrong answer. Note also that its thresholds (`7.3.165`) and §3.2's
+(`1.3.7`) are different scales on the same three bytes, which is a reason to
+distrust either as a considered version policy.
+
 ## 6. What the video corroborates — post-hoc, weak evidence
 
 Flagged per §0: this is explanation after the fact, not prediction.
@@ -524,7 +653,7 @@ product branches in order, each self-contained:
 644297  pushl $0x3367            ; VID
 64429c  movl  -0x18(%ebp), %ecx  ; context
 64429f  addl  $0x2dc, %ecx       ; -> its HID sub-object
-6442a6  calll 0x647660           ; open(ctx+0x2dc, vid, pid) -> bool in al
+6442a6  calll 0x647660           ; predicate, NOT an open -- see below
 ...  on success:
 6442b5  movl  $0x8000,   -0x24(%ebp)   ; 32,768
 6442bc  movb  $0x38,     -0x1(%ebp)    ; 56
@@ -542,6 +671,22 @@ product branches in order, each self-contained:
 then the same block for **PID `0x1905`** with blob `0x706a88` and constant
 `0x08b4`, then a third branch gated on `0x493(%ecx) == 1` **and**
 `0x38c(%eax) != 0`, with blob `0x70ea88` and version minor `8`.
+
+**`0x647660` is a predicate on the already-open device, not an open.**
+Corrected 2026-09-04; the earlier "open(ctx, vid, pid)" reading was wrong and it
+mattered. The body (`0x647660`–`0x647781`) formats `vid_%04x` and `pid_%04x` from
+its two arguments (`0x647720`, `0x647738`, format strings at `0x6ba1b4` /
+`0x6ba1c0`), fetches the **currently open** device's path through the import at
+`*0x66f534` into a `0x104`-wide buffer, and returns 1 iff the path contains both
+substrings (`0x403010`, the case-insensitive finder; `0x64776e` sets `al = 1`,
+`0x647772` clears it). It opens nothing and changes no state.
+
+The consequence is the reassuring one and is worth stating because the wrong
+reading suggests a hazard that is not there: since all three branches test the
+*same* open device, the tool **cannot** pair one product's image with another
+product's device by trying opens in order. If two branches both matched it would
+be a real wrong-image path, but they cannot: a single device path cannot contain
+two different `pid_` substrings.
 
 **Device identity — resolves a §7 item.** VID **`0x3367`** (the same vendor id
 the OP1 config tool matches on) with PIDs **`0x1903`** and **`0x1905`**, plus a
