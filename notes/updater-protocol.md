@@ -351,11 +351,19 @@ bootloader, with no application-mode handshake first.**
 4. `Sleep(200)`, then `FUN_00401bb0(&v)` = `0xA1/0x08/0x34` to read the device's
    whole-image checksum, compared against `+0x25a20`. Mismatch →
    `L"get all check sum error"`, **abort**.
-5. **Complete**: `0xA1/0x09`, `Sleep(50)`, read `0xA1`, require `resp[1] == 0x01`,
-   then re-enumerate. Retried up to 11 passes with a growing `Sleep`. All fail →
-   `L"send bldr complete request failed"`.
-6. Wait for the device to come back: `FUN_00401000()` with `Sleep(d)`,
-   `d = 800, 1600 … 16000`. Never returns → `L"Update failed, try again"`.
+5. **Complete** — loop at `0x403bc7`–`0x403c4c` [D]. Counter starts at 1.
+   Each pass: build `A1 09` with `[4..7] = 0`, send 64 bytes, `Sleep(50)`; if the
+   send succeeded, read a 64-byte `0xA1` report and require `resp[1] == 0x01`.
+   On any failure `Sleep(counter)` — **1 ms, then 2, … up to 10** — and increment;
+   the loop runs while `counter <= 10`, so **10 attempts**. These retry sleeps are
+   milliseconds, not the growing hundreds used elsewhere; the decompiled C makes
+   them look like the latter, which is wrong.
+   All 10 fail → `L"send bldr complete request failed"`.
+6. **Wait for the device to come back**, `0x403c7c`–`0x403cc3` [D]: one immediate
+   `FUN_00401000(0x1978)`, then a loop with `Sleep(d)` where `d` starts at
+   **800** and increases by **800** while `d <= 16000` — 800, 1600 … 16000, i.e.
+   20 further attempts and about **136 s** of waiting in total. Still not found →
+   `L"Update failed, try again"`.
 7. On success: send `0xA1/0x13`, `Sleep(900)`, one `0xA1` read, then display
    `L"Update Succeed, current firmware version is V%.2f"`.
 
