@@ -26,6 +26,23 @@ Evidence sets, weakest last:
   N  Ghidra FID  - named by Ghidra's FunctionID signature database, ALONE
 
 Exit status is 1 if anything is unaccounted, so this can gate a commit.
+
+STATUS: FINDING-AID, NOT EVIDENCE (demoted 2026-09-04).
+
+This tool's output must not be cited as showing that a binary is accounted for.
+It partitions GHIDRA'S FUNCTION LIST, and that list does not cover .text -- the
+function reachable only through an MFC message map that produced the retracted
+factory-reset conclusion is not in it, is not in the residue, and cannot be
+reported here at all. A residue of 0 means the list is internally consistent.
+That is a useful thing to know and it is not a completeness claim.
+
+The completeness evidence is elsewhere and is byte-level:
+    filemap.py    every byte of the file, partition must sum
+    gapscan.py    every byte of .text into KNOWN/CALLED/PTR/PAD/DARK
+    darkclass.py  every DARK byte resolved to a known function
+    closure.py    every HID/SetupAPI reference attributed to an owner
+    cmdscan.py    every report-id immediate in the whole section
+Use this tool to find things to check. Never to conclude nothing is there.
 """
 import json, sys, os, hashlib, collections
 

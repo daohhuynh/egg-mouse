@@ -41,6 +41,20 @@ These are ground truth. Ghidra's function list is not.
 
 Structure only. It classifies bytes by provenance and holds no opinion about
 what any of them mean (CLAUDE.md 7.1).
+
+STATUS: FINDING-AID for the DARK class, EVIDENCE for the rest (2026-09-04).
+
+The KNOWN/CALLED/PTR/PAD figures are a byte partition and stand as evidence.
+The DARK figure does NOT stand on its own: it is "bytes this tool could not
+account for", which is a statement about the tool. What those bytes actually are
+is settled by darkclass.py, which re-disassembles from each function's own start
+and resolves every DARK run in all six PE binaries to a known function's tail or
+an instruction interior. Cite darkclass.py for that, not the DARK percentage.
+
+Also note KNOWN is computed from Ghidra's function extents, and those extents are
+SHORT for 29-71 functions per binary (microread.py measures the overshoot), so
+KNOWN slightly understates and DARK slightly overstates. The direction is safe
+but the numbers are not exact.
 """
 import sys, os, json, bisect, collections, struct
 
