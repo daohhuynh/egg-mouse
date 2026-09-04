@@ -527,6 +527,80 @@ bootloader, with no application-mode handshake first.**
    `L"Update failed, try again"`.
 7. On success: send `0xA1/0x13`, `Sleep(900)`, one `0xA1` read, then display
    `L"Update Succeed, current firmware version is V%.2f"`.
+   **See §5.4a — "on success" is three gates, and one path skips this step
+   while still reporting success.**
+
+### 5.4a The post-flash `A1 13`, in full  [D]
+
+`A1 13` is **factory reset** (§6, `notes/config-protocol.md` §2.4), so this step
+is what makes a firmware update destroy the user's settings. Its gating therefore
+matters, and "sent after a verified success" understated it.
+
+**The frame.** Built and sent at `0x403dbc`–`0x403ddd`:
+```
+403dbc  pushl $0x40 ; leal -0x50(%ebp),%eax ; pushl $0 ; pushl %eax
+403dc4  calll 0x4f83a0                  ; memset(buf, 0, 0x40)
+403dcc  pushl $0x40                     ; length
+403dce  pushl %ecx                      ; buffer
+403dcf  movl  $0x13a1,-0x50(%ebp)       ; A1 13 00 00
+403dd6  movl  $0x0,-0x4c(%ebp)          ; (redundant; memset already zeroed)
+403ddd  calll 0x4012a0                  ; the HidD_SetFeature wrapper
+```
+64 bytes: `A1 13 00 00` then 60 zeros. **Byte-for-byte identical to the config
+tool's Factory Reset frame** — the same 7-byte encoding `c7 45 b0 a1 13 00 00`
+builds it in both binaries (fw110 `0x403dcf`, cfg107 `0x40479f`), to the same
+VID/PID and the same HID collection.
+
+**Three gates, not one.** `A1 13` fires only after all of:
+
+| gate | what must hold | site |
+|---|---|---|
+| (a) | device-reported whole-image checksum == host-computed | `cmpl 0x25a20(%esi),%eax` `0x403b95` |
+| (b) | `A1 09` completion returns `resp[1] == 0x01`, within 11 tries | `0x403c30`, retry `0x403c49` |
+| (c) | device re-enumerates as VID `0x3367` / PID `0x1978` | loop `0x403c8d`–`0x403cb9` |
+
+Between gate (c) and the send the path is straight-line: the only branches
+(`0x403cee`, `0x403d21`, `0x403d81`) guard `E_FAIL` throws and a `CString`
+refcount release, and all reconverge before `0x403dbc`.
+
+**The corner case, and it is reachable  [D].** Gate (c) fails at
+`0x403cc3 je 0x403e6f`. That path clears the busy flag, updates the UI, closes
+the handle — and then:
+```
+403ea3  xorl %edx,%edx
+403ea5  xorl %eax,%eax
+403ea7  movw %ax,0x56a0fc
+403ead  leal 0x1(%edx),%eax      ; eax = 1
+```
+**It returns 1 — success — having never sent `A1 13`.** So there is a real,
+reachable outcome in which the image is written and verified, the tool reports
+success, and the settings are *not* reset. "A firmware update always resets
+settings" is therefore **false**; "a firmware update that completes normally
+resets settings" is the accurate statement.
+
+**Fire-and-forget  [D].** The updater sleeps 900 ms (`pushl $0x384`, `0x403de9`),
+reads one 64-byte `0xA1` report (`0x403e10`), and **never inspects it** — the
+next instruction consumes an unrelated float. On send failure (`0x403de7`) it
+skips the read and still returns success. The config tool, by contrast, sleeps
+1100 ms and *requires* `resp[1] == 0x01`. So the device does answer `A1 13` with
+the usual status byte; the updater simply ignores it.
+
+**Exhaustive transport census, by raw scan  [D].** `HidD_SetFeature`
+(IAT `0x51b1d4`) is dereferenced at exactly **2** sites, both inside the wrapper
+`0x4012a0`; `HidD_GetFeature` (`0x51b1d0`) at exactly **3**, all inside
+`0x401330`. Recovering `E8` targets across all 1,154,048 bytes of `.text` gives
+the wrapper **7 callers each**:
+```
+send 0x4012a0 : 0x40190f 0x401a60 0x401b26 0x401bf6 0x4037a1 0x403bf2 0x403ddd
+recv 0x401330 : 0x401951 0x401aa2 0x401b74 0x401c3d 0x4037d9 0x403c24 0x403e10
+```
+Every command this updater can emit is one of those seven sends. `0x403ddd` is
+the last. Method: 4-byte search for the IAT address, plus an `E8 rel32` sweep of
+the whole section — reproducible with `objdump` and `grep`.
+
+fw104 matches structurally: frame at `0x404f4c`, sent `0x404f88`, same 64 bytes,
+same three gates, same `Sleep(900)`, same discarded read. fw106/fw107 carry the
+identical build at the identical address as fw110.
 
 ### 5.5 Per-block verify and repair — `FUN_00401c90` @ `0x00401c90` [D]
 `ECX` = pointer to the 1024 source bytes, stack arg = block index [D]
