@@ -162,6 +162,27 @@ bytes in, 1024 bytes of payload)**, and the write is `A0 11` with 1024 bytes at
 `+0x10` (§1). Read and write are exact mirrors, which is what read-modify-write
 needs.
 
+### 2.2a `A1 02` is a small query, not a blob read  [D]
+
+`FUN_004045e0`:
+```
+40466c  movl $0x2a1,-0x94(%ebp)    ; A1 02, 64-byte request
+404676  calll 0x403850             ; send
+4046a8  movl $0x40,%esi            ; 64-byte response
+4046b0  movb $0xa1,-0x54(%ebp)     ; response report id = 0xA1
+4046b4  calll 0x403920             ; receive
+4046c3+ unpacks dwords from -0x44, -0x40, -0x3c, ... into a caller struct
+```
+So the two reads differ in both report id and size: `A1 12` answers on report
+`0xA0` with 1041 bytes (the settings blob), `A1 02` answers on report `0xA1`
+with 64 and yields a handful of 32-bit fields. What those fields mean is **[G]**
+and is not guessed here.
+
+**Both response report ids are the *other* report from the request.** A request
+on `0xA1` is answered on `0xA0` when the payload is large and on `0xA1` when it
+is small — i.e. the report id tracks the transfer size, not the direction. Worth
+knowing before assuming a request/response pair shares a report id.
+
 ### 2.3 There is no factory-reset command  [D], and §4.1 needs adjusting
 
 **No config tool version contains a command that resets the device.** The set is
