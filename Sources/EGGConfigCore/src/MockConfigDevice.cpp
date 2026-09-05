@@ -12,7 +12,7 @@ namespace {
 // than a constant fill it would reject for the wrong reason.
 std::vector<std::uint8_t> defaultRecord() {
     std::vector<std::uint8_t> r(kLargeLen, 0);
-    r[0] = kReportLarge;
+    r[0] = kReportSmall;      // §2.1: the device answers with 0xA1 either way
     r[kStatusOffset] = kStatusReady;
     std::uint8_t* p = r.data() + kPayloadOffset;
     p[0x01] = 0x80;          // [O] eight of nine captured reads
@@ -63,7 +63,16 @@ Reply MockConfigDevice::readRecord() {
     r.outcome = Outcome::Ok;
     r.status = kStatusReady;
     r.buf = record_;
-    r.buf[0] = kReportLarge;
+    // wire-observed.md §2.1: the device never sends the report-id slot, so an
+    // N-byte report reads back N-1 bytes. record_ stays kLargeLen internally so
+    // every payload offset is unchanged; only the REPLY is short. Until
+    // 2026-09-05 this mock returned kLargeLen and so certified a Transport
+    // check that rejected every real read.
+    // MockConfigDevice implements ConfigLink, which sits ABOVE Transport, so it
+    // returns what Transport hands up: full length, device bytes at [0..N-2].
+    // Byte 0 is 0xA1 because that is what the device really answers with, for
+    // EITHER report (§2.1) -- not 0xA0, which nothing ever sends.
+    r.buf[0] = kReportSmall;
     r.buf[kStatusOffset] = kStatusReady;
 
     if (roll(f_.implausibleRate)) {

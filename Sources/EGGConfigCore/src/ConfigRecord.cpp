@@ -34,10 +34,17 @@ bool plausibleImpl(const std::vector<std::uint8_t>& r, Log* log) {
         if (log) log->warn("record is not 1041 bytes");
         return false;
     }
-    if (r[0] != kReportLarge) {
-        if (log) log->warn("record does not begin with report id 0xA0");
-        return false;
-    }
+    // BYTE 0 IS NOT VALIDATED, AND MUST NOT BE. It is the report-id slot, and
+    // wire-observed.md §2.1 establishes the device never sends it: on Windows
+    // the vendor's app writes 0xA1 there itself, and this device answers EVERY
+    // feature read with 0xA1 regardless of which report was requested -- so
+    // even the captured vendor reply has 0xA1, not 0xA0. On macOS hidapi
+    // leaves it 0x00 (observed 2026-09-05, first read from the real device).
+    //
+    // This used to require r[0] == kReportLarge (0xA0), a value that appears
+    // there on NO platform. It passed the suite only because MockConfigDevice
+    // set the byte the check wanted. The status byte at kStatusOffset is the
+    // real signal and Transport already checks it.
     const std::uint8_t* p = r.data() + kPayloadOffset;
     bool allSame = true;
     for (std::size_t i = 1; i < kPayloadLen; ++i)

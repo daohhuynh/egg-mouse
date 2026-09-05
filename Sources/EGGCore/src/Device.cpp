@@ -1,6 +1,9 @@
 #include "egg/Device.h"
 
 #include <hidapi.h>
+#ifdef __APPLE__
+#include <hidapi_darwin.h>
+#endif
 
 #include <cstdio>
 #include <cwchar>
@@ -21,6 +24,32 @@ bool g_inited = false;
 
 bool initHid() {
     if (!g_inited) g_inited = (hid_init() == 0);
+#ifdef __APPLE__
+    // MUST come after hid_init: the header says calling it before hid_init or
+    // after hid_exit has no effect, and hid_init resets it to 1.
+    //
+    // hidapi opens every device with kIOHIDOptionsTypeSeizeDevice on macOS,
+    // which SEIZES it from the system. For a device the OS treats as an input
+    // device that is refused with 0xE00002C1 kIOReturnNotPrivileged -- observed
+    // on this mouse 2026-09-05, after Input Monitoring had already been granted
+    // and the earlier 0xE00002E2 kIOReturnNotPermitted had gone away.
+    //
+    // Non-exclusive is not a workaround for that error, it is what the vendor
+    // does. Both Endgame tools open the device SHARED:
+    //   CreateFileW(path, 0xC0000000, 3, NULL, 3, 0, NULL)   [D]
+    //   share mode 3 = FILE_SHARE_READ|FILE_SHARE_WRITE
+    //   updater-protocol.md:101, config-protocol.md:207
+    // so CLAUDE.md §4.2's "mirror the vendor" points here, and hidapi's
+    // exclusive default is the deviation. We exchange only FEATURE reports and
+    // never read the input stream, so seizing buys us nothing and costs the
+    // user their mouse for the duration.
+    //
+    // The tradeoff it accepts, recorded rather than hidden: nothing now stops a
+    // second process interleaving with ours. The vendor accepts the same one --
+    // share mode 3 across two separate executables -- and only the device can
+    // say whether interleaving matters (working memory, flagged item #3).
+    if (g_inited) hid_darwin_set_open_exclusive(0);
+#endif
     return g_inited;
 }
 

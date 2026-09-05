@@ -125,8 +125,23 @@ static void testPlausible() {
     std::vector<std::uint8_t> shortBuf = r.buf; shortBuf.resize(kLargeLen - 1);
     ok("a short record is refused", !plausible(shortBuf));
 
-    std::vector<std::uint8_t> badId = r.buf; badId[0] = 0xA1;
-    ok("a record with the wrong report id is refused", !plausible(badId));
+    // BYTE 0 MUST NOT AFFECT PLAUSIBILITY. It is the report-id slot the device
+    // never sends (wire-observed.md §2.1). This test used to assert the exact
+    // opposite -- it set byte 0 to 0xA1 and required plausible() to REFUSE --
+    // and 0xA1 is what the real device actually answers with, for either
+    // report. So the suite was pinning a check that rejects every genuine read.
+    // Found 2026-09-05 by the first read from the physical mouse; on macOS
+    // hidapi leaves the slot 0x00, which the old check also refused.
+    for (std::uint8_t slot : {std::uint8_t(0x00),   // macOS hidapi
+                              std::uint8_t(0xA0),   // the id we requested
+                              std::uint8_t(0xA1),   // what the device sends
+                              std::uint8_t(0x5A)}) {
+        std::vector<std::uint8_t> v = r.buf; v[0] = slot;
+        char msg[96];
+        std::snprintf(msg, sizeof msg,
+                      "record stays plausible with report-id slot 0x%02x", slot);
+        ok(msg, plausible(v));
+    }
 
     for (int fill : {0x00, 0xFF, 0x5A}) {
         std::vector<std::uint8_t> flat = r.buf;

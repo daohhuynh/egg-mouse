@@ -114,15 +114,40 @@ Reply Transport::receive(std::uint8_t reportId, const char* what) {
             r.outcome = Outcome::TransportFail;
             return r;
         }
-        if (static_cast<std::size_t>(rc) < want) {
-            char b[128];
-            std::snprintf(b, sizeof b, "read %d bytes, report declares %zu", rc, want);
+        // N-1 IS THE COMPLETE READ, NOT A SHORT ONE. wire-observed.md §2.1:
+        // buf[0] is the report-id slot and THE DEVICE NEVER SENDS IT, so an
+        // N-byte report reads back N-1 bytes of content. Both captured Windows
+        // replies show it -- frames/01-baseline-003-in-01.bin is 1040 for the
+        // 1041-byte 0xA0 report, frames/01-baseline-001-in-01.bin is 63 for the
+        // 64-byte 0xA1 -- and 0x10 + 1024 = 1040 lands the payload flush.
+        //
+        // This check demanded `want` and so failed every real read. It passed
+        // the whole test suite because MockConfigDevice returns `want`: the
+        // mock was built from the same wrong reading, which is exactly the
+        // limit CLAUDE.md decision #1 records ("if the derivation is wrong the
+        // mock is confidently wrong in the same direction"). Caught 2026-09-05
+        // by the first read from the real device.
+        //
+        // Resizing to rc leaves the buffer byte-comparable with the capture
+        // files, index for index.
+        const std::size_t least = want - 1;
+        if (static_cast<std::size_t>(rc) < least) {
+            char b[160];
+            std::snprintf(b, sizeof b,
+                "read %d bytes, expected at least %zu (report %zu, less the "
+                "report-id slot the device does not send)", rc, least, want);
             log_.warn(b);
             r.buf.resize(static_cast<std::size_t>(rc));
             log_.frame(Dir::In, r.buf, what);
             r.outcome = Outcome::ShortRead;
             return r;
         }
+        // Deliberately NOT resized to rc. The buffer stays `want` with the
+        // device's N-1 bytes at [0..N-2] and the last byte left zero, which is
+        // exactly the vendor's own model: it allocates N, writes the report id
+        // into buf[0] itself, and the device fills the rest. wire-observed.md
+        // §2.1 proves buf[i] == wire[i]. Everything above Transport therefore
+        // keeps seeing a full-length record and needs no change.
 
         r.status = r.buf[kStatusOffset];
         log_.frame(Dir::In, r.buf, what);
