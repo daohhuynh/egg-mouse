@@ -104,12 +104,41 @@ std::unique_ptr<Device> Device::open(std::uint16_t productId, Log& log) {
     if (!d) {
         // CLAUDE.md §2: "Detect missing macOS permissions and say so rather
         // than failing silently." Enumeration needs no permission; opening a
-        // device this OS considers an input device does.
+        // device this OS considers an input device may.
+        //
+        // There is more than one cause and we do not know which is common, so
+        // this lists them without ranking them. An earlier version of this
+        // message said the cause "is usually Input Monitoring" -- that was a
+        // guess stated as a likelihood, and CLAUDE.md §1.2 does not allow it.
+        // Whether Input Monitoring is needed at all is still device-gated and
+        // unverified (§5).
         log.warn("the interface was found but could not be opened.");
-        log.note("On macOS this is usually Input Monitoring: grant it to your "
-                 "terminal in System Settings > Privacy & Security > Input "
-                 "Monitoring, then run again. Root is not required and will not "
-                 "help.");
+        if (const wchar_t* e = hid_error(nullptr))
+            log.note("hidapi says: " + narrow(e));
+
+        // Distinguish "it went away" from "it is there and will not open".
+        // Cheap, and it removes the biggest ambiguity for free.
+        bool stillThere = false;
+        for (const Match& x : enumerateAll())
+            if (x.path == m.path) { stillThere = true; break; }
+
+        if (!stillThere) {
+            log.note("the interface has disappeared since enumeration -- the "
+                     "device was probably unplugged or changed mode. Re-run.");
+            return nullptr;
+        }
+        log.note("the interface is still present, so it is being refused "
+                 "rather than missing. Known causes, in no particular order:");
+        log.note("  1. another process holds the device. Observed 2026-09-05: "
+                 "a browser held this exact mouse open for exclusive access "
+                 "and the kernel refused another process's open. Quit browsers "
+                 "and any vendor or web configurator, then re-run.");
+        log.note("  2. macOS Input Monitoring. Grant it to your terminal in "
+                 "System Settings > Privacy & Security > Input Monitoring. "
+                 "Root is not required and will not help.");
+        log.note("  3. the OS has claimed it as an input device.");
+        log.note("To see who holds it:  log show --last 5m --predicate "
+                 "'eventMessage CONTAINS \"exclusive access\"'");
         return nullptr;
     }
 
