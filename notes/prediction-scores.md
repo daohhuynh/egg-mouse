@@ -76,6 +76,29 @@ because no UI can change them.
 
 ---
 
+## Observed, and deliberately NOT scored
+
+Things reality has settled that **were not pre-registered**. They belong here
+rather than in the tally, because counting them would inflate a number whose
+only value is that it was fixed before the data existed.
+
+- **`X/Y Settings` writes nothing** (`gui-surface.md` §6). the owner found the control
+  himself — it was not in `log.txt` and not in the register — and then found
+  that ticking it does not enable APPLY. I had claimed from the wire that the
+  X/Y lock is host-side only, and this agrees with that claim. **It is still not
+  a scored prediction**: I wrote that claim down *after* he told me the control
+  existed, so it is a successful postdiction and nothing more.
+- **The APPLY button is gated on dirty state** (`gui-surface.md` §5). Not
+  predicted at all. It is load-bearing for the capture method, which is why it
+  is written up, but it scores nothing.
+- **The mouse reports firmware 1.07, VID `0x3367`, PID `0x1978`** in the info
+  reply (`wire-observed.md` §2.2). All three were known independently before the
+  capture, so decoding them confirms the *decode*, not a prediction.
+
+The distinction matters more than it looks. Three plausible-sounding hits that
+do not count is exactly the pressure a scoreboard has to resist to stay worth
+keeping.
+
 ## Not yet scored, and what it will take
 
 - **#19 `cfg-basic-page-invisible-buttons`** (`Apply CPI settings` id 1059,
