@@ -43,16 +43,24 @@ read payload    [0]=status 0xa1, [1]=0x01, [2..] the record
 Record offset numbering below matches the serializer offsets already derived
 from `cfg107` — i.e. record `N` is write payload `N+15`.
 
-**That alignment is one fitted constant, and it should be read as such.** The
-wire fixes every offset *relative* to the others with certainty; tying them to
-the `.exe`'s numbering took one shift. What makes it more than a fit is that a
-single shift puts sixteen independently derived predictions on their observed
-bytes at once — polling at 0x05, the LED at 0x08, angle snapping at 0x0a,
-downshift and smoothing sharing 0x0b, motion sync at 0x0c, stage count at 0x0e,
-the CPI flag at 0x23, multiclick at 0x3d and 0x44, sensor angle at 0x70, fps at
-0x71, the acknowledgement at 0x72. One shift cannot coincidentally place
-sixteen. But the shift itself is not separate evidence, and saying otherwise
-would be counting the same fact twice.
+**That alignment is not fitted — it was derived first.** `config-protocol.md`
+§7.2a read the builder out of `cfg107 FUN_00404180`: `memset` the 1041-byte
+buffer, `movl $0x11a0` putting `a0 11 00 00` at `buf[0..3]`, then `rep movsl` of
+0x100 dwords into `leal -0x45c(%ebp)` = **`buf[16]`**. Buffer byte 16 is payload
+byte 15, because the report id occupies `buf[0]`. So the `.exe` and the wire
+agree on the offset without either being adjusted to the other.
+
+That matters for how much the sixteen confirmations are worth. Had the shift
+been fitted, one free parameter would be placing all sixteen predictions and the
+count would partly be measuring the fit. It was not, so it isn't: polling at
+0x05, the LED at 0x08, angle snapping at 0x0a, downshift and smoothing sharing
+0x0b, motion sync at 0x0c, stage count at 0x0e, the CPI flag at 0x23, multiclick
+at 0x3d and 0x44, sensor angle at 0x70, fps at 0x71 and the acknowledgement at
+0x72 each land on an independently derived offset.
+
+The record proper is the 1024 bytes copied by that `rep movsl`, of which only
+`0x00`–`0x72` — 115 bytes — carry anything. Payload byte 1039 is a pad and is
+always zero.
 
 ## 3. What each APPLY moved
 
