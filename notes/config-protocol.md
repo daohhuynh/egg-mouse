@@ -1541,3 +1541,53 @@ function, and in the baseline they read `80 00 00 00` (wire `0x11`–`0x14`).
 which the serializer never copies — suggestive, not established. **Open, and
 listed in `working-memory.md`.** Do not write those four bytes on any inference
 from this paragraph; §1.3 applies and read-modify-write preserves them for free.
+
+## 7.4 The vendor ZEROES record `0x01`–`0x04` on write, and the device reports `0x80` there  [D]+[O]
+
+`FUN_00404180` is the only meaningful caller of the serializer, and the full
+sequence is now accounted for byte by byte:
+
+```
+4041d1  pushl $0x400 ; leal -0x86c(%ebp),%eax ; pushl %ebx(=0) ; pushl %eax
+4041e7  calll 0x508df0                ; memset(payload, 0, 1024)
+4041ec  leal  -0x86c(%ebp), %eax
+4041f2  movl  %esi, %ecx              ; ecx = the settings object
+4041f4  calll 0x4042d0                ; the serializer, 7.3
+4041f9  pushl $0x411 ; leal -0x46c(%ebp),%ecx ; …
+404206  calll 0x508df0                ; memset(frame, 0, 1041)
+404218  movl  $0x11a0, -0x46c(%ebp)   ; a0 11 00 00
+404233  rep   movsl                   ; payload -> frame+0x10, 1024 bytes
+```
+
+**Nothing writes record `0x01`–`0x04`.** The payload is zeroed at `0x4041e7`,
+the serializer skips those four, and no instruction between the call and the
+`rep movsl` touches them. So the vendor transmits `00 00 00 00` there.
+
+The device does not. `01-baseline.pcapng` returns **`80 00 00 00`** at wire
+`0x11`–`0x14` = record `0x01`–`0x04`.
+
+### This is a decision, not a finding, and it is the owner's
+
+Those four bytes are the only place where §4.1's read-modify-write and "do what
+the vendor does" give **different bytes on the wire**:
+
+- **§1.3 as written** says preserve what we do not understand, so `egg-config
+  restore` sends the device's own `0x80` back.
+- **Matching the vendor** means zeroing them, because that is what the only
+  known-working writer does.
+
+Neither is obviously safe. Preserving means sending the device a value its own
+tool has never sent it; matching means deliberately discarding a byte the device
+chose to report, which is precisely what §1.3 exists to prevent. A plausible
+reading — `0x80` is a direction or status marker meaningful only device→host —
+is **[G]** and cannot justify either choice.
+
+**Recommendation: follow the vendor and zero them**, on the narrow grounds that
+the vendor's write path is the only write path observed to work, and these four
+bytes are the only ones where we would otherwise diverge from it. But this is
+not mine to settle and nothing is changed until the owner rules.
+
+**Until then `egg-config restore` preserves them** (current behaviour, §1.3's
+default) and must say so when it runs, so the divergence is never silent. The
+same four bytes are also the reason a future frame-by-frame diff of our output
+against a vendor capture will show a difference that is **expected, not a bug**.
