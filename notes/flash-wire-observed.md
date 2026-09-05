@@ -195,15 +195,77 @@ knowing which id, and the only reason we know is that we watched.
 So the guard is: hardcode the sha256 above, compare before the first byte goes
 out, and refuse. Not a warning, a refusal.
 
-### Open, and it matters [G]
+### Which id, and why the other five are not a risk [D]
 
-Why does the updater ship two-then-three per-release images? If 140 versus 142
-is chosen at runtime from something about the device — a hardware revision, a
-sensor variant — then 140 is the right image for *the owner's* mouse and we have no
-evidence it is right for anyone else's. Our constant is correct either way for
-the one device that exists, which is what §2 scopes to. Finding the selection
-site in the `.exe` is the next question, and it is `[D]` work that needs no
-hardware.
+**Cross-reference: `notes/updater-protocol.md` §8 derived this first, from the
+same `.text` reference.** What follows is a second, independent pass done from
+raw bytes on 2026-09-05 -- it agrees, and it adds the typing of all 13
+resource-lookup sites and the capture test. This section previously asked the
+question §8 had already answered; if you change one, change both.
+
+Resolved 2026-09-05. **The selection is a compile-time constant in the vendor's
+binary too.** One `push imm32` feeds `FindResourceW`, and nothing reaches it:
+
+```
+00403207  68 c0 47 54 00    push 0x5447c0     ; lpType -> L"FWFILE"
+0040320c  68 8c 00 00 00    push 0x8c         ; lpName  = MAKEINTRESOURCE(140)
+00403211  6a 00             push 0            ; hModule = NULL
+00403213  ff 15 30 b2 51 00 call [0x51b230]   ; KERNEL32!FindResourceW
+```
+
+No table, no argument, no computation, nothing read from the device. 1.04 is a
+separate code base and hardcodes the same 140, at file offset `0x373a`
+(`68 d8 1c 5a 00 / 68 8c 00 00 00 / 6a 00 / 8b f1 / ff 15 9c e2 56 00`).
+
+**The other five are unreachable, and this is the absence claim §1.2a is about,
+so here is the search space.** Four mechanical scans over the whole 2,133,504-byte
+file, not over Ghidra's view of it (§1.2b):
+
+1. `L"FWFILE"` occurs **twice** in the file: `0x5447c0` in `.rdata` and
+   `0x56cd3e`, which is the type-name string inside `.rsrc` itself. Scanning
+   every 4-byte little-endian occurrence of each VA anywhere in the file:
+   `0x5447c0` is referenced **once**, at `0x2608`, the byte after the `68` above.
+   `0x56cd3e` is referenced **zero** times.
+2. **All 13 resource-lookup call sites were typed**, by reading the `lpType`
+   push at each: twelve `FindResourceW` and one `FindResourceExW`, found by
+   scanning for `ff 15 <IAT slot>` against slots recovered from the import
+   directory. Six push `5` (RT_DIALOG), two push `6` (RT_STRING), one each
+   `0xf0`, `0xf1` and `0xfc11` (MFC private types), and one pushes a global at
+   `0x56751c` — an MFC `CString` constructed at `0x118e1e` from `L"PNG"`. Exactly
+   one pushes `0x5447c0`. **An integer type can never equal a string pointer**,
+   so no other site can name FWFILE whatever its `lpName` turns out to be.
+3. `EnumResourceNamesW/A`, `EnumResourceTypesW` and `EnumResourceLanguagesW` are
+   **not imported** — checked by name against the whole file, both encodings. So
+   the resource directory is never walked; ids can only be named literally.
+4. Independent `[O]` corroboration, which needs none of the above. Split all six
+   images into 65 blocks each and ask which blocks appear verbatim among the
+   1024-byte payloads the host actually sent in `08-flash.pcapng`:
+
+   | id | blocks found in the capture |
+   | --- | --- |
+   | 133, 135, 137, 142, 143 | 0 / 65 each |
+   | **140** | **65 / 65** |
+
+So 140 is what this updater sends to **any** device it talks to, not just to
+The owner's. `§1.4`'s compile-time constant is right, and it matches the vendor's.
+
+What remains `[G]` is *why* five unreachable images ship — nothing here says the
+OP1 8k v2 is the only product 1.10 was built for, only that 1.10 has exactly one
+reachable image. That question no longer gates anything.
+
+### The guard must pin resources, not code
+
+**Updater 1.10 has `.text` byte-identical to 1.06 and 1.07 (same SHA-256), and
+yet 1.10 added a sixth FWFILE that the other two do not have.** A guard keyed on
+code identity would have accepted 1.10 without noticing a new firmware blob had
+appeared in it. Pin the resource set and its hashes; never `.text`.
+
+The trap in the table above is 142's lockstep with 140 — it changes on exactly
+the same releases, which is the pattern that invites "the updater must use
+both". It does not. Only 140 is ever named.
+
+`Tools/pe/fwfile.py` lists and extracts these; `Tests/test_fwfile_set.py` pins
+the whole 1.10 set by hash so a swapped file is loud rather than silent.
 
 ## 6. What is still not known
 
