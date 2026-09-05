@@ -336,9 +336,102 @@ static void testDeterminismAndIdentity() {
        sha256Hex(synth.data(), synth.size()) != std::string(kExpectedSha256));
 }
 
+// Frame layout pinned against the bytes Endgame's updater actually sent, read
+// out of windows-run/08-flash.pcapng (notes/flash-wire-observed.md §2, §3).
+// These are literals on purpose: an offset that drifts by one still produces a
+// well-formed frame with a valid checksum, and every check the DEVICE performs
+// would pass on it. Only a fixed reference catches that class of error, and the
+// only trustworthy reference is what the vendor sent to this mouse.
+static void testObservedFrameLayout() {
+    std::printf("\nframe layout, against the captured vendor stream\n");
+
+    const Frame e = enterBootloader();
+    ok("enter: a1 3a, magic 5a a5 32 at [5..7]",
+       e.size() == 64 && e[0] == 0xA1 && e[1] == 0x3A &&
+       e[5] == 0x5A && e[6] == 0xA5 && e[7] == 0x32);
+    bool enterRestZero = true;
+    for (std::size_t i = 2; i < e.size(); ++i)
+        if (i < 5 || i > 7) enterRestZero = enterRestZero && (e[i] == 0);
+    ok("enter: every other byte is zero", enterRestZero);
+
+    // The observed start frame, in full: a0 03, then zeros, then 0x41 at [16]
+    // and 7d d5 81 00 at [17..20]. 0x41 is 65 -- the block count -- and the
+    // four bytes are the 32-bit sum of all 66560 image bytes, 0x0081d57d.
+    // Reading [15..18] as one 32-bit checksum gives 0x81d57d41, which looks
+    // plausible and is wrong; that misreading is exactly what this pins down.
+    const Frame s0 = bootloaderStart(65, 0x0081d57du);
+    ok("start: a0 03", s0.size() == 1041 && s0[0] == 0xA0 && s0[1] == 0x03);
+    ok("start: block count 0x41 at [16], not [15]",
+       s0[16] == 0x41 && s0[15] == 0x00);
+    ok("start: whole-image sum 7d d5 81 00 at [17..20]",
+       s0[17] == 0x7D && s0[18] == 0xD5 && s0[19] == 0x81 && s0[20] == 0x00);
+    bool startRestZero = true;
+    for (std::size_t i = 2; i < s0.size(); ++i)
+        if (i < 16 || i > 20) startRestZero = startRestZero && (s0[i] == 0);
+    ok("start: nothing else is set", startRestZero);
+
+    // One real block from the capture: index 0x34, and the 1024 data bytes.
+    //
+    // ONE ORIGIN, ALWAYS: offsets are counted on the bytes as transferred, with
+    // the report id included where the wire carries one. Under that convention
+    // the 1024 data bytes start at 16 in BOTH directions -- the write buffer and
+    // the read-back response -- and cfg107 agrees, using frame+0x10 in its
+    // writer and its reader alike.
+    //
+    // This comment previously described a "one-byte stagger" between the two
+    // directions. There is none. That claim came from measuring the write
+    // without its report-id byte and the read with its leading status byte, and
+    // an independent check refuted it from raw file bytes on 2026-09-05, using
+    // the vendor's own checksum as the discriminator: sum(buf[16:1040]) & 0xFFFF
+    // equals the declared checksum on 65 of 65 blocks in both directions in both
+    // captures, and on 0 of 65 at offset 15.
+    //
+    // The genuine asymmetry is at the START of the buffer and is worth keeping
+    // in mind: the device omits the report-id byte from GET_REPORT responses and
+    // returns wLength-1 bytes, so an inbound buffer is one shorter and begins
+    // with a status byte rather than the report id that was requested.
+    std::vector<std::uint8_t> data(kBlockSize, 0);
+    data[0] = 0x29;
+    const Frame w = writeBlock(0x34, data.data(), kBlockSize);
+    ok("write: a0 06, index LE16 at [2..3]",
+       w.size() == 1041 && w[0] == 0xA0 && w[1] == 0x06 &&
+       w[2] == 0x34 && w[3] == 0x00);
+    ok("write: checksum LE16 at [4..5]",
+       w[4] == 0x29 && w[5] == 0x00);
+    ok("write: ten zero bytes at [6..15]", [&] {
+           for (std::size_t i = 6; i < 16; ++i) if (w[i]) return false;
+           return true;
+       }());
+    ok("write: data starts at offset 16, same as the response",
+       w[16] == 0x29 && w[15] == 0x00);
+    ok("write: [1040] is a zero pad", w[1040] == 0x00);
+
+    const Frame r = readBlock(0x34);
+    ok("verify: a0 07, index at [2..3], nothing else",
+       r.size() == 1041 && r[0] == 0xA0 && r[1] == 0x07 &&
+       r[2] == 0x34 && r[3] == 0x00 && [&] {
+           for (std::size_t i = 4; i < r.size(); ++i) if (r[i]) return false;
+           return true;
+       }());
+
+    const Frame q = wholeImageChecksumQuery(0x74);
+    ok("finish: a1 08, first 0x34 and last 0x74 at [2..3]",
+       q.size() == 64 && q[0] == 0xA1 && q[1] == 0x08 &&
+       q[2] == 0x34 && q[3] == 0x74);
+
+    const Frame c = bootloaderComplete();
+    ok("complete: a1 09 and nothing else",
+       c.size() == 64 && c[0] == 0xA1 && c[1] == 0x09 && c[2] == 0x00);
+
+    const Frame ps = postSuccess();
+    ok("post-success: a1 13 and nothing else",
+       ps.size() == 64 && ps[0] == 0xA1 && ps[1] == 0x13 && ps[2] == 0x00);
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
+    testObservedFrameLayout();
     testChecksums();
     testInvariants();
     testAdversarial();

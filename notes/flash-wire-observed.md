@@ -24,11 +24,15 @@ Two HID **feature** reports, both on the vendor interface:
 `SET_REPORT` is `bmRequestType 0x21, bRequest 0x09`; `GET_REPORT` is `0xA1,
 0x01`; `wValue = 0x0300 | reportId`, `wIndex = 1`.
 
-**The direction is asymmetric and getting it wrong loses a byte of alignment.**
-Outbound, byte 0 of the buffer is the report id and the payload starts at byte
-1. Inbound, the report id is not in the returned buffer and the payload starts
-at byte 0. So an outbound 1041-byte transfer and an inbound 1040-byte transfer
-carry the same 1040-byte payload.
+**The device omits the report-id byte from responses**, and returns
+`wLength - 1` bytes: ask for 1041 on report `0xA0` and 1040 come back, first
+byte `0x51`; ask for 64 on `0xA1` and 63 come back, first byte `0x50`. So an
+outbound buffer begins with the report id and an inbound one begins with a
+status byte.
+
+That is the only inter-direction asymmetry, and it is at the *start* of the
+buffer. **Measured on the bytes as transferred, every offset below is the same
+in both directions.**
 
 Every command is answered. The first payload byte of a response is a status
 byte — `0x50` from the bootloader, `0x51` on a block read-back, `0xa1` from the
@@ -71,37 +75,54 @@ last thing the updater does.
 
 ## 3. Block format
 
-Write payload, 1040 bytes:
+Both are given in **transferred-buffer offsets** — the bytes as they appear in
+the capture, report id included where the wire carries one.
+
+Write buffer, 1041 bytes:
 
 | offset | size | meaning |
 | --- | --- | --- |
-| 0 | 1 | `0x06` |
-| 1 | 2 | block index, LE |
-| 3 | 2 | checksum, LE |
-| 5 | 10 | zero |
-| 15 | 1024 | data |
-| 1039 | 1 | zero pad |
+| 0 | 1 | `0xA0` report id |
+| 1 | 1 | `0x06` |
+| 2 | 2 | block index, LE |
+| 4 | 2 | checksum, LE |
+| 6 | 10 | zero |
+| **16** | 1024 | data |
+| 1040 | 1 | zero pad |
 
-Read-back response payload, 1040 bytes:
+Read-back response, 1040 bytes:
 
 | offset | size | meaning |
 | --- | --- | --- |
-| 0 | 1 | `0x51` |
+| 0 | 1 | `0x51` status |
 | 1 | 1 | `0x01` |
 | 2 | 4 | block index, LE |
 | 6 | 2 | checksum, LE |
 | 8 | 8 | zero |
-| 16 | 1024 | data |
+| **16** | 1024 | data |
 
-Note the one-byte stagger: data sits at +15 going out and +16 coming back,
-because the response carries an extra status byte. Assuming a symmetric layout
-shifts every byte by one and the checksum still passes on the block you built
-from the wrong offset.
+**Corrected 2026-09-05.** An earlier version of this section claimed a one-byte
+stagger — data at +15 outbound and +16 inbound. That was wrong, and it was wrong
+in a specific and instructive way: it measured the two directions from different
+origins, excluding the write's report-id byte while including the read's leading
+status byte. An independent check refuted it from raw file bytes, using the
+vendor's own checksum as the discriminator: `sum(buf[16:1040]) & 0xFFFF` matches
+the declared checksum on 65 of 65 blocks in both directions in both captures,
+and at offset 15 it matches 0 of 65.
+
+The two headers are also not one layout shifted by a byte — the write has a
+1-byte opcode and a 2-byte index, the response a 2-byte status pair and a 4-byte
+index. They are different headers that happen to be the same length.
+
+The lesson generalises past this one field: **state which origin you are
+counting from, every time.** The same confusion produced two separate false
+alarms while reading this capture, in opposite directions.
 
 ### The checksum
 
 **Sum of the 1024 data bytes, truncated to 16 bits.** Nothing more — no seed, no
-carry fold, no CRC.
+carry fold, no CRC. (An independent check specifically tested CRC-16/CCITT
+against these blocks and refuted it.)
 
 Checked on all 130 block writes across both flashes: 130 of 130 agree, and the
 device echoed both the index and the checksum back correctly every time. The 10

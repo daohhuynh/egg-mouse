@@ -224,6 +224,22 @@ mutate kill "whole-image checksum truncated to 16 bits" "$FW" \
 # admit a wrong image -- any corruption it would catch, memcmp catches too.
 # It is defence in depth against a bug in our own memcmp, and nothing else, so
 # no behavioural test can distinguish it. Recorded rather than papered over.
+# Mutants the CAPTURE taught us to fear. Each is an offset that still produces a
+# well-formed frame with a valid checksum, so every check the DEVICE performs
+# passes on it. Only a fixed reference catches this class, which is why
+# Tests/test_flash.cpp now pins the layout against the bytes the vendor sent.
+mutate kill "block count moved to frame [15]" "$FC" \
+'    f[16] = blockCount;|||    f[15] = blockCount;  // MUTANT'
+
+mutate kill "whole-image sum shifted down two bytes" "$FC" \
+'    f[17] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);|||    f[15] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);  // MUTANT'
+
+mutate kill "read-back compared at the write offset, not the response offset" "$WP" \
+'                std::memcmp(back.data() + 16, src, kBlockSize) == 0;|||                std::memcmp(back.data() + 15, src, kBlockSize) == 0;  // MUTANT'
+
+mutate kill "device checksum read from the index field" "$WP" \
+'                static_cast<std::uint16_t>(back[6] | (back[7] << 8));|||                static_cast<std::uint16_t>(back[4] | (back[5] << 8));  // MUTANT'
+
 mutate equiv "removes the per-block checksum comparison" "$WP" \
 '            const bool sumMatch = devSum == blockChecksum(src, kBlockSize);|||            const bool sumMatch = true;  // MUTANT (equivalent)'
 

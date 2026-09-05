@@ -19,11 +19,21 @@ residue named. A line left out is an error, not a default.
 
 FRAMING, all [O] from windows-run/ (see notes/flash-wire-observed.md §1):
 
-  write payload  [0]=0x11 command, record body starts at payload[15]
-  read payload   [0]=status, [1]=0x01, record body starts at payload[16]
+  write buffer, 1041 bytes  [0]=0xA0 report id, [1]=0x11 command, record at [16]
+  read buffer,  1040 bytes  [0]=0xA1 status,    [1]=0x01,         record at [16]
 
-The one-byte stagger between the two directions is real and is the same stagger
-the firmware blocks have. Assuming symmetry misaligns every field by one.
+**ONE origin, both directions: the bytes as transferred.** The record starts at
+offset 16 either way, and cfg107 agrees -- its write builder and its read parser
+both use frame+0x10.
+
+An earlier version of this file described a "one-byte stagger" between the
+directions. That was an artefact of measuring the two directions from different
+origins (excluding the write's report-id byte but including the read's leading
+status byte), not a property of the protocol. An independent check refuted it on
+2026-09-05. The real asymmetry is elsewhere and is worth knowing: the device
+OMITS the report-id byte from GET_REPORT responses and returns wLength-1 bytes,
+so a read buffer is one byte shorter and its [0] is a status byte rather than
+the report id it was asked for.
 
   python3 Tools/capture/ingest.py windows-run/02-basic.pcapng \
           Tools/capture/maps/02-basic.json  > /tmp/02.json
@@ -37,13 +47,7 @@ import usbpcap  # noqa: E402
 
 CMD_WRITE_SETTINGS = 0x11
 CMD_READ_SETTINGS = 0x12
-WRITE_RECORD_BASE = 15
-READ_RECORD_BASE = 16
-
-
-def payload(t):
-    """Outbound buffers carry the report id at byte 0; inbound ones do not."""
-    return t.data[1:] if not (t.bmRequestType & 0x80) else t.data
+RECORD_BASE = 16          # both directions, measured on the transferred bytes
 
 
 def settings_writes(path):
@@ -52,9 +56,9 @@ def settings_writes(path):
     for t in xf:
         if t.bmRequestType & 0x80:
             continue
-        p = payload(t)
-        if len(p) == 1040 and p[0] == CMD_WRITE_SETTINGS:
-            out.append((t.ts, p[WRITE_RECORD_BASE:]))
+        b = t.data
+        if len(b) == 1041 and b[1] == CMD_WRITE_SETTINGS:
+            out.append((t.ts, b[RECORD_BASE:]))
     return out
 
 
@@ -64,9 +68,9 @@ def settings_reads(path):
     for t in xf:
         if not (t.bmRequestType & 0x80):
             continue
-        p = payload(t)
-        if len(p) == 1040 and p[1] == 0x01 and p[0] not in (0x50, 0x51):
-            out.append((t.ts, p[READ_RECORD_BASE:]))
+        b = t.data
+        if len(b) == 1040 and b[1] == 0x01 and b[0] not in (0x50, 0x51):
+            out.append((t.ts, b[RECORD_BASE:]))
     return out
 
 
@@ -140,8 +144,8 @@ def build(capture, mapping):
     return {
         "capture": os.path.basename(capture),
         "note": ("record offsets are relative to the serialized settings record,"
-                 " i.e. write payload byte %d and read payload byte %d"
-                 % (WRITE_RECORD_BASE, READ_RECORD_BASE)),
+                 " which begins at offset %d of the transferred bytes in BOTH"
+                 " directions" % RECORD_BASE),
         "writes": len(wr),
         "reads": len(rd),
         "observations": obs_count,

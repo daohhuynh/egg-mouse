@@ -35,13 +35,22 @@ it is the cheapest §4.4 stage-1 command there is.
 
 ## 2. Framing of the record
 
+Offsets are on the bytes **as transferred**, one origin for both directions:
+
 ```
-write payload   [0]=0x11, [1..14] fourteen bytes, [15..] the record
-read payload    [0]=status 0xa1, [1]=0x01, [2..] the record
+write buffer, 1041 bytes   [0]=0xA0 report id, [1]=0x11 command, record at [16]
+read buffer,  1040 bytes   [0]=0xA1 status,    [1]=0x01,         record at [16]
 ```
 
-Record offset numbering below matches the serializer offsets already derived
-from `cfg107` — i.e. record `N` is write payload `N+15`.
+Record `N` is buffer byte `N + 16`, in **both** directions. `cfg107` agrees
+independently: its write builder targets frame+0x10 and its read parser reads
+frame+0x10 — the same constant, both ways.
+
+**Corrected 2026-09-05**, after an independent check refuted an earlier wording
+that put the write's record at 15 and the read's at 16. That asymmetry was an
+artefact of measuring the two directions from different origins, not a property
+of the protocol. The real asymmetry is that the device omits the report-id byte
+from responses and returns one byte fewer than asked for.
 
 **That alignment is not fitted — it was derived first.** `config-protocol.md`
 §7.2a read the builder out of `cfg107 FUN_00404180`: `memset` the 1041-byte
