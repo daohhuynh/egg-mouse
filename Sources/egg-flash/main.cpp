@@ -16,6 +16,8 @@ static int usage() {
         "\n"
         "  egg-flash image <updater.exe>   validate the firmware image and stop\n"
         "  egg-flash dryrun <updater.exe>  emit the exact byte stream, send nothing\n"
+        "  egg-flash stream <updater.exe>  the same stream in full, one frame per\n"
+        "                                  line, for diffing against a capture\n"
         "  egg-flash help\n"
         "\n"
         "The image is always FWFILE resource %u of the .exe you name. That is a\n"
@@ -51,6 +53,33 @@ int main(int argc, char** argv) {
                 img.deviceIndex(0), img.deviceIndex(img.blockCount() - 1));
 
     if (verb == "image") return 0;
+
+    // "stream" prints every frame in full, one per line, so the whole outbound
+    // byte sequence can be diffed against a capture of the vendor's tool doing
+    // the same flash. That comparison is worth more than the frozen golden file
+    // §4.3 asks for, because the reference is not something we produced -- it is
+    // what Endgame's own updater actually sent to this exact mouse.
+    if (verb == "stream") {
+        auto emit = [](const char* what, const Frame& f) {
+            std::printf("%s ", what);
+            for (std::size_t i = 0; i < f.size(); ++i) std::printf("%02x", f[i]);
+            std::printf("\n");
+        };
+        emit("enter", enterBootloader());
+        emit("start", bootloaderStart(
+            static_cast<std::uint8_t>(img.blockCount()), img.checksum()));
+        for (std::size_t i = 0; i < img.blockCount(); ++i) {
+            const std::uint8_t idx = img.deviceIndex(i);
+            emit("write", writeBlock(idx, img.block(i), kBlockSize));
+            emit("verify", readBlock(idx));
+        }
+        emit("wholesum",
+             wholeImageChecksumQuery(img.deviceIndex(img.blockCount() - 1)));
+        emit("complete", bootloaderComplete());
+        emit("postsuccess", postSuccess());
+        return 0;
+    }
+
     if (verb != "dryrun") return usage();
 
     std::printf("\nthe exact byte stream, first 16 bytes of each frame:\n");
