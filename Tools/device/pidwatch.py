@@ -55,7 +55,12 @@ def render(s):
     out = []
     for pid, ver, up, u in sorted(s):
         tag = NAMES.get(pid, "*** UNKNOWN PID -- THIS IS A FINDING ***")
-        v = "?" if ver is None else "0x%04x (fw %d.%02d)" % (ver, ver >> 8, ver & 0xFF)
+        # bcdDevice is BCD: each nibble is a decimal digit, so 0x0110 is 1.10
+        # and NOT 1.16. Formatting it with %d printed "1.16" for firmware 1.10 --
+        # correct for 1.04/1.06/1.07 by coincidence (low byte < 0x0a) and wrong
+        # from 1.10 on, which is the version the device actually runs. hidobserve
+        # .py already had this right with %x; this line did not.
+        v = "?" if ver is None else "0x%04x (fw %x.%02x)" % (ver, ver >> 8, ver & 0xFF)
         out.append("  PID 0x%04x %-12s ver=%-20s usagepage=0x%02x usage=0x%02x"
                    % (pid, tag, v, up or 0, u or 0))
     return "\n".join(out)
