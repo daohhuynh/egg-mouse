@@ -102,12 +102,29 @@ def main():
     # IN-QUEUE MEANS QUEUED, NOT READ. Counting a queue whose read has not
     # landed turns a real hole into a clean row, so say so out loud: for every
     # queue file, how much of it is actually present in read_<tag>.json.
+    #
+    # A HAND READ IS A READ. handread.json holds functions read by hand and
+    # written up in the notes, and the OPEN column has always honoured it --
+    # but this block did not, so every hand-read function counted as
+    # unharvested. On 2026-09-05 that made readqueue_fw110.json look 70 bodies
+    # short when 8 of those were hand-read, recorded, and written up in
+    # updater-protocol.md, 0x00403960 (the flash sequence) and 0x00403200 (the
+    # FWFILE load) among them. The two sources must agree or the tool argues
+    # with itself, and the alarming direction is the one that gets believed.
     readhash = set()
+    hand = {}
+    hp = os.path.join(AN, "handread.json")
+    if os.path.exists(hp):
+        with open(hp) as fh:
+            hand = {k: {x.lower() for x in v} for k, v in json.load(fh).items()}
     for t in TAGS:
+        done = set(hand.get(t, ()))
         rp = os.path.join(AN, f"read_{t}.json")
-        if not os.path.exists(rp):
+        if os.path.exists(rp):
+            with open(rp) as fh:
+                done |= {e.lower() for e in json.load(fh)}
+        if not done:
             continue
-        done = {e.lower() for e in json.load(open(rp))}
         for r in records(t):
             if r["entry"].lower() in done:
                 h = bodyhash(r)
@@ -175,6 +192,44 @@ def main():
               % (tag, n, q, m, h_, n - q - m - h_, ob, note))
     print()
     print("distinct OPEN bodies, union over all binaries: %d" % len(openrep))
+
+    # OPEN 0 DOES NOT MEAN EVERYTHING IS READ, and on 2026-09-05 it was read
+    # that way. OPEN counts a body as covered when it is in a reading QUEUE;
+    # a queue that was never harvested still shows OPEN 0. So print the
+    # difference here rather than leaving it to be noticed in the block above,
+    # and split it, because the two halves need opposite responses.
+    unhashable, unread = [], []
+    for tag in ("fw110",):
+        qp = os.path.join(AN, f"readqueue_{tag}.json")
+        if not os.path.exists(qp):
+            continue
+        with open(qp) as fh:
+            q = json.load(fh)
+        handt = set(hand.get(tag, ()))
+        rp = os.path.join(AN, f"read_{tag}.json")
+        if os.path.exists(rp):
+            with open(rp) as fh:
+                handt |= {e.lower() for e in json.load(fh)}
+        for h, reps in q.items():
+            if h in readhash:
+                continue
+            mine = [r for r in reps if r[0] == tag]
+            if any(r[1].lower() in handt for r in mine):
+                continue
+            (unhashable if max(r[2] for r in reps) < 16 else unread).append(
+                (mine[0][1] if mine else reps[0][1], max(r[2] for r in reps)))
+    if unhashable or unread:
+        print("\nfw110 HARVEST RESIDUE -- what OPEN cannot show:")
+        print("  %4d sub-16-byte bodies. classify.sigs() will not hash these, so they"
+              % len(unhashable))
+        print("       can NEVER be counted harvested. Permanent artefact, not a task;")
+        print("       clear them via handread.json, one address at a time.")
+        print("  %4d bodies of >=16 bytes, %d bytes, GENUINELY UNREAD."
+              % (len(unread), sum(s for _, s in unread)))
+        if unread:
+            print("       largest: %s" % ", ".join(
+                "%s(%dB)" % (a, s) for a, s in sorted(unread, key=lambda x: -x[1])[:6]))
+
     if "--queue" in sys.argv:
         out = sys.argv[sys.argv.index("--queue") + 1]
         json.dump({k: v for k, v in sorted(openrep.items())}, open(out, "w"), indent=0)
