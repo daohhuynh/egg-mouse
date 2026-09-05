@@ -194,3 +194,29 @@ following lines set X and Y to different values, which dirty normally. It also
 means the **fifth byte of each 5-byte CPI record is still unexplained** — it was
 the obvious candidate for an X/Y-independent flag, and this rules that out: a
 control that never writes cannot be what sets it.
+
+
+## 7. The Multiclick Filter acknowledgement is one-shot  [O]
+
+The owner, 2026-09-05: *"after you tick i understand and click apply, the whole line
+disappears"*. The `I understand the multiclick filter is not a traditional
+debounce slider...` checkbox gates the multiclick sliders, and once acknowledged
+and applied it is removed from the page permanently — it cannot be un-ticked.
+
+Two consequences, both practical.
+
+**It can be captured exactly once, ever.** Every later run of `04-buttons` will
+find it absent, so that numbered line becomes `NOT PRESENT` with no APPLY behind
+it. This is the case `fieldmap.py`'s `NO_APPLY` marker exists for, and it is why
+the marker had to be a property of the log rather than of the procedure — no
+amount of care at the machine can produce that frame a second time.
+
+**Whether it reaches the device at all is open, and the capture answers it for
+free.** If the APPLY that accompanies the tick moves no record byte, the
+acknowledgement is host-side state (registry or an ini) and the mouse never
+learns about it. `fieldmap.py` already prints `NO BYTES CHANGED` with exactly
+that reading. A one-shot UI gate that persists across reinstalls would have to
+live on the device; one that does not, would not — so this single diff
+distinguishes them.
+
+Not derived. No address is offered for the gate and none was looked for.
