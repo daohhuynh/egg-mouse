@@ -145,3 +145,28 @@ addresses; reproducing any of it needs your own copy.
 Not yet chosen. The vendor binaries are Endgame Gear's and are not redistributed
 here. Protocol facts about hardware are not copyrightable, and this is an
 independent implementation from documented facts.
+
+
+## Changing one setting
+
+```
+egg-config set                      # list the settable fields
+egg-config set polling 1000         # dry run: says what it would write
+egg-config set polling 1000 --yes   # read, change one byte, write, verify
+```
+
+**The list is short on purpose.** `CLAUDE.md` §1.3 forbids writing a byte whose
+meaning is a guess, so a field is settable only when its meaning was derived
+from the vendor's own binary and can be cited to an address — the tool prints
+that citation next to every field. The 115-byte settings record is fully
+*mapped* (`notes/config-protocol.md` §7.3) and mostly not *named*, and mapped is
+not good enough to write.
+
+Everything else is still reachable, through `egg-config restore`, which sends
+back bytes the device itself produced — so no byte in it is a guess even where
+we cannot say what it means.
+
+Each `set` reads first and refuses to write after a failed or implausible read,
+checks that its outgoing frame differs from what it read in exactly one byte at
+the cited offset, then reads back and verifies. If more bytes changed on the
+device than the one it sent, it says so.
