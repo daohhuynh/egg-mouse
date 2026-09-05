@@ -3,6 +3,7 @@
 
     fieldmap.py 02-basic.pcapng --log log.txt
     fieldmap.py 02-basic.pcapng            # diffs only, no attribution
+    fieldmap.py *.pcapng --log log.txt --emit Sources/EGGCore/data/settings-1.07.json
 
 THE METHOD. The vendor tool sends the WHOLE settings record on every APPLY. So
 if exactly one setting was changed between two APPLYs, the bytes that differ
@@ -37,11 +38,24 @@ The annotation also needs enough diffs to mean anything: with two APPLYs, every
 byte that moved trivially "moved on every APPLY". Below MIN_FOR_ALWAYS diffs it
 is not reported at all.
 
+--emit WRITES THE FIELD MAP AS DATA, which is the deliverable. CLAUDE.md §3
+says protocol constants live in EGGCore "as data tables, not scattered through
+code", and the difference between this tool producing the table and a human
+retyping it into C++ is an hour of transcription against bytes where a
+transcription error is expensive. Every entry carries the capture it came from,
+the log line that moved it, and a provenance tag, so any row can be re-derived
+from the raw file without trusting this one.
+
+Field NAMES are the log line's own text, verbatim. The tool does not invent a
+name, guess a type, or merge two runs it thinks are related. A human names
+fields later, from a table that already says exactly what evidence exists.
+
 OFFSETS ARE WIRE OFFSETS -- offset 0 is the first byte USBPcap recorded. See
 notes/wire-observed.md 2.1: the translation to a hidapi buffer index is still
 undecided and shifts everything by one. One unambiguous origin, translated once,
 at the edge.
 """
+import json
 import os
 import re
 import sys
@@ -113,17 +127,84 @@ def parse_log(path, capture):
     return lines, problems
 
 
+def encoding_guess(width, obs):
+    """A conservative shape, never a meaning.
+
+    Widths of 1 and 2 are the only ones called; anything else is 'bytes'. For a
+    two-byte run the little-endian reading is offered ONLY as a candidate, and
+    only when every observation's new value is consistent with it -- and the
+    tag stays [G] regardless, because a two-byte run that happens to look like
+    LE16 could equally be two adjacent one-byte fields that moved together.
+    That distinction is exactly what a diff cannot settle."""
+    if width == 1:
+        return "u8"
+    if width == 2:
+        return "le16?"
+    return "bytes"
+
+
+def emit(path, byrun, always, captures, unattributed):
+    fields = []
+    for (s, e), obs in sorted(byrun.items()):
+        w = e - s
+        fields.append({
+            "wire_offset": s,
+            "payload_offset": s - 0x10,
+            "width": w,
+            "encoding": encoding_guess(w, obs),
+            "name": None,                     # a human names it, not this tool
+            "moved_by_every_apply": all(k in always for k in range(s, e)),
+            "tag": "O",                       # observed on the wire, by diff
+            "observations": [
+                {"line": n, "action": a, "old": o, "new": v, "capture": c}
+                for n, a, o, v, c in obs
+            ],
+        })
+    doc = {
+        "device": "Endgame Gear OP1 8k v2",
+        "config_tool": "1.07",
+        "generated_by": "Tools/capture/fieldmap.py",
+        "captures": sorted(captures),
+        "offset_origin":
+            "wire offset -- byte 0 is the first byte USBPcap recorded. The "
+            "translation to a hidapi buffer index is UNDECIDED and shifts every "
+            "offset by one; see notes/wire-observed.md 2.1. Do not use these "
+            "offsets against the device until that is settled.",
+        "naming":
+            "name is null everywhere on purpose. `action` is the log line "
+            "verbatim; a human turns that into a field name.",
+        "fields": fields,
+        "unattributed": unattributed,
+    }
+    with open(path, "w") as f:
+        json.dump(doc, f, indent=1)
+        f.write("\n")
+    print("\n%d field runs -> %s" % (len(fields), path))
+    if unattributed:
+        print("%d capture(s) contributed NO attributed rows: %s"
+              % (len(unattributed), ", ".join(u["capture"] for u in unattributed)))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     logp = None
+    emitp = None
     if "--log" in sys.argv:
         logp = sys.argv[sys.argv.index("--log") + 1]
         args = [a for a in args if a != logp]
+    if "--emit" in sys.argv:
+        emitp = sys.argv[sys.argv.index("--emit") + 1]
+        args = [a for a in args if a != emitp]
+    allruns = {}
+    allalways = set()
+    captures = []
+    unattributed = []
     if not args:
         print(__doc__)
         return 2
 
     for cap in args:
+        captures.append(os.path.basename(cap))
         print("=" * 72)
         print(cap)
         print("=" * 72)
@@ -234,6 +315,23 @@ def main():
                       % (s, e - 1, e - s, "" if e - s == 1 else "s", mark))
                 for n, what, old, new in obs:
                     print("        %2d  %-46s %s -> %s" % (n, what[:46], old, new))
+                allruns.setdefault((s, e), []).extend(
+                    (n, what, old, new, os.path.basename(cap))
+                    for n, what, old, new in obs)
+            allalways |= always
+        else:
+            # A capture that produced diffs but could not be attributed still
+            # has to appear in the output. Silently omitting it would make the
+            # emitted map look complete when a whole section is missing.
+            unattributed.append({
+                "capture": os.path.basename(cap),
+                "write_frames": len(diffs),
+                "log_lines": len(entries),
+                "reason": "counts did not line up, or no log block was found",
+            })
+
+    if emitp:
+        emit(emitp, allruns, allalways, captures, unattributed)
     return 0
 
 

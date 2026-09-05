@@ -122,6 +122,19 @@ was already running when you hit record, the read is not in the file, line 1 has
 nothing to diff against, and `fieldmap.py` refuses to attribute anything at all
 rather than guess.
 
+**Never undo anything, ever.** Settings accumulate through a section. After
+line 7 polling stays at 8000 for the rest of the file; line 8 toggles angle
+snapping *on top of that*; line 9 toggles ripple control on top of that. Each
+APPLY differs from the one before it by exactly one change, which is what makes
+the diff between two consecutive frames *be* that setting and nothing else. Undo
+a setting before making the next change and every line moves two things, and
+neither can be attributed. (the owner asked, 2026-09-05 — it is the single easiest
+thing to get wrong here and it would quietly ruin a whole section.)
+
+The mouse ends the session in an odd configuration. That is expected;
+`07-factory-reset` puts it back, and that capture earns its place by giving us
+every default in one shot.
+
 **Do not run one continuous recording across all the sections.** The correlator
 checks, per file, that the number of APPLYs equals the number of numbered lines;
 that check is the thing that catches a miscount. In one big file a single slip

@@ -165,5 +165,44 @@ sys.argv = argv
 check("varying write header is announced",
       "header VARIES" in buf.getvalue(), buf.getvalue())
 
-print("\n%d/%d passed" % (8 - len(FAILS), 8))
+# 8. --emit produces the deliverable, and an unattributable capture still
+#    appears in it. A map that silently omits a whole section reads as complete
+#    when it is not.
+import json
+out = os.path.join(HERE, "_tmp_map.json")
+fs = build([bytes(s0), bytes(s1), bytes(s2), bytes(s3)])
+records.frames = fieldmap.frames = lambda p: fs
+logp = os.path.join(HERE, "_tmp_log2.txt")
+open(logp, "w").write(LOG3)
+argv = sys.argv
+sys.argv = ["fieldmap.py", "02-basic.pcapng", "--log", logp, "--emit", out]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    fieldmap.main()
+sys.argv = argv
+doc = json.load(open(out))
+check("--emit writes a field map with one run and three observations",
+      len(doc["fields"]) == 1 and len(doc["fields"][0]["observations"]) == 3
+      and doc["fields"][0]["wire_offset"] == 0x20
+      and doc["fields"][0]["payload_offset"] == 0x10, json.dumps(doc)[:400])
+check("--emit refuses to name fields",
+      all(f["name"] is None for f in doc["fields"]))
+check("--emit records the offset-origin caveat",
+      "UNDECIDED" in doc["offset_origin"])
+
+# now the same capture with a MISCOUNTED log: nothing may be attributed, and
+# the capture must still be listed as unattributed rather than vanish.
+open(logp, "w").write("--- 02-basic.pcapng ---\n 1  only one line\n")
+sys.argv = ["fieldmap.py", "02-basic.pcapng", "--log", logp, "--emit", out]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    fieldmap.main()
+sys.argv = argv
+doc = json.load(open(out))
+check("a miscounted capture yields no fields but IS listed as unattributed",
+      doc["fields"] == [] and len(doc["unattributed"]) == 1
+      and doc["unattributed"][0]["write_frames"] == 3, json.dumps(doc)[:400])
+os.unlink(out); os.unlink(logp)
+
+print("\n%d/%d passed" % (12 - len(FAILS), 12))
 sys.exit(1 if FAILS else 0)
