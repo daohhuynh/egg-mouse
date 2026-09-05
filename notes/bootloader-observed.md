@@ -178,3 +178,134 @@ and the button makes it unnecessary to know.
   inference only.
 - **Whether the device auto-enters the bootloader on an invalid application.**
   Untested, and the cheap test is described in §10.2's successor work.
+
+---
+
+## 4. The kernel log settles the button question as far as it can be settled  [O]
+
+2026-09-05. Three button-plug cycles run with `Tools/device/bootwatch.py` at
+100 Hz, then cross-checked against macOS's unified log, which records every USB
+enumeration with a kernel timestamp and is therefore blind to nothing a poll
+could miss.
+
+```
+/usr/bin/log show --last 20m --style compact --predicate 'eventMessage CONTAINS "0x3367"'
+```
+
+Six attach events, perfectly alternating, three of each:
+
+| time | PID | |
+| --- | --- | --- |
+| 13:54:31.155 | `0x1977` | button plug 1 |
+| 13:54:48.187 | `0x1978` | normal plug |
+| 13:54:57.513 | `0x1977` | button plug 2 |
+| 13:55:06.194 | `0x1978` | normal plug |
+| 13:55:23.449 | `0x1977` | button plug 3 |
+| 13:55:29.637 | `0x1978` | normal plug |
+
+**Every button plug produced exactly ONE enumeration, and it was the
+bootloader.** No `0x1978` attach precedes any `0x1977` attach, in any trial.
+
+**What this rules out, and it is the stronger half.** The mechanism "the
+application boots, brings up USB, reads the buttons, then resets into the
+bootloader" is dead. That path requires an application-mode enumeration, the
+kernel logs every enumeration however brief, and there is none. The 100 Hz poll
+could have missed a short transient; the kernel log cannot.
+
+**What it does NOT rule out, per §1.2a.** Firmware that reads the buttons
+*before* bringing up USB would never enumerate as `0x1978` and would produce a
+log identical to the above. So the honest claim is: **the application does not
+participate in bootloader entry via any path that enumerates** `[O]`. That the
+bootloader owns the check outright remains `[G]`.
+
+**Why the residue is smaller than it looks.** For the surviving case to bite,
+the application must be present-and-broken rather than absent: a blank or
+invalid application region cannot be jumped to at all, so the bootloader keeps
+control and recovery works for a different reason. The one genuinely dangerous
+shape is a *partial* image whose first block is valid — block `0x34` holds the
+vector table and is written first — with garbage after it, which the bootloader
+would accept and jump to, and which could then hang before any button is read.
+**That is precisely the state CLAUDE.md §4.2's never-return rule exists to
+prevent**, and it is why invariant 7 (no return from the post-`A0 03` phase
+without a verified image or a loud unrecoverable state) is load-bearing rather
+than decorative. Our flasher retries forever; the vendor's gives up after five
+attempts per block.
+
+## 5. Both report descriptors, recovered from the kernel log  [O]
+
+The same log carries the full `ReportDescriptor` for every collection, base64 in
+the `IOHIDFamily` dictionaries. This closes two open items at zero cost and with
+no device opened.
+
+**Bootloader and application differ by exactly ONE byte.**
+
+| descriptor | bootloader `0x1977` | application `0x1978` |
+| --- | --- | --- |
+| 156-byte (keyboard + vendor + consumer) | offset 35 = `0x00` | offset 35 = `0x01` |
+| 69-byte (mouse) | **byte-identical** | **byte-identical** |
+
+Offset 35 is the keyboard array's `Logical Minimum`. **This is exactly what
+`notes/device-predictions.md` recorded by hand.** §1.2b required treating a hand
+transcription as a derived view rather than evidence; it has now been confirmed
+against the bytes and is `[O]`. The mouse-interface descriptor in application
+mode had **never been captured before** — working memory listed it as open. It
+is identical to the bootloader's.
+
+**156-byte descriptor (application mode):**
+```
+05010906a1018502050719e029e71500250175019508810295017508810195057508150125650507
+190129658100c00601ff0902a10185a17508953f150025010921b10385a07580954115002501
+0922b103c0050c0901a101850619012a3c021501263c02950175108100c00602ff0901a1018503
+190129ff15002500950775088101c00602ff0902a1018508190129ff15002500953f75088101c0
+```
+**69-byte descriptor (both modes):**
+```
+05010902a10185010901a1000509190129081500250195087501810205010930093116008026ff7f
+75109502810609381581257f950175088106050c0a380295018106c0c0
+```
+
+**The transport collection, decoded, and it matches our constants exactly:**
+```
+06 01 ff     Usage Page 0xFF01
+09 02        Usage 0x02
+a1 01        Collection (Application)
+85 a1          Report ID 0xA1
+75 08          Report Size 8 bits
+95 3f          Report Count 63        ->   63 + 1 id  =   64 bytes
+09 21 b1 03    Feature
+85 a0          Report ID 0xA0
+75 80          Report Size 128 bits = 16 bytes
+95 41          Report Count 65        -> 65*16 + 1 id = 1041 bytes
+09 22 b1 03    Feature
+```
+`Protocol.h` hardcodes `kSmallLen = 0x40` (64) and `kLargeLen = 0x411` (1041).
+Both were already `[O]` for the bootloader; they are now `[O]` for the
+**application** collection too, which is the one `egg-config` talks to.
+
+Six top-level collections in total: Generic Desktop mouse (`0x02`) on its own
+interface; and on the other, Generic Desktop keyboard (`0x06`), Vendor
+`0xFF01`/`0x02` (the transport), Consumer (`0x01`), Vendor `0xFF02`/`0x01`, and
+Vendor `0xFF02`/`0x02`. The two `0xFF02` collections are input-only and no
+Endgame binary opens either.
+
+## 6. Something else already holds the device open, exclusively  [O]
+
+```
+AppleUSBHostUserClient::openGated: failed to open Bootloader@00100000:
+provider is already opened for exclusive access by pid 613, Google Chrome
+```
+
+Logged three times across the run, against **both** `Bootloader` and the
+application-mode device. Another process (Spotify) tried to open the mouse and
+the kernel refused it.
+
+**Operational consequence, and it must be handled before §4.4 stage 1:** if a
+browser holds the device when `egg-config` runs, our `hid_open_path` fails, and
+that failure looks exactly like a permissions or protocol fault. Close it first,
+and make the tool say "another process holds this device" rather than reporting
+a generic open failure.
+
+**One free inference the other way:** a userspace process is successfully
+opening this device on macOS right now. That is weak positive evidence that the
+vendor collection is reachable without special entitlement — weak, because that
+process may hold permissions ours will not.
