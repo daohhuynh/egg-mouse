@@ -1464,6 +1464,76 @@ inventory exactly: 133/135/137 byte-identical across all four releases
 > their full hashes differ. Comparing leading bytes therefore says "same" when
 > the blobs are not the same. Compare whole-blob hashes, never prefixes.
 
+## 6.2.10 The reading is harvested and the partition closes — 2026-09-05  [D]
+
+LIST 1 item 3's residue read had landed but had never been written into
+`read_<tag>.json`, so `coverage.py` was still counting thousands of functions as
+unaccounted that had in fact been read. Harvested from
+`scratchpad/read7` paired with workflow `wf_a0798ea3-0cc`'s journal:
+**4,503 function results, 4,268 distinct normalised bodies.**
+
+### The partition, per binary
+
+`readpartition.py`, all nine binaries:
+
+```
+binary     sized in-queue  micrord   hand    OPEN  open bytes
+fw110       9076     5193     3844     39       0           0
+fw107       9076     5193     3844     39       0           0
+fw106       9076     5193     3844     39       0           0
+fw104      10763     6560     4168     35       0           0
+cfg107      9528     5313     4177     38       0           0
+cfg104      9495     5298     4159     38       0           0
+cfg101      9516     5320     4158     38       0           0
+cfg100     11071     6689     4348     34       0           0
+xm1r       23001    12619    10332     50       0           0
+```
+
+**Distinct OPEN bodies, union over all binaries: 0.** `coverage.py` agrees
+independently: `UNACCOUNTED 0` for both fw110 and cfg107, with 1 fw110 function
+resting on a Ghidra FunctionID name alone and **0 such functions at ≥32 bytes**.
+
+### What that number does NOT say, stated before anyone quotes it
+
+1. **Scope.** The 9,076 are Ghidra's *exported functions*. They do not cover
+   `.text`; `gapscan.py` puts DARK at 0.1036% of fw110's `.text` bytes and
+   0.1116% of cfg107's. A residue of 0 means the LIST is accounted for. It is
+   not a claim about the binary (§1.2b).
+2. **In-queue means QUEUED, not READ**, and `readpartition.py` says so itself.
+   Counting a queue whose read never landed turns a real hole into a clean row,
+   so here is the shortfall:
+
+   | | queued | harvested | short |
+   | --- | --- | --- | --- |
+   | all queues | 23,764 | 18,529 | 5,235 |
+   | **excluding xm1r** | 15,759 | 15,433 | **326 (2.07%)** |
+   | xm1r alone | 8,005 | 3,096 | 4,909 |
+
+   The xm1r shortfall is a decision, not a gap: it is a different product AND a
+   different vendor code base, and resuming its read was deliberately declined.
+   The **326** is a real, small hole in the *reading* evidence — those bodies are
+   covered by being in a queue, not by a reader having returned them. It does
+   not touch the device question, which §6.2 settles mechanically by
+   `closure.py` and never by anything a reader said.
+
+### The read's own failure rate, which was recorded wrong
+
+`working-memory.md` carried "112/112 batches, 4,503 functions, **0 failures**".
+The journal disagrees, and reconciling it matters because §6.2 says a failure
+rate of zero is a red flag rather than a pass:
+
+```
+distinct batch keys: started 112, result 112, failed 40
+failed keys that also have a result (retried, succeeded): 40
+failed keys with NO result (genuinely lost):               0
+attempt-level failure rate: 40/152 = 26.3%
+```
+
+So "0 failures" was true at the **batch** level and misleading unqualified.
+Nothing was lost; **26.3% of individual attempts failed and were retried.** That
+is the number worth having, and it is healthy — a reading harness that never
+fails is one that is not being checked.
+
 ## 6.3 What was looked for and NOT found
 
 `CLAUDE.md` §6 forbids silent sampling, and the corollary is that a search which

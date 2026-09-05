@@ -295,12 +295,27 @@ exists, a skipped option is a feature we cannot ship); number → **three values
 | 17 | CPI level 1 → **3200** |
 | 18 | CPI level 2 → **1600** |
 | 19–30 | LOD → **every option in the list, top to bottom, one APPLY each.** Number them 19, 20, 21 … and write down how many there actually were |
-| 31 | CPI level 1 **X** value → **1000** (if X and Y are locked together, write `LOCKED` and skip to 33) |
-| 32 | CPI level 1 **Y** value → **2000** |
-| 33 | radio buttons → click the **1st** from the top. *(These four have no labels in the resource. Write down what they sit next to. If you cannot find four radio buttons, write `NOT FOUND` on 33–36 and move on — that is a finding, not a failure.)* |
-| 34 | radio buttons → click the **2nd** |
-| 35 | radio buttons → click the **3rd** |
-| 36 | radio buttons → click the **4th** |
+| 31 | tick the **X/Y Settings** checkbox |
+| 32 | CPI level 1 **X** → **1000** |
+| 33 | CPI level 1 **Y** → **2000** |
+| 34 | radio buttons → click the **1st** from the top. *(These four have no labels in the resource. Write down what they sit next to. If you cannot find four radio buttons, write `NOT FOUND` on 34–37 and move on — that is a finding, not a failure.)* |
+| 35 | radio buttons → click the **2nd** |
+| 36 | radio buttons → click the **3rd** |
+| 37 | radio buttons → click the **4th** |
+
+**About lines 31–33** (the owner spotted the checkbox, 2026-09-05; an earlier version
+said to write `LOCKED` and skip, which would have thrown the experiment away).
+`X/Y Settings` is checkbox 1063 on DIALOG 135. X and Y move together until it is
+ticked.
+
+The wire already disagrees with the UI here, which is what makes this worth
+three APPLYs. `01-baseline.pcapng` shows the CPI table at wire `0x34` as four
+five-byte records, each holding **two** 16-bit little-endian values —
+`90 01 90 01 00` is 400 and 400, not one 400. So X and Y have always been stored
+separately and the lock is a host-side convenience. Setting X to 1000 and Y to
+2000 separately pins which of the two is which, and line 31 is on its own in
+case the tick itself writes a flag byte — plausibly the fifth byte of each CPI
+record, which is `0x00` in all four and whose meaning is currently unknown.
 
 ### `03-sensor.pcapng` — Advanced Sensor page
 
