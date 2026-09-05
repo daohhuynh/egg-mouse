@@ -89,6 +89,8 @@ void usage() {
       "  egg-config read [--save F]    read the settings record and dump it\n"
       "  egg-config info               small query (A1 02)\n"
       "  egg-config diff A B           compare two saved records, offline\n"
+      "  egg-config frames             offline: the exact bytes of every fixed\n"
+      "                                command frame. Sends nothing.\n"
       "\n"
       "  egg-config factory-reset --yes    A1 13. restores the DEVICE's own\n"
       "                                    defaults. loses all settings.\n"
@@ -387,6 +389,40 @@ int cmdDiff(const std::string& a, const std::string& b) {
     std::vector<std::uint8_t> A, B;
     if (!loadRecord(a, A) || !loadRecord(b, B)) return 1;
     printDiff(A, B, a.c_str(), b.c_str());
+    return 0;
+}
+
+// Every fixed-length command frame this tool can put on the wire, hex, one per
+// line. The exact counterpart of `egg-flash stream`, and it exists for the same
+// reason: so the bytes can be diffed against a capture of Endgame's own tool
+// WITHOUT a device, without a write, and without trusting our own decoder.
+//
+// This closes a real gap. `test_golden_vendor.py` pins the flasher's whole
+// 135-frame stream against 08-flash.pcapng and `test_config_replay.py` pins the
+// A0 11 write frames against 73 captured writes -- but until now NOTHING pinned
+// the three short commands, and `07-factory-reset.pcapng` was referenced by no
+// test at all. A1 13 is the one command in this tool that destroys user data,
+// and it was the least checked frame in the repo.
+//
+// Nothing here touches a device or reads a file, so it is safe to run and safe
+// to pipe. Output goes to stdout alone (§4.3's golden-diff argument, same as
+// the flasher's `stream`).
+int cmdFrames() {
+    struct Cmd { std::uint8_t id; std::uint8_t op; const char* what; };
+    static const Cmd kAll[] = {
+        { kReportSmall, cfg::kSmallQuery,   "A1 02 small query"    },
+        { kReportSmall, cfg::kReadRequest,  "A1 12 read settings"  },
+        { kReportSmall, cfg::kFactoryReset, "A1 13 factory reset"  },
+    };
+    for (const Cmd& c : kAll) {
+        const std::vector<std::uint8_t> f = Transport::frame(c.id, c.op);
+        std::printf("%-22s ", c.what);
+        for (std::uint8_t b : f) std::printf("%02x", b);
+        std::printf("\n");
+    }
+    // A0 11 is deliberately absent: it carries a 1024-byte payload that depends
+    // on what the device just returned, so it has no fixed form. `dryrun` emits
+    // it, against a record, and that is what test_config_replay.py checks.
     return 0;
 }
 
@@ -767,6 +803,7 @@ int main(int argc, char** argv) {
     if (cmd == "restore" && args.size() > 1)
         return cmdRestore(args[1], verbose, yes, policy, vaultPath);
     if (cmd == "diff" && args.size() > 2)    return cmdDiff(args[1], args[2]);
+    if (cmd == "frames")  return cmdFrames();
     if (cmd == "set" && args.size() > 2)
         return cmdSet(args[1], args[2], verbose, yes, policy, vaultPath);
     if (cmd == "dryrun" && args.size() == 4)

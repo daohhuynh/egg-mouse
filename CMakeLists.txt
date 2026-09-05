@@ -82,7 +82,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t config_replay fwfile_set golden_vendor usbpcap)
+  foreach(t config_replay fwfile_set golden_vendor golden_config_cmds usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

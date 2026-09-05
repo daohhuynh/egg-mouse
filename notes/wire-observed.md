@@ -108,6 +108,47 @@ index, and the translation is no longer `[G]`. §4.4 stage 1 should still confir
 it on macOS — hidapi's own report-id convention is a *third* API and has not
 been observed — but nothing here is waiting on it any more.
 
+### 2.1a CONFIRMED ON macOS — hidapi is the third API and it agrees  [O], 2026-09-05
+
+§2.1 left one thing open: "hidapi's own report-id convention is a *third* API and
+has not been observed." It has now. `egg-config read` on the owner's device, macOS
+15 / hidapi via Homebrew, first successful read from the physical mouse.
+
+**The result is (a) again, and the test was not a judgement call.** The macOS
+buffer was compared byte-for-byte against `01-baseline-003-in-01.bin` under all
+three alignments:
+
+| hypothesis | bytes matching |
+| --- | --- |
+| **aligned — `buf[i] == wire[i]`** | **1019 / 1039 (98.08%)** |
+| macOS shifted −1 | 957 / 1039 (92.11%) |
+| macOS shifted +1 | 960 / 1040 (92.31%) |
+
+The two shifts are not merely worse, they are at the floor: the record is 87.5%
+zeros, so ~92% is what *any* misalignment scores by matching zero against zero.
+Only the aligned reading rises above the noise.
+
+**The 20 differing bytes corroborate rather than complicate it.** They are
+settings, and they are self-consistent: wire `0x34`/`0x36`, `0x39`/`0x3b`,
+`0x3e`/`0x40` are the CPI stage X and Y pairs, and in each stage *both copies
+moved together* — `90 01`→`20 03` (400→800), `20 03`→`b0 04` (800→1200),
+`40 06`→`d0 07` (1600→2000). A shift or a misread does not produce paired,
+round-numbered, independently-plausible CPI values in six places. §4's CPI table
+is confirmed a second time, on a second device state, through a second API.
+
+**The one macOS difference is byte 0, and it is the report-id slot.** Windows
+shows `0xa1` there; macOS shows `0x00`. §2.1 explains why: the device never
+sends that byte, so whatever the host left in the slot survives — Windows leaves
+its own `0xA1`, and hidapi leaves a zero. **Byte 0 carries no device
+information on either platform**, which is why `plausible()` no longer looks at
+it. It used to require `0xA0`, a value neither platform produces.
+
+**Outbound is unaffected.** hidapi passes a non-zero `buf[0]` as the reportID
+argument *and* keeps it in the buffer, so `egg-config`'s 64-byte `a1 12` frame
+reaches the wire byte-identical to `frames/01-baseline-002-out-12.bin`.
+`Tests/test_golden_config_cmds.py` pins that, and the two other short frames,
+against the vendor's own captures.
+
 ## 2.2 The info reply, decoded  [O]
 
 The 63-byte reply to `A1 02` (frame 1 of `01-baseline.pcapng`):
@@ -132,13 +173,32 @@ cfg107 `0x413edb` `[D]`. The firmware version matches
 or the pair is one little-endian `0x0107`, is **[G]** — one device on 1.07
 cannot separate those, and a post-flash capture on 1.10 settles it for free.
 
-## 3. The settings record is 114 bytes of content, not 1024
+## 3. The settings record is 115 bytes of content, not 1024
 
-Of the 1040 recorded bytes, **58 are non-zero, and every one of them lies below
-wire offset `0x82`.** Offsets `0x82`–`0x40f` — 910 bytes — are entirely zero.
+Of the 1040 recorded bytes, **58 are non-zero, and every one of them lies at or
+below wire offset `0x82`.** Offsets `0x83`–`0x40f` — 909 bytes — are zero in
+every record observed so far.
 
-That is a large, cheap result. The field-mapping problem is ~114 bytes wide, not
+That is a large, cheap result. The field-mapping problem is ~115 bytes wide, not
 1024, and a diff between two records will have nowhere to hide.
+
+**CORRECTED 2026-09-05 — the original claim was an absence claim from one
+capture, and the second observation broke it.** It read "every one of them lies
+*below* `0x82`. Offsets `0x82`–`0x40f` are entirely zero." Wire `0x82` is `0x00`
+in `01-baseline` and in `10-postflash-baseline`, and it is **`0x01`** in the
+first record read off the device from macOS (`~/.egg-mouse-known-good.bin`,
+stage 1). So `0x82` is a live byte that merely happened to be zero in both
+Windows captures, and the record is 115 bytes (`0x10`–`0x82`), not 114.
+
+This is §1.2a exactly: "the set is exactly N" asserts something about everywhere
+you did not look, and one capture of one device in one state cannot support it.
+`config-protocol.md` §7.3 had it right — it maps the record as `0x10`–`0x82` and
+lists `0x72` (payload) as the last, unattributed byte. This file disagreed with
+it for a day and this file was the one that was wrong.
+
+Note also what the correction did *not* do: `0x83`–`0x40f` is still zero in all
+three records, and that is still an absence claim from three observations. It is
+`[G]` that it is unused, exactly as the paragraph below already says.
 
 It is also a **[G]** that the tail is unused: zero in the default configuration is
 not the same as never written. Some of it plausibly holds per-profile or macro
