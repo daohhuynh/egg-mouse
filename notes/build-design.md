@@ -280,3 +280,31 @@ Stated here so they are not silently resolved by an implementation detail:
 - **Settings preservation policy if the pre-flash capture fails** — Flagged for
   the owner #2, and a genuine tradeoff: `§4.1` says never write after a failed read,
   which if applied here lets a config failure block a firmware update.
+
+## Sanitizer build — clean as of 2026-09-05
+
+`test-flash` runs clean under AddressSanitizer + UndefinedBehaviorSanitizer:
+zero `runtime error` and zero ASan reports across the whole suite, including the
+eleven adversarial mock scenarios at eight seeds each.
+
+```
+cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+cmake --build build-san --target test-flash && ./build-san/test-flash
+```
+
+`build-san/` is gitignored. Worth re-running after any change to
+`WritePhase.cpp`, because §4.3's dangerous failures — wrong chunk boundary,
+wrong opcode, trusting a reported success — are exactly the class that compiles
+clean, and a sanitizer catches the *memory* half of that for nothing.
+
+**What this does and does not buy.** It rules out out-of-bounds access,
+use-after-free and the UB that UBSan covers **on the paths the tests take**. It
+says nothing about paths the tests do not reach, and nothing at all about
+protocol correctness — a flasher that cheerfully writes a correct-looking wrong
+image is sanitizer-clean. It is a floor, not evidence.
+
+It was reached for as a diagnostic, not as an audit: the mutation harness was
+returning different verdicts on an unchanged tree, and undefined behaviour was
+a live hypothesis for that. It was not the cause (the cause was stale object
+files, `Tests/mutants.sh`), but the run is worth keeping.

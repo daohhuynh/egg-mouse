@@ -18,6 +18,7 @@ ghidra_projects/
 
 # Build output
 build/
+build-san/
 .build/
 cmake-build-*/
 compile_commands.json
