@@ -82,11 +82,61 @@ are already committed, so they are evidence, not decoration.
 ## 3. The settings experiments (about 40 min)
 
 One capture file per page. Inside each file: change one setting, **click APPLY**,
-change the next, **click APPLY**, and so on. Keep a numbered list as you go —
-put it in `windows-run/log.txt`. The list is as important as the capture.
+change the next, **click APPLY**, and so on, in the order the table gives.
 
-Use the exact values below where given. They are chosen to be unmistakable in a
-hex dump.
+### Before you touch a page, screenshot it
+
+**Screenshot each page BEFORE changing anything on it.** That records every
+starting state in one image, which is most of what I would otherwise have to ask
+you to write out. Name them `before-basic.png`, `before-sensor.png`, and so on.
+
+### What to actually write in `log.txt`
+
+The tables below are already numbered — **you do not copy them out.** Write down
+only the things a table *cannot* say in advance:
+
+1. **Which direction you toggled.** "Toggle it" doesn't tell me whether the
+   feature ended up on or off, and that is exactly what decides whether the byte
+   means enabled or disabled. So: `2 angle snapping OFF -> ON`.
+2. **Any number or item you chose yourself**, where the table says "note it" or
+   "distinctive". So: `5 sensor angle tuning 0 -> 37`.
+3. **What a dropdown item was actually called**, when the table says something
+   like "last item". So: `6 cpi downshift -> "Default"` — and if the list has
+   four entries rather than three, say so, because that alone settles a
+   prediction.
+4. **Anything that went differently.** Skipped, out of order, value refused,
+   app misbehaved, you clicked APPLY twice. Say so plainly. **A noted mistake
+   costs nothing; an unnoted one can make a whole file unreadable.**
+
+If a line went exactly as the table says and involved no choice of yours, it
+needs no entry at all.
+
+### A complete example of what `log.txt` should look like
+
+```
+02-basic
+1 polling 8000 -> 125
+2 angle snapping OFF -> ON
+3 ripple control ON -> OFF
+4 disable LED on lift-off OFF -> ON
+6 cpi1 800 -> 3200
+10 clicked the 3rd radio button from the top (was on the 1st)
+
+03-sensor
+1 motion sync OFF -> ON
+2 motion jitter filter ON -> OFF
+5 sensor angle tuning 0 -> 37
+6 cpi downshift -> "Default"  (list had FOUR items, not three)
+7 smoothing -> "Ripple Control On"
+
+04-buttons
+1 left-handed OFF -> ON
+2 changed FORWARD button to "Middle Click"
+3 changed BACK button to keyboard key F13
+   -- note: SCROLL DOWN combo would not open, skipped it
+```
+
+That is the whole job. Roughly one short line per change.
 
 ### `02-basic.pcapng` — Basic page
 | # | change | to |
@@ -100,7 +150,7 @@ hex dump.
 | 7 | CPI level 1 | **6400** |
 | 8 | LOD | **0.7mm** |
 | 9 | LOD | **2.0mm** |
-| 10 | the four unlabelled radio buttons | click a different one |
+| 10 | the four unlabelled radio buttons | click a different one — **note which position from the top** |
 
 ### `03-sensor.pcapng` — Advanced Sensor page
 | # | change | to |
@@ -109,9 +159,9 @@ hex dump.
 | 2 | Motion Jitter Filter | toggle |
 | 3 | Force max Sensor fps | toggle |
 | 4 | Sensor Glass Mode | toggle |
-| 5 | Sensor Angle Tuning | some distinctive number, note it |
-| 6 | CPI Downshift Tuning | last item in the list |
-| 7 | Smoothing Tuning | last item in the list |
+| 5 | Sensor Angle Tuning | any distinctive number — **note it** |
+| 6 | CPI Downshift Tuning | last item — **note its name, and how many items the list has** |
+| 7 | Smoothing Tuning | last item — **note its name** |
 
 ### `04-buttons.pcapng` — Buttons page
 | # | change | to |
