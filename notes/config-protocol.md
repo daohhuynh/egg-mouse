@@ -1662,3 +1662,55 @@ one APPLY each. **I have not seen that file.**
 **Correction to a lead in `working-memory.md`:** it recorded dialog `+0x13b8` as
 "a 7-tab control". It is a **combo box** — every access here is `CB_SETCURSEL`,
 which a tab control does not take (`TCM_SETCURSEL` is `0x130C`).
+
+## 7.6 Record `0x0e` is the CPI stage count, `0x0d` the selected stage  [D]
+
+Four near-identical handlers at `0x00410c47`, `0x00410d77`, `0x00410ea7` and
+`0x00410fd7` (and a second, matching set at `0x00411119`, `0x00411259`,
+`0x00411399`, `0x004114d9`). Each one:
+
+1. writes a fixed value **0, 1, 2 or 3** to `0x0057f21a` = object `0x0a`;
+2. sends `CB_GETCURSEL` (`0x147`) to the combo at `0xf0(%esi)` and writes
+   **index + 1** to `0x0057f21b` = object `0x0b`, via an explicit
+   `cmpl $0/$1/$2` ladder falling through to 4:
+
+   ```
+   410c59  CB_GETCURSEL -> eax
+   410c5e  jne  ...          ; eax == 0
+   410c60  movb $0x1, 0x57f21b
+   410c7b  cmpl $0x1, %eax ; 410c80  movb $0x2, 0x57f21b
+   410c9b  cmpl $0x2, %eax ; 410ca0  movb $0x3, 0x57f21b
+   410cc0  movb $0x4, 0x57f21b        ; the fall-through
+   ```
+3. then writes that stage's CPI pair — `0x10`/`0x12`, `0x16`/`0x18`,
+   `0x1c`/`0x1e`, `0x22`/`0x24` for stages 0–3 respectively.
+
+The serializer (§7.3) maps object `0x0a` → **record `0x0d`** and object `0x0b` →
+**record `0x0e`**.
+
+| | value | tag |
+| --- | --- | --- |
+| record `0x0e` | number of CPI stages, `1`–`4`, = combo index + 1 | `[D]` |
+| record `0x0d` | which CPI stage, `0`–`3` | range `[D]`, meaning `[G]` |
+
+`0x0d`'s **range** is derived; its **meaning** is not. "Selected/active stage"
+is the natural reading and the handlers are consistent with it, but they are
+equally consistent with "the stage last edited", and nothing here separates
+those. It is `[G]` and stays `[G]` until something moves it independently.
+
+Both agree with what is already on the wire without being fitted to it. The
+default writer sets object `0x0a`=`0x01`, `0x0b`=`0x04` (`0x413e31`,
+`movw $0x401,0xa(%eax)`), and `01-baseline.pcapng` reads record `0x0d`=`0x01`,
+`0x0e`=`0x04` — four stages, stage 1.
+
+### Prediction, registered before the polling/CPI capture was read
+
+`02-basic` lines 11–14 set CPI levels to 1, 2, 3, 4, one APPLY each.
+
+- **Expect:** record `0x0e` (wire `0x1e`) takes `01 02 03 04` across those four
+  lines and is the only settings byte they move.
+- **REFUTED IF:** `0x0e` does not change across lines 11–14, or takes any value
+  outside 1–4, or the sequence is not monotonic with the level count.
+- **Also expect:** record `0x0d` (wire `0x1d`) stays in 0–3 throughout the whole
+  capture and never exceeds `0x0e − 1`. A violation of that would mean `0x0d` is
+  not a stage index at all.

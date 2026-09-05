@@ -30,13 +30,30 @@
 #      `touch` before every build fixes it.
 #   3. Both together made the output non-reproducible, which for a script whose
 #      entire job is to measure trustworthiness is the worst possible bug.
+#   4. AND IT WAS STILL NON-REPRODUCIBLE (2026-09-05). The same mutant --
+#      "off-by-one below kBlockFirst", the one guarding the only unrecoverable
+#      failure this project has -- reported SURVIVED on one run and killed
+#      (SIGABRT) on the next, from an unchanged tree. `touch` alone does not
+#      guarantee the built binary actually contains the mutation: any build
+#      hiccup leaves the previous test-flash in place, it passes because it is
+#      the CLEAN binary, and a clean pass is indistinguishable from "the suite
+#      did not catch this".
+#
+#      That is the worst possible direction for the error. A hole that is not
+#      there gets investigated; a hole that IS there and reports as killed does
+#      not. So the fix is not to trust the build: hash the binary before and
+#      after, and if the mutant build is byte-identical to the clean one, the
+#      mutation provably did not reach the binary and the result is BROKEN, not
+#      SURVIVED. A verdict is only allowed when the thing under test demonstrably
+#      changed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 # macOS has no coreutils `timeout`.
-runlimited() {
+runlimitedto() {
+  local out=$1; shift
   local lim=$1; shift
-  "$@" >/dev/null 2>&1 & local pid=$!
+  "$@" >"$out" 2>&1 & local pid=$!
   ( sleep "$lim"; kill -9 $pid 2>/dev/null ) >/dev/null 2>&1 & local w=$!
   wait $pid; local rc=$?
   kill -9 $w 2>/dev/null; wait $w 2>/dev/null
@@ -58,6 +75,14 @@ trap 'restore; cmake --build build --target test-flash >/dev/null 2>&1; rm -rf "
 
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
+# The clean binary's hash. Any mutant build equal to this did not take effect.
+restore
+cmake --build build --target test-flash >/dev/null 2>&1 || {
+  echo "the CLEAN tree does not build -- nothing below would mean anything"; exit 2; }
+CLEAN_HASH=$(shasum -a 256 ./build/test-flash | cut -d' ' -f1)
+./build/test-flash >/dev/null 2>&1 || {
+  echo "the CLEAN tree does not PASS its own tests -- fix that first"; exit 2; }
+
 mutate() {  # <kill|equiv> <name> <file> <old|||new>
   local kind="$1" name="$2" file="$3" expr="$4"
   restore
@@ -71,12 +96,46 @@ if old not in s:
 open(p, "w").write(s.replace(old, new, 1))
 PY
   then echo "  ????      $name -- mutation did not apply"; BROKEN=$((BROKEN+1)); return; fi
+  # Delete the OBJECT FILES, not just the binary. A rebuild that does not
+  # actually recompile leaves an object built from clean source, links a
+  # "mutant" binary that contains no mutation, and the suite then passes -- and
+  # a pass is reported as SURVIVED, i.e. as a hole in the tests. That is the
+  # single worst direction for this script to be wrong in, because a hole that
+  # is not real gets investigated while the reverse would not.
+  #
+  # This was diagnosed, not guessed: with the mutation demonstrably in the
+  # source (grep for MUTANT) the suite still printed "all passed (0 failures)"
+  # and, specifically, "inv 3 end-to-end: every index the device saw is in
+  # [0x34,0x74]" PASSED under a mutation that makes deviceIndex(0) return 0x33.
+  #
+  # Comparing the binary's hash against a clean build does NOT catch it: these
+  # builds are not reproducible, and identical source produced three different
+  # hashes across five rebuilds. So hashing proves nothing either way and the
+  # only reliable move is to make a stale object impossible.
+  rm -f ./build/test-flash
+  find build -name '*.o' -path '*EGGFlashCore*' -delete 2>/dev/null
   touch "$file"
-  if ! cmake --build build --target test-flash >/dev/null 2>&1; then
+  if ! cmake --build build --target test-flash >/dev/null 2>&1 \
+     || [ ! -x ./build/test-flash ]; then
     echo "  ????      $name -- did not compile"; BROKEN=$((BROKEN+1)); return
   fi
   local rc=0
-  runlimited 45 ./build/test-flash || rc=$?
+  local log; log=$(mktemp)
+  runlimitedto "$log" 90 ./build/test-flash || rc=$?
+  # Grade on the SUITE'S OWN VERDICT as well as the exit code, and shout when
+  # they disagree. The exit code alone made this script unreadable: it cannot
+  # tell "the suite passed" from "the suite never ran".
+  local nfail; nfail=$(grep -c '^  FAIL' "$log" 2>/dev/null); nfail=${nfail:-0}
+  local verdict; verdict=$(grep -Eo '(all passed|FAILED) \([0-9]+ failure' "$log" 2>/dev/null | head -1)
+  # The exit code and the suite's own verdict must agree. If they ever do not,
+  # the run is not evidence about the mutant at all and must not be graded.
+  if { [ $rc -eq 0 ] && [ "$nfail" -gt 0 ]; } \
+  || { [ $rc -eq 1 ] && [ "$nfail" -eq 0 ]; }; then
+    echo "  ????      $name -- exit code $rc disagrees with the suite's own"
+    echo "            count of $nfail failures. Not graded; the harness is wrong."
+    BROKEN=$((BROKEN+1)); rm -f "$log"; return
+  fi
+  rm -f "$log"
   local how="test failures"
   [ $rc -ge 128 ] && how="hung or crashed, signal $((rc-128))"
   if [ "$kind" = kill ]; then
