@@ -1,0 +1,70 @@
+{
+ "_comment": [
+  "Strict 1:1, all 12 lines, in order."
+ ],
+ "log_lines": [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12"
+ ],
+ "no_write_lines": {},
+ "writes": [
+  {
+   "line": "1",
+   "action": "left-handed mode (clicked once)"
+  },
+  {
+   "line": "2",
+   "action": "Forward -> the back action"
+  },
+  {
+   "line": "3",
+   "action": "Forward -> the middle click action"
+  },
+  {
+   "line": "4",
+   "action": "Forward -> disable / no action"
+  },
+  {
+   "line": "5",
+   "action": "Forward -> a media action, volume up"
+  },
+  {
+   "line": "6",
+   "action": "Back -> the middle click action"
+  },
+  {
+   "line": "7",
+   "action": "Back -> the forward action"
+  },
+  {
+   "line": "8",
+   "action": "Wheel Up -> disable / no action"
+  },
+  {
+   "line": "9",
+   "action": "Forward -> a fixed-CPI action, value 1600"
+  },
+  {
+   "line": "10",
+   "action": "Forward -> keyboard key A, no modifier"
+  },
+  {
+   "line": "11",
+   "action": "Forward -> keyboard key A, CTRL"
+  },
+  {
+   "line": "12",
+   "action": "Forward -> keyboard key A, CTRL and SHIFT"
+  }
+ ]
+}

@@ -1,0 +1,79 @@
+{
+ "_comment": [
+  "1:1 with the root log's 03 section once its three NOT PRESENT / NONE lines",
+  "are removed: 12 real lines, 12 writes, in order. Line 6 asks for -45 and the",
+  "byte becomes 0xd3, which is the whole point of that line."
+ ],
+ "log_lines": [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15"
+ ],
+ "no_write_lines": {
+  "2": "motion jitter filter -- marked NOT PRESENT on the page.",
+  "4": "sensor glass mode -- marked NOT PRESENT on the page. The .exe binds this control and never reads it, so a write here would have been the surprise.",
+  "15": "smoothing 4th slot -- the dropdown has 3 options."
+ },
+ "writes": [
+  {
+   "line": "1",
+   "action": "motion sync (clicked once)"
+  },
+  {
+   "line": "3",
+   "action": "force max sensor fps (clicked once)"
+  },
+  {
+   "line": "5",
+   "action": "sensor angle tuning -> 20"
+  },
+  {
+   "line": "6",
+   "action": "sensor angle tuning -> -45"
+  },
+  {
+   "line": "7",
+   "action": "sensor angle tuning -> maximum, observed 127"
+  },
+  {
+   "line": "8",
+   "action": "downshift option 1 of 4"
+  },
+  {
+   "line": "9",
+   "action": "downshift option 2 of 4"
+  },
+  {
+   "line": "10",
+   "action": "downshift option 3 of 4"
+  },
+  {
+   "line": "11",
+   "action": "downshift option 4 of 4"
+  },
+  {
+   "line": "12",
+   "action": "smoothing option 1 of 3"
+  },
+  {
+   "line": "13",
+   "action": "smoothing option 2 of 3"
+  },
+  {
+   "line": "14",
+   "action": "smoothing option 3 of 3"
+  }
+ ]
+}

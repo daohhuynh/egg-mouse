@@ -1,0 +1,89 @@
+{
+ "_comment": [
+  "Strict 1:1, all 15 lines, in order. This section is the clearest evidence",
+  "that the owner used the root log rather than the stale copy: there the 'I",
+  "understand' tick is line 2 because it GATES the sliders, and the record 0x72",
+  "write really is the second one in the capture. Under the stale copy that tick",
+  "is line 15 and the order does not fit."
+ ],
+ "log_lines": [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15"
+ ],
+ "no_write_lines": {},
+ "writes": [
+  {
+   "line": "1",
+   "action": "slamclick filter (clicked once), before ticking anything"
+  },
+  {
+   "line": "2",
+   "action": "tick the I understand checkbox, then APPLY"
+  },
+  {
+   "line": "3",
+   "action": "LEFT multiclick -> minimum"
+  },
+  {
+   "line": "4",
+   "action": "LEFT multiclick -> maximum"
+  },
+  {
+   "line": "5",
+   "action": "LEFT multiclick -> 12"
+  },
+  {
+   "line": "6",
+   "action": "RIGHT multiclick -> maximum"
+  },
+  {
+   "line": "7",
+   "action": "MIDDLE multiclick -> maximum"
+  },
+  {
+   "line": "8",
+   "action": "FORWARD multiclick -> maximum"
+  },
+  {
+   "line": "9",
+   "action": "BACK multiclick -> maximum"
+  },
+  {
+   "line": "10",
+   "action": "SPDT-1 -> GX Safe"
+  },
+  {
+   "line": "11",
+   "action": "SPDT-1 -> GX Speed"
+  },
+  {
+   "line": "12",
+   "action": "SPDT-1 -> Off"
+  },
+  {
+   "line": "13",
+   "action": "SPDT-2 -> GX Safe"
+  },
+  {
+   "line": "14",
+   "action": "SPDT-2 -> GX Speed"
+  },
+  {
+   "line": "15",
+   "action": "SPDT-2 -> Off"
+  }
+ ]
+}

@@ -1,0 +1,32 @@
+{
+ "_comment": [
+  "The four unlabelled radio buttons, clicked top to bottom with NO APPLY",
+  "pressed anywhere in the section. Four writes appeared regardless, which is",
+  "what this capture existed to test."
+ ],
+ "log_lines": [
+  "1",
+  "2",
+  "3",
+  "4"
+ ],
+ "no_write_lines": {},
+ "writes": [
+  {
+   "line": "1",
+   "action": "radio button 1st from top, no APPLY"
+  },
+  {
+   "line": "2",
+   "action": "radio button 2nd, no APPLY"
+  },
+  {
+   "line": "3",
+   "action": "radio button 3rd, no APPLY"
+  },
+  {
+   "line": "4",
+   "action": "radio button 4th, no APPLY"
+  }
+ ]
+}

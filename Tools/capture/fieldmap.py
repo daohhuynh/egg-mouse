@@ -139,7 +139,21 @@ def parse_log(path, capture):
     stem = base.split(".")[0]
     want = re.compile(r"^-{2,}\s*" + re.escape(stem))
     end = re.compile(r"^-{2,}\s*\d")
-    num = re.compile(r"^\s*(\d+)[.)]?\s+(\S.*)$")
+    # Two things this must get right, both found by scanning a real log rather
+    # than by reading the regex (2026-09-05):
+    #
+    #  * INDENT SEPARATES ENTRIES FROM PROSE. `\s*` matched an explanatory
+    #    paragraph beginning "600 = 58 02 ..." as entry number 600, and a note
+    #    numbered "1. DETERMINISM ..." as entry 1 -- the latter silently, since
+    #    1 is exactly what the 1..N check expects to see first. Entries sit at
+    #    indent 0-2; commentary is indented four or more. So bound the indent.
+    #
+    #  * SUFFIXED ENTRIES ARE REAL ENTRIES. Lines 18a-18f were inserted into an
+    #    already-numbered section so the operator would not have to renumber
+    #    work already done. `(\d+)[.)]?\s+` requires a digit run followed by
+    #    space, so "18a CPI 4 -> 800" matched NOTHING and six performed lines
+    #    were dropped with no warning at all. Accept a single letter suffix.
+    num = re.compile(r"^ {0,2}(\d+)([a-z]?)[.)]?\s+(\S.*)$")
     lines, inside, problems = [], False, []
     try:
         text = open(path, encoding="utf-8", errors="replace").read()
@@ -154,15 +168,33 @@ def parse_log(path, capture):
         if inside:
             m = num.match(raw)
             if m:
-                lines.append((int(m.group(1)), m.group(2).rstrip()))
+                n, suffix = int(m.group(1)), m.group(2)
+                # The label is what the operator wrote and what a prediction's
+                # expect_by_line is keyed on, so keep "18a" as "18a" and a plain
+                # 10 as the integer 10.
+                label = ("%d%s" % (n, suffix)) if suffix else n
+                lines.append((label, m.group(3).rstrip(), n, suffix))
     if not inside:
         problems.append("no '--- %s ---' block found in %s" % (stem, path))
-    for k, (n, _) in enumerate(lines, 1):
-        if n != k:
-            problems.append("log numbering is not 1..N: entry %d is numbered %d"
-                            % (k, n))
+    # The integer parts must be non-decreasing and must cover 1..N exactly once
+    # each. Suffixed entries hang off the integer before them and do not create
+    # a new number, so 18, 18a, 18b, 19 is well formed and 18, 20 is not.
+    ints = []
+    last = 0
+    for label, _, n, suffix in lines:
+        if n < last:
+            problems.append("log numbering goes backwards at entry %s" % label)
             break
-    return lines, problems
+        if not suffix and n != last:
+            ints.append(n)
+        last = n
+    else:
+        if ints != list(range(1, len(ints) + 1)):
+            missing = [k for k in range(1, (max(ints) if ints else 0) + 1)
+                       if k not in ints]
+            problems.append("log numbering is not 1..N: got %d entries, "
+                            "missing %s" % (len(ints), missing or "nothing"))
+    return [(label, action) for label, action, _, _ in lines], problems
 
 
 def encoding_guess(width, obs):

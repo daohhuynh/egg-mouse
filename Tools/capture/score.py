@@ -134,41 +134,35 @@ def score_somewhere_in(doc, p):
     success the offset is reported, which is the thing we actually wanted."""
     lo, hi = p["record_first"], p["record_last"]
     want = p["expect_by_line"]
-    # every observation on a line this prediction names, anywhere in the range
-    obs = []
-    for off in range(lo, hi + 1):
-        for fld, ob in observations_at(doc, off):
-            if p["match_log"].lower() in (ob.get("action") or "").lower():
-                obs.append((fld, ob))
+    # ABSOLUTE record state, not the diff. A diff only reports bytes that moved,
+    # so a byte that already held the predicted value reads as absent and the
+    # claim comes back REFUTED for want of evidence rather than against it --
+    # which is exactly what happened here first time round. The states list is
+    # the full record after each write, so every offset in the range has a value
+    # on every line. This gives the test MORE to fail against, not less: a wrong
+    # offset that used to be merely unreported is now positively contradicted.
     seen = {}
-    for fld, ob in obs:
-        seen[str(ob.get("line"))] = (fld, ob)
+    for st in doc.get("states", []):
+        if p["match_log"].lower() in (st.get("action") or "").lower():
+            seen[str(st.get("line"))] = st
     lines = [l for l in want if l in seen]
     if not lines:
         return "UNTESTED", ["no observation in records 0x%02x-0x%02x on any line"
                             " mentioning %r" % (lo, hi, p["match_log"])]
     hits = []
     for off in range(lo, hi + 1):
-        ok = True
-        for l in lines:
-            fld, ob = seen[l]
-            got = byte_at(ob.get("new"), off - fld["payload_offset"])
-            if got != want[l]:
-                ok = False
-                break
-        if ok:
+        if all(byte_at(seen[l].get("record"), off) == want[l] for l in lines):
             hits.append(off)
     rows = ["  lines used: %s   (of %d predicted)" % (", ".join(sorted(lines)), len(want))]
     if len(lines) < len(want):
         rows.append("  ?  only %d of %d lines are in this capture -- a partial test"
                     % (len(lines), len(want)))
     for l in sorted(lines):
-        fld, ob = seen[l]
-        run = " ".join("%02x" % byte_at(ob.get("new"), o - fld["payload_offset"])
-                       if byte_at(ob.get("new"), o - fld["payload_offset"]) is not None
-                       else "--" for o in range(lo, hi + 1))
+        st = seen[l]
+        run = " ".join("%02x" % byte_at(st.get("record"), o)
+                       for o in range(lo, hi + 1))
         rows.append("     line %-3s %-26s range reads %s, wanted %02x somewhere"
-                    % (l, ob.get("action"), run, want[l]))
+                    % (l, st.get("action"), run, want[l]))
     if hits:
         rows.insert(0, "  ok  a single offset satisfies every line: %s"
                        % ", ".join("record 0x%02x" % h for h in hits))
@@ -186,8 +180,13 @@ def score_one(doc, p):
     hits = observations_at(doc, off)
     rows, verdict = [], None
 
-    relevant = [(f, o) for f, o in hits
-                if p["match_log"].lower() in (o.get("action") or "").lower()]
+    # A prediction with no match_log is keyed by line number instead (the
+    # masked ones -- combo items are named by position, so there is no word to
+    # match on). Then every observation at this offset is in scope and
+    # expect_by_line does the selecting.
+    key = p.get("match_log")
+    relevant = hits if not key else [
+        (f, o) for f, o in hits if key.lower() in (o.get("action") or "").lower()]
 
     if not hits:
         return "UNTESTED", ["no observation in this capture touches record 0x%02x" % off], []
