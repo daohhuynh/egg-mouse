@@ -1714,3 +1714,44 @@ default writer sets object `0x0a`=`0x01`, `0x0b`=`0x04` (`0x413e31`,
 - **Also expect:** record `0x0d` (wire `0x1d`) stays in 0–3 throughout the whole
   capture and never exceeds `0x0e − 1`. A violation of that would mean `0x0d` is
   not a stage index at all.
+
+## 7.7 The button block is eight entries of stride 8 in the object  [D]
+
+`0x00407763` onward, the button-mapping page's write path:
+
+```
+407763  movl  0x380(%esi), %ecx           ; ecx = button index
+40776b  movw  %dx, 0x57f240(,%ecx,8)      ; obj[0x30 + 8*idx] = 0
+40777b  movw  %cx, 0x57f242(,%eax,8)      ; obj[0x32 + 8*idx] = 0
+407789  cmpl  $0x7, %eax
+40778c  ja    default
+407792  jmpl  *0x408430(,%eax,4)          ; 8-entry jump table
+```
+
+**Eight buttons**, index `0`–`7`, bounded explicitly by `cmpl $0x7` and by an
+8-entry jump table — which is why the wire shows exactly eight button records
+(`wire-observed.md` §5.2, `config-protocol.md` §7.3). Two independent counts
+agreeing, one from a bound in the code and one from the bytes.
+
+**Object stride is 8**, base `0x2c`, so entry *k* is `obj[0x2c + 8k]`. Against
+the default writer (§7.2b) that gives an entry of:
+
+```
++0  u8   type        0x08 in every default entry
++1  u8   pad         never written
++2  u16  a           0x0200 0x0400 0x1000 0x0800 0xf109 0x0101 0xff01
++4  u16  b           0, and zeroed on this path
++6  u16  c           0, and zeroed on this path
+```
+
+The **high** byte of `a` is the button mask — `01 02 04 10 08` for left, right,
+middle, forward, back — which is why those bytes appear at stride 7 on the wire
+once the pad is dropped by the serializer.
+
+**What is NOT derived here, and must not be inferred from the table above.**
+The role of `type`, and of `a`'s low byte, and of `b` and `c`. The scan of
+writes into the mirrors shows the low byte of `a` taking `0x0c 0x09 0x20 0x18
+0x01` on other handlers around `0x00407c6f`–`0x00408240`, which is consistent
+with an action code — and consistent with several other things. **`[G]`.**
+`05-buttonmapping` is the capture that settles it, and the derivation above
+tells the differ where to look rather than what it will find.
