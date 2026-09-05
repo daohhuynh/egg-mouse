@@ -24,14 +24,21 @@ with **what was actually observed** and by whom.
 
 | | count |
 | --- | --- |
-| CONFIRMED | 2 |
+| CONFIRMED | 3 |
 | REFUTED | 0 |
 | PARTIAL | 0 |
 | AMBIGUOUS | 0 |
-| **scored so far** | **2 of 266** |
+| **scored so far** | **3 of 266** |
 
-Zero REFUTED at n=2 is not yet informative either way. It becomes a red flag if
+Zero REFUTED at n=3 is not yet informative either way. It becomes a red flag if
 it survives the GUI area, which is ~15 predictions and the cheapest to test.
+
+**Watch this specifically:** all three confirmations so far are the *same kind of
+claim* — "a control shipped in the resource is hidden by code at page-init, so
+it is not on screen", read off `ShowWindow(…, SW_HIDE)` calls in `OnInitDialog`.
+Three hits from one technique is one technique working, not three independent
+successes, and it should not be reported as though the register is 3-for-3 on
+unrelated ground.
 
 ---
 
@@ -61,6 +68,25 @@ being the whole LED page (`gui-surface.md` §3). That pattern is the evidence fo
 a claim that governs our writes: **the record contains fields this firmware no
 longer honours**, so §1.3's read-modify-write is not pedantry — there are known
 bytes behind dead UI, and we must carry them through untouched.
+
+### #21 `cfg-advanced-sensor-hidden-controls` — **CONFIRMED**
+
+Observer: the owner, 2026-09-05, mid-capture, prompted only by `log.txt` telling him
+to click them.
+
+- **Predicted:** on the Advanced Sensor page, `Motion Jitter Filter` and
+  `Sensor Glass Mode` are hidden by code and do not appear. REFUTED IF either
+  is visible.
+- **Observed:** *"motion jitter filter and sensor glass mode are not seen
+  anywhere on advanced sensor"*. Neither is visible.
+- **Cite that held:** page-140 `OnInitDialog` `0x00411980` calls
+  `ShowWindow(this+0x1a4, 0)` at `0x411a19` and `ShowWindow(this+0x130, 0)` at
+  `0x411a26`, DDX-bound to control ids 1030 and 1031.
+
+The rest of that prediction is **not yet scored**: it also says the Sensor Angle
+Tuning slider runs −127..+127 symmetric, and the `REFUTED IF` covers that too.
+The owner has confirmed the default is 0 but not the range. Do not mark this fully
+confirmed until the maximum is read off the screen.
 
 ### `led-page-unreachable` — **CONFIRMED** (`gui-surface.md` §3)
 
