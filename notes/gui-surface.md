@@ -1,0 +1,143 @@
+# The config tool's user-visible surface
+
+CLAUDE.md §1.2a requires the user-visible surface to be checked before any claim
+that a capability is missing. This is that check for the config tools, done
+properly on 2026-09-05 after three errors showed it had never been done at all.
+
+**A resource is not a screen.** Every mistake corrected here has the same shape:
+a dialog template exists in the `.exe`, so the plan assumed the user could reach
+it. Reachability is a separate claim and needs separate evidence — which code
+creates the dialog, and with what parent.
+
+## 1. What the user actually sees in 1.07
+
+Main window is DIALOG 102. It holds a `SysTabControl32` (id 1060), the firmware
+and software version readouts, a **`Factory Reset`** button (1039) and a single
+**`APPLY`** button (1043). Four tab pages, created at `0x4133e0`–`0x413490`,
+each pushed with parent id `0x424` = 1060:
+
+| tab caption | dialog | contents |
+| --- | --- | --- |
+| `  Basic  ` | 135 | CPI levels 1–4 + X/Y, LOD, polling rate, angle snapping, ripple control, `Disable LED on Lift-Off`, four unlabelled radio buttons |
+| `  Advanced Sensor  ` | 140 | motion sync, motion jitter filter, force max sensor fps, sensor glass mode, sensor angle tuning, CPI downshift tuning, smoothing tuning |
+| `  Buttons  ` | 153 | slamclick filter, five multiclick-filter sliders, two `SPDT:` combos, the "I understand…" acknowledgement |
+| `  Button Mapping  ` | 139 | left-handed mode, six per-button assignment dropdowns |
+
+The captions are literals at `0x1573e8`. [D]
+
+The owner confirmed the same four tabs and the same four names by looking at the
+running program before being told what they were. [O]
+
+Two buttons on the Basic page carry no `WS_VISIBLE`: `Apply CPI settings` (1059)
+and `Surface Calibration` (1061). That is a prediction that they are invisible,
+not an observation — a program can call `ShowWindow` at runtime. The session log
+asks the owner to look. [D]
+
+## 2. Button assignment is a nested menu
+
+Six dropdowns, one per remappable button: right, middle, forward, back, wheel
+up, wheel down. **There is no entry for the left button.** [D]
+
+The menu is **nested** — a top-level group opens to reveal functions. the owner
+observed the shape directly: Right Button → `MOUSE` → `LEFT CLICK`. [O]
+
+The function names are UTF-16 literals in one run at `0x155cde`, in this order:
+[D]
+
+> LEFT CLICK, RIGHT CLICK, MIDDLE CLICK, FORWARD, BACK, SCROLL UP, SCROLL DOWN,
+> MOUSE, KEYBOARD KEY, CPI LOOP, FIXED CPI, CPI, PLAY/PAUSE, NEXT, PREVIOUS,
+> MUTE, VOLUME UP, VOLUME DOWN, BROWSER, EXPLORER, MEDIA, DISABLE
+
+`MOUSE`, `CPI` and `MEDIA` sit immediately after the group they plausibly head,
+which is why they are read as group headings. That reading is **[G]**; the
+screenshot settles it.
+
+Two entries open a further modal:
+
+- **`FIXED CPI`** → DIALOG 150, caption `FIXED CPI`: a value EDIT + trackbar, an
+  `X/Y Settings` checkbox with its own X and Y pair, and `OK`. [D]
+- **`KEYBOARD KEY`** → DIALOG 152, caption `KEYBOARD KEY`: `Enter a key:`, a
+  key display, four checkboxes `SHIFT` (1075), `CTRL` (1076), `WIN` (1077),
+  `ALT` (1078), and `OK`. [D]
+
+  the owner confirmed this modal exists and that **the four modifier boxes are
+  independent, not mutually exclusive**. [O] All four are `AUTOCHECKBOX` in the
+  template, which agrees. Whether the wire encoding is a bitmask or an
+  enumeration does **not** follow from that and is [G] — ticking two at once is
+  the experiment that decides it, and it is line 12 of `05-buttonmapping`.
+
+So a button assignment cannot be one byte in general: `FIXED CPI` carries a CPI
+value and `KEYBOARD KEY` carries a keycode plus modifiers.
+
+## 3. The LED page exists in every version and is reachable in none
+
+This is a negative claim, so per §1.2a here is the search space before the
+conclusion.
+
+**The claim.** DIALOG 137 — `LED On / Off`, an `LED effect` combo, `Scroll led`,
+`Logo led`, `DPI led`, Red/Green/Blue EDITs, `Apply led settings` — is present
+in the resources of cfg100, cfg101, cfg104 and cfg107, and is created as a tab
+page by none of them.
+
+**Method, and what it can and cannot see.**
+
+1. Full `objdump -d` of the entire cfg107 file, all sections, 410,190 lines.
+   Because objdump prints normalised immediates, this sees every encoding form
+   at once — `push imm8`, `push imm32`, `movl $imm32`, `movl $imm32, disp(%reg)`
+   — which is the exact failure mode recorded for 2026-09-03.
+2. The LED dialog is constructed as a member of the main window at offset
+   `+0x166c` (ctor at `0x405690`, called from `0x412dfa`). Every instruction in
+   the whole file mentioning `0x166c` was enumerated: **five**, being the
+   constructor, the destructor, one call at `0x413c9e` shared with all the tab
+   pages, and two exception-unwind funclets. None creates it as a tab.
+3. The tab-page creation run at `0x4133e0`–`0x413490` makes exactly four pages,
+   ids `0x87`, `0x8c`, `0x99`, `0x8b` — 135, 140, 153, 139. `0x89` is absent.
+4. The tab-selection handler at `0x413cb3` sends `0x130B` (`TCM_GETCURSEL`) and
+   dispatches through a **four**-entry jump table, bounded by `cmpl $0x3`.
+5. cfg100, cfg101 and cfg104 have only **three** tab captions
+   (`  Basic Settings  `, `  Advanced Settings  `, `  Button Mapping  `) and
+   three-page creation runs (135, 140, 139). DIALOG 137 is absent from those
+   too, and those builds have no DIALOG 153 at all.
+6. the owner independently reported no LED controls anywhere in the running program,
+   and no visible lights or light apertures on the mouse. [O]
+
+**What the method cannot see:** a path that reaches the dialog through a stored
+pointer rather than a literal member offset, or a page added by a build variant
+not in hand. So the honest statement is **not found by an exhaustive literal
+scan over every section, which cannot see a computed or pointer-mediated path**
+— not "does not exist".
+
+**Why it is there at all.** cfg107 also contains the literals
+`' 3950 Configuration Tool'` and `'50 Gaming Mouse software'`. This is a shared
+code base across Endgame products, and the OP1 8k v2 build inherits UI for
+hardware it does not have.
+
+**Consequence.** The RGB-looking five-byte records at wire `0x1d` in the
+settings record (`wire-observed.md` §5.1) have no reachable control behind them
+and cannot be attributed by diff, because no capture can move them. They stay
+**[G]** and §1.3 forbids writing them. Read-modify-write preserves them anyway,
+so nothing is blocked.
+
+The one LED setting that *is* reachable is `Disable LED on Lift-Off` (checkbox
+1066) on the Basic page. Given there are no visible lamps, the plausible reading
+is the sensor's own illumination LED rather than decorative lighting — [G], and
+it does not matter, because the checkbox is reachable and its byte will fall out
+of the `02-basic` diff like any other.
+
+## 4. Corrections this file records
+
+Three claims in `windows-session.md` were wrong and are fixed:
+
+| was | is |
+| --- | --- |
+| an LED window to capture as `06-led.pcapng` | no such window; capture deleted |
+| `04-buttons` = the button-assignment tab | `04-buttons` = the Multiclick/SPDT tab (153) |
+| button mapping has no dropdown, only push buttons | it has nested dropdowns [O] |
+
+The third is worth naming precisely because it is the most instructive. The
+button-assignment combos on DIALOG 139 genuinely do lack `WS_VISIBLE` in the
+template, and six push buttons genuinely are present and labelled with function
+names. That is real evidence, and the conclusion drawn from it was still wrong:
+the program clearly makes the dropdowns visible at runtime. A missing style bit
+supports "hidden as shipped"; it never supports "hidden while running", and
+`dlgdump.py` prints the bit precisely because it is a template fact.

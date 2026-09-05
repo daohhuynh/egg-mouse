@@ -78,10 +78,11 @@ values recoverable without writing them down.
   and both buttons.
 - Each of the four tabs: **Basic**, **Advanced Sensor**, **Buttons**,
   **Button Mapping**.
-- The **LED** window (it opens separately).
 - Every dropdown **while it is open**, so we see its actual items in order:
-  CPI Levels, LOD, Polling Rate, CPI Downshift Tuning, Smoothing Tuning, the two
-  `SPDT:` combos, LED effect, and one of the six button-assignment combos.
+  CPI Levels, LOD, Polling Rate, CPI Downshift Tuning, Smoothing Tuning, and the
+  two `SPDT:` combos.
+- One button-assignment dropdown **with a submenu expanded** — these are nested
+  and the nesting is the part we cannot read off the resource.
 - The firmware updater window, before you press anything.
 
 **Two things I specifically want to know from the screenshots:**
@@ -142,11 +143,10 @@ Basic page: is there a button labelled "Apply CPI settings"?      YES / NO
 Basic page: is there a button labelled "Surface Calibration"?     YES / NO
 CPI Downshift Tuning: how many items, and what are they called?   ___
 Smoothing Tuning: what are the items called?                      ___
-LED effect: how many items does the dropdown show?                ___
 Polling Rate: how many options?                                   ___
 LOD: how many options, and what is the highest?                   ___
-Button assignment dropdown: roughly how many options?             ___
-LED window: what is its apply button called?                      ___
+Button dropdown: what are the TOP-LEVEL group names, in order?    ___
+Does the mouse light up at all when you change CPI level?         YES / NO
 Anything that looked odd, crashed, or refused a value:            ___
 === END ANSWERS ===
 ```
@@ -158,6 +158,14 @@ real finding — say so plainly, it is worth more than a confirmation.
 
 Same with CPI Downshift Tuning: the resource holds three items, the code fills
 four. Whichever you see settles which list is dead.
+
+**There is no LED capture and no LED questions.** There was, until 2026-09-05.
+`notes/gui-surface.md` §3 has the working; the short version is that the LED
+page exists in the resources of all four config-tool versions and is created as
+a tab by none of them, so there is nothing to click. the owner independently reported
+seeing no LED controls and no lights on the mouse. The one LED setting that *is*
+reachable, `Disable LED on Lift-Off`, is on the Basic page and is already line
+10 of `02-basic`.
 
 ### A complete example of what `log.txt` should look like
 
@@ -245,7 +253,7 @@ exists, a skipped option is a feature we cannot ship); number → **three values
 | 19–30 | LOD → **every option in the list, top to bottom, one APPLY each.** Number them 19, 20, 21 … and write down how many there actually were |
 | 31 | CPI level 1 **X** value → **1000** (if X and Y are locked together, write `LOCKED` and skip to 33) |
 | 32 | CPI level 1 **Y** value → **2000** |
-| 33 | radio buttons → click the **1st** from the top |
+| 33 | radio buttons → click the **1st** from the top. *(These four have no labels in the resource. Write down what they sit next to. If you cannot find four radio buttons, write `NOT FOUND` on 33–36 and move on — that is a finding, not a failure.)* |
 | 34 | radio buttons → click the **2nd** |
 | 35 | radio buttons → click the **3rd** |
 | 36 | radio buttons → click the **4th** |
@@ -264,29 +272,10 @@ exists, a skipped option is a feature we cannot ship); number → **three values
 | 8+ | CPI Downshift Tuning → **every option, top to bottom, one APPLY each.** Number them 8, 9, 10 … and write each name down |
 | next | Smoothing Tuning → **every option, top to bottom, one APPLY each.** Continue the numbering, write each name |
 
-### `04-buttons.pcapng` — Buttons page
+### `04-buttons.pcapng` — the **Buttons** tab
 
-| # | do exactly this |
-|---|---|
-| 1 | click **Left-handed Mode** once |
-| — | **Screenshot the FORWARD button's dropdown fully open.** Scroll it if it is long. No APPLY, no number — this is a screenshot only |
-| 2 | FORWARD button → **1st item in the list** |
-| 3 | FORWARD button → **2nd item** |
-| 4 | FORWARD button → **3rd item** |
-| 5 | FORWARD button → **4th item** |
-| 6 | BACK button → **2nd item** — the *same* item FORWARD holds from line 3 |
-| 7 | BACK button → **5th item** |
-
-**Line 6 is the one that may be refused**, if the app will not let two buttons
-share a function. **That refusal is a real finding — write `REFUSED` and exactly
-what it said, then do line 7 anyway.** Line 7 uses an item nothing else holds, so
-it works either way and still answers the question line 6 was asking: whether
-each button owns its own byte.
-
-Do not try to exhaust these lists — four items from one button plus one from
-another is enough.
-
-### `05-buttonmapping.pcapng` — Button Mapping page
+*(This is the tab with the Multiclick Filter sliders. Corrected 2026-09-05: an
+earlier version of this file had 04 and 05 the wrong way round.)*
 
 | # | do exactly this |
 |---|---|
@@ -295,32 +284,92 @@ another is enough.
 | 3 | Left Button Multiclick Filter → **its maximum** (write the number) |
 | 4 | Left Button Multiclick Filter → **roughly halfway** (write the number) |
 | 5 | Right Button Multiclick Filter → **its maximum** |
-| 6 | first `SPDT:` combo → **1st item** |
-| 7 | first `SPDT:` combo → **2nd item** |
-| 8 | first `SPDT:` combo → **3rd item** |
-| 9 | second `SPDT:` combo → **1st item** |
-| 10 | second `SPDT:` combo → **2nd item** |
-| 11 | second `SPDT:` combo → **3rd item** |
-| 12 | click the **"I understand…"** checkbox once |
+| 6 | Middle Button Multiclick Filter → **its maximum** |
+| 7 | Forward Button Multiclick Filter → **its maximum** |
+| 8 | Back Button Multiclick Filter → **its maximum** |
+| 9 | the **first** `SPDT:` combo (next to *Left* Button) → **1st item** |
+| 10 | first `SPDT:` combo → **2nd item** |
+| 11 | first `SPDT:` combo → **3rd item** |
+| 12 | the **second** `SPDT:` combo (next to *Right* Button) → **1st item** |
+| 13 | second `SPDT:` combo → **2nd item** |
+| 14 | second `SPDT:` combo → **3rd item** |
+| 15 | click the **"I understand…"** checkbox once |
 
-If either SPDT list has more than three items, keep going and renumber the rest.
+Lines 6–8 exist because there are **five** Multiclick sliders, one per button,
+and each needs to be moved at least once for its byte to be located. Lines 2–4
+move one slider three times to prove the byte holds a *number* rather than a
+flag; the rest only need to move once each.
 
-### `06-led.pcapng` — LED window
+Both `SPDT:` combos should hold three items. If either holds more, keep going
+and renumber the rest.
+
+### `05-buttonmapping.pcapng` — the **Button Mapping** tab
+
+Each mouse button has a dropdown, and the dropdowns are **nested**: the top
+level groups functions, and you open a group to reach the actual function.
+The owner confirmed the shape on 2026-09-05 — e.g. Right Button → **MOUSE** → **LEFT
+CLICK**.
+
+There is no entry for the left mouse button itself. That is expected.
+
+The groups, and what the binary says is inside each (`0x155cde`, the vendor's
+own strings, in its own order):
+
+| group | contains |
+|---|---|
+| **MOUSE** | LEFT CLICK, RIGHT CLICK, MIDDLE CLICK, FORWARD, BACK, SCROLL UP, SCROLL DOWN |
+| **KEYBOARD KEY** | opens a small window: a key field, tick boxes SHIFT / CTRL / WIN / ALT, and **OK** |
+| **CPI** | CPI LOOP, FIXED CPI — FIXED CPI opens a small window with a value and **OK** |
+| **MEDIA** | PLAY/PAUSE, NEXT, PREVIOUS, MUTE, VOLUME UP, VOLUME DOWN, BROWSER, EXPLORER |
+| **DISABLE** | on its own, no submenu |
+
+That grouping is derived from the binary, not observed. **If what you see is
+arranged differently, follow what you see** and note the difference — three of
+those names could be group headings I have put in the wrong place, and the
+screenshot below settles it.
 
 | # | do exactly this |
 |---|---|
-| 1 | R=**170**, G=**187**, B=**204** — all three, then apply once (`AA BB CC`, will leap out of the dump) |
-| 2 | R=**1**, G=**2**, B=**3** — all three, then apply once (proves channel order and that they are separate bytes) |
-| 3+ | LED effect → **every option, top to bottom, one apply each.** Number them 3, 4, 5 … and write each name. If there is only one item, write `ONLY ONE` and go to the next line |
-| next | click **LED On / Off** once |
-| next | click **Scroll led** once |
-| next | click **Logo led** once |
-| next | click **DPI led** once |
+| — | open the **Forward Button** dropdown and **screenshot it with a submenu expanded**. No APPLY, no number — screenshot only |
+| 1 | click **Left-handed Mode** once |
+| 2 | Forward Button → MOUSE → **BACK** |
+| 3 | Forward Button → MOUSE → **MIDDLE CLICK** |
+| 4 | Forward Button → **DISABLE** |
+| 5 | Forward Button → MEDIA → **VOLUME UP** |
+| 6 | Back Button → MOUSE → **MIDDLE CLICK** — deliberately the same function line 3 gave Forward |
+| 7 | Back Button → MOUSE → **FORWARD** |
+| 8 | Wheel Up → **DISABLE** |
+| 9 | Forward Button → CPI → **FIXED CPI**, set it to **1600**, press **OK** |
+| 10 | Forward Button → **KEYBOARD KEY**, press the **A** key, tick nothing, press **OK** |
+| 11 | Forward Button → **KEYBOARD KEY**, press **A** again but tick **CTRL** first, press **OK** |
+| 12 | Forward Button → **KEYBOARD KEY**, press **A**, tick **CTRL and SHIFT together**, press **OK** |
 
-Line 1 is the only place two controls change before one apply, and it is
-deliberate: R, G and B are one logical setting and we want all three bytes to
-move together so the triple is unmistakable. **Note which apply button this
-window uses** — it has its own.
+**Line 6 is the one that may be refused**, if the app will not let two buttons
+share a function. **That refusal is a real finding — write `REFUSED` and exactly
+what it said, then do line 7 anyway.** Line 7 uses a function nothing else
+holds, so it answers the same question either way: whether each button owns its
+own byte.
+
+Lines 9–12 are the expensive ones and the most valuable. A plain function is
+probably one byte; `FIXED CPI` has to carry a *number* and `KEYBOARD KEY` a
+keycode plus modifier flags, so these lines are what reveal how wide a button
+record really is.
+
+Lines 10–12 are a deliberate three-step. the owner confirmed on 2026-09-05 that the
+four modifier boxes — SHIFT, CTRL, WIN, ALT — are **independent tick boxes, not
+mutually exclusive**. So:
+
+- line 10 → keycode alone, modifiers clear
+- line 11 → same keycode, one modifier. The diff is the CTRL bit, isolated.
+- line 12 → same keycode, two modifiers at once.
+
+Line 12 is the one that decides the *encoding*, and it is worth an extra APPLY
+on its own. If the modifier byte in line 12 is line 11's value with one more bit
+set, modifiers are a **bitmask** and all sixteen combinations are reachable from
+three observations. If instead it is some third unrelated number, they are an
+**enumeration** and every combination has to be observed separately. Those two
+readings need completely different code, and nothing short of ticking two boxes
+at once tells them apart.
 
 ### `07-factory-reset.pcapng`
 Start capture, press **Factory Reset**, let it settle, stop. Then **read the
@@ -369,7 +418,6 @@ windows-run/
   03-sensor.pcapng
   04-buttons.pcapng
   05-buttonmapping.pcapng
-  06-led.pcapng
   07-factory-reset.pcapng
   08-flash.pcapng
   09-flash-again.pcapng
