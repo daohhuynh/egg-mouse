@@ -1,34 +1,147 @@
 {
-  "_comment": [
-    "Predictions about the settings record, derived from the vendor binary",
-    "BEFORE the capture that tests them. Kept in a separate file from",
-    "fieldmap.py on purpose: CLAUDE.md §7.1 deleted a previous tool because it",
-    "carried its conclusions inside it, so anyone reading the tool inherited",
-    "them. fieldmap.py must observe without expecting; this file expects; and",
-    "score.py is the only place the two meet.",
-    "",
-    "Every entry needs a `cite` and a `refuted_if`. An entry with no way to",
-    "fail is not a prediction."
-  ],
-  "predictions": [
-    {
-      "id": "polling-divisor",
-      "record_offset": 5,
-      "cite": "config-protocol.md §7.5; cfg107 0x413a79, 0x413a94-0x413b8f",
-      "claim": "record 0x05 holds 8000/rate",
-      "expect_values": {"125": 64, "250": 32, "500": 16, "1000": 8,
-                        "2000": 4, "4000": 2, "8000": 1},
-      "match_log": "polling",
-      "refuted_if": "a polling line moves no byte at record 0x05, or moves it to a value outside {1,2,4,8,16,32,64}, or rate*value != 8000"
-    },
-    {
-      "id": "cpi-stage-count",
-      "record_offset": 14,
-      "cite": "config-protocol.md §7.6; cfg107 0x410c47, 0x410c59 CB_GETCURSEL",
-      "claim": "record 0x0e is the CPI stage count, 1..4",
-      "expect_values": {"1": 1, "2": 2, "3": 3, "4": 4},
-      "match_log": "cpi levels",
-      "refuted_if": "a CPI-levels line moves no byte at record 0x0e, or moves it outside 1..4"
-    }
-  ]
+ "_comment": [
+  "Predictions about the settings record, derived from the vendor binary",
+  "BEFORE the capture that tests them. Kept in a separate file from",
+  "fieldmap.py on purpose: CLAUDE.md §7.1 deleted a previous tool because it",
+  "carried its conclusions inside it, so anyone reading the tool inherited",
+  "them. fieldmap.py must observe without expecting; this file expects; and",
+  "score.py is the only place the two meet.",
+  "",
+  "Every entry needs a `cite` and a `refuted_if`. An entry with no way to",
+  "fail is not a prediction."
+ ],
+ "predictions": [
+  {
+   "id": "polling-divisor",
+   "record_offset": 5,
+   "cite": "config-protocol.md §7.5; cfg107 0x413a79, 0x413a94-0x413b8f",
+   "claim": "record 0x05 holds 8000/rate",
+   "expect_values": {
+    "125": 64,
+    "250": 32,
+    "500": 16,
+    "1000": 8,
+    "2000": 4,
+    "4000": 2,
+    "8000": 1
+   },
+   "match_log": "polling",
+   "refuted_if": "a polling line moves no byte at record 0x05, or moves it to a value outside {1,2,4,8,16,32,64}, or rate*value != 8000"
+  },
+  {
+   "id": "cpi-stage-count",
+   "record_offset": 14,
+   "cite": "config-protocol.md §7.6; cfg107 0x410c47, 0x410c59 CB_GETCURSEL",
+   "claim": "record 0x0e is the CPI stage count, 1..4",
+   "expect_values": {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4
+   },
+   "match_log": "cpi levels",
+   "refuted_if": "a CPI-levels line moves no byte at record 0x0e, or moves it outside 1..4"
+  },
+  {
+   "id": "slamclick-bit0",
+   "kind": "bit",
+   "bit": 0,
+   "record_offset": 6,
+   "cite": "config-protocol.md §7.8; cfg107 0x40677a/0x406786 (click), 0x40619d/0x4061a3 (APPLY collect); DDX_Control 0x4207ed binds IDC 1029 = dialog 153 'Slamclick Filter'",
+   "claim": "record 0x06 bit 0 is Slamclick Filter, and record 0x06 is the record's only bitfield",
+   "match_log": "slamclick",
+   "refuted_if": "the slamclick line moves no byte at record 0x06, or the xor of old and new at 0x06 is anything but 0x01 (a different bit moved, or the whole byte was rewritten)"
+  },
+  {
+   "id": "angle-snapping",
+   "kind": "toggle",
+   "record_offset": 10,
+   "cite": "config-protocol.md §7.8; cfg107 0x40ecb8 setne / 0x40ecbd store to object 0x28; serializer 0x4042f8 maps object 0x28 to record 0x0a; IDC 1064 dialog 135",
+   "claim": "record 0x0a is Angle Snapping, stored 1 when ticked",
+   "match_log": "angle snapping",
+   "refuted_if": "the angle snapping line moves no byte at record 0x0a, or moves it to a value outside {0,1}"
+  },
+  {
+   "id": "led-liftoff-inverted",
+   "kind": "toggle",
+   "record_offset": 8,
+   "cite": "config-protocol.md §7.8; cfg107 0x40ecd2 is SETE not SETNE, storing to object 0x26; serializer 0x4042ea maps object 0x26 to record 0x08; IDC 1066 dialog 135",
+   "claim": "record 0x08 is Disable LED on Lift-Off, and it is INVERTED: ticking the box stores 0. The byte means 'LED enabled on lift-off'",
+   "match_log": "disable led",
+   "refuted_if": "the disable-LED line moves no byte at record 0x08, or moves it to a value outside {0,1}. NOTE: the capture cannot score the inversion itself, because the log does not record whether 'clicked once' ticked or unticked. The inversion is [D] from the sete at 0x40ecd2 and does not need the capture; what is scored here is only that this is the right byte."
+  },
+  {
+   "id": "motion-sync",
+   "kind": "toggle",
+   "record_offset": 12,
+   "cite": "config-protocol.md §7.9; cfg107 0x411ad1 setne / 0x411ad6 store to object 0x2a; serializer 0x404306 maps object 0x2a to record 0x0c; IDC 1028 dialog 140",
+   "claim": "record 0x0c is Motion Sync",
+   "match_log": "motion sync",
+   "refuted_if": "the motion sync line moves no byte at record 0x0c, or moves it to a value outside {0,1}"
+  },
+  {
+   "id": "force-max-fps",
+   "kind": "toggle",
+   "record_offset": 113,
+   "cite": "config-protocol.md §7.8/§7.9; cfg107 0x411b0b setne / 0x411b10 store to object 0x2d, and click handler 0x41201b; serializer 0x4045cf maps object 0x2d to record 0x71; IDC 1032 dialog 140",
+   "claim": "record 0x71 is Force max Sensor fps -- the single byte that did not match the predicted defaults in 01-baseline",
+   "match_log": "force max",
+   "refuted_if": "the force-max-fps line moves no byte at record 0x71, or moves it to a value outside {0,1}"
+  },
+  {
+   "id": "sensor-angle-twos-complement",
+   "kind": "value",
+   "record_offset": 112,
+   "cite": "config-protocol.md §7.9; cfg107 0x411b19 pushes TBM_GETPOS (0x400), 0x411b25 stores the raw byte to object 0x2c with no clamp; serializer 0x4045c8 maps object 0x2c to record 0x70; IDC 1038 dialog 140",
+   "claim": "record 0x70 is Sensor Angle Tuning, the trackbar position stored raw, negatives in two's complement",
+   "expect_values": {
+    "20": 20,
+    "-45": 211
+   },
+   "match_log": "sensor angle",
+   "refuted_if": "the sensor-angle line moves no byte at record 0x70, or 20 does not store 20, or -45 stores anything but 211 (0xd3). Sign-magnitude would store 173 (0xad); anything else means the control is not passing TBM_GETPOS through unmodified."
+  },
+  {
+   "id": "cpi1-xy-flag-leads",
+   "kind": "toggle",
+   "record_offset": 35,
+   "cite": "config-protocol.md §7.8; cfg107 0x40ed5d-0x40ed6e computes setne(0x4e8 != 0xe7c) into object 0x0e; serializer 0x4043ad maps object 0x0e to record 0x23, and 0x22 comes from object 0x81 (end of the RGB block) so 0x23 is the block boundary",
+   "claim": "the CPI block is record 0x23-0x36 with the X-differs-from-Y flag FIRST in each 5-byte stage, not record 0x24-0x37 with a trailing byte. Making CPI stage 1's X and Y differ moves record 0x23",
+   "match_log": "cpi 1 x",
+   "refuted_if": "setting CPI 1 X to a value different from its Y moves no byte at record 0x23, or moves record 0x27 instead -- 0x27 moving is the specific signature of the OLD flag-last reading being right and this correction being wrong"
+  },
+  {
+   "id": "cpi-downshift-remap",
+   "kind": "masked",
+   "record_offset": 11,
+   "mask": 12,
+   "shift": 2,
+   "cite": "config-protocol.md §7.9; cfg107 CB_GETCURSEL on member 0x398 (IDC 1082 dialog 140), 4-arm jump table at 0x411bc0 -> 0x411b70/0x411b84/0x411b98/0x411bac ORing 0x8/0xc/0x4/0x0",
+   "claim": "CPI Downshift Tuning occupies bits 3:2 of record 0x0b, and the combo index is NOT stored directly: item 1 stores 2, item 2 stores 3, item 3 stores 1, item 4 stores 0",
+   "expect_by_line": {
+    "8": 2,
+    "9": 3,
+    "10": 1,
+    "11": 0
+   },
+   "refuted_if": "a downshift line moves no byte at record 0x0b, or bits 3:2 do not take the predicted value for that line's position, or bits outside 3:2 move on a downshift-only line (which would mean the two combos do not share the byte as derived)",
+   "match_log": "downshift"
+  },
+  {
+   "id": "smoothing-remap",
+   "kind": "masked",
+   "record_offset": 11,
+   "mask": 3,
+   "shift": 0,
+   "cite": "config-protocol.md §7.9; cfg107 CB_GETCURSEL on member 0x40c (IDC 1084 dialog 140), three-arm ladder 0x411b36-0x411b4d",
+   "claim": "Smoothing Tuning occupies bits 1:0 of record 0x0b with the remap item 1 -> 2, item 2 -> 0, item 3 -> 1",
+   "expect_by_line": {
+    "12": 2,
+    "13": 0,
+    "14": 1
+   },
+   "refuted_if": "a smoothing line moves no byte at record 0x0b, or bits 1:0 do not take the predicted value for that line's position, or bits outside 1:0 move on a smoothing-only line",
+   "match_log": "smoothing"
+  }
+ ]
 }

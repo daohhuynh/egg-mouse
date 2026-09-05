@@ -35,8 +35,56 @@ echo
 # An unlisted field must never be settable, however real it sounds. These are
 # genuine settings on this mouse; the point is that knowing a field EXISTS is
 # not knowing which byte it is (§7.3 maps all 115 and names only a few).
-for f in lod angle-snapping ripple-control dpi cpi motion-sync debounce; do
+#
+# angle-snapping and motion-sync USED TO BE ON THIS LIST and were moved off on
+# 2026-09-05 when §7.8/§7.9 derived their bytes. That is the list working as
+# intended: it holds names whose byte is unknown, not names we dislike.
+for f in lod ripple-control dpi cpi debounce; do
   want_rc 2 "is not a settable field" set "$f" 1
+done
+
+# Derived but DELIBERATELY withheld, each for a reason the tool must state.
+# These are the dangerous ones -- a plausible name with a real byte behind it --
+# so the test asserts both that they are refused AND that the refusal explains
+# itself rather than pretending the field does not exist.
+for f in disable-led-on-liftoff slamclick-filter cpi-downshift smoothing; do
+  want_rc 2 "is not a settable field" set "$f" 1
+done
+want_rc 2 "BIT 0" set slamclick-filter 1
+
+# The vendor's caption must be refused, and the refusal must point at the field
+# named after the byte instead of just saying "no". Getting this wrong writes
+# the opposite of what the user asked for, which is the whole reason for the
+# rename -- so the redirect is asserted, not just the refusal.
+want_rc 2 "led-on-liftoff" set disable-led-on-liftoff 1
+for v in 0 1; do
+  want_rc 2 "Exactly one byte changes" set led-on-liftoff "$v"
+done
+want_rc 2 "record 0x08" set led-on-liftoff 1
+for v in 2 -1; do
+  want_rc 2 "is not a legal led-on-liftoff" set led-on-liftoff "$v"
+done
+
+# Newly derived and now settable. Legal values are accepted, still refuse to
+# write without --yes, and must name the byte and cite the derivation.
+for f in angle-snapping motion-sync force-max-fps; do
+  for v in 0 1; do
+    want_rc 2 "Exactly one byte changes" set "$f" "$v"
+  done
+  for v in 2 -1 255; do
+    want_rc 2 "is not a legal $f" set "$f" "$v"
+  done
+done
+want_rc 2 "record 0x0a" set angle-snapping 1
+want_rc 2 "record 0x0c" set motion-sync 1
+want_rc 2 "record 0x71" set force-max-fps 1
+
+# Sensor angle is signed: the vendor stores TBM_GETPOS raw, so -45 must encode
+# as two's complement 0xd3 and NOT as sign-magnitude 0xad.
+want_rc 2 "0xd3" set sensor-angle -45
+want_rc 2 "record 0x70" set sensor-angle 20
+for v in -129 128 1000; do
+  want_rc 2 "is not a legal sensor-angle" set sensor-angle "$v"
 done
 
 # Rates that do not divide 8000, and rates that divide it by a non-power of two.
@@ -67,7 +115,10 @@ done
 
 # The listing must show every settable field with a citation, and must not
 # quietly grow: a field with no cite is a protocol claim with no evidence.
-listing=$("$BIN" set 2>&1)
+# Count only the SETTABLE section. The withheld list below it also names record
+# offsets -- on purpose, so a user is told which byte they are being refused --
+# and counting those as settable fields is how this check started lying.
+listing=$("$BIN" set 2>&1 | sed -n '1,/deliberately NOT settable/p')
 n_fields=$(printf '%s\n' "$listing" | grep -c "record 0x")
 n_cites=$(printf '%s\n' "$listing" | grep -c "config-protocol.md")
 if [ "$n_fields" -eq "$n_cites" ] && [ "$n_fields" -gt 0 ]; then

@@ -59,6 +59,70 @@ def number_in(text):
     return m.group(1) if m else None
 
 
+def score_bitwise(p, relevant, off):
+    """kind "bit" / "toggle": the log line carries no number, so the claim is
+    about the SHAPE of the change rather than a value. "bit" says one named bit
+    of one byte flips and every other bit of that byte holds; "toggle" says the
+    whole byte flips between 0 and 1. Both are refutable by a capture in which
+    the byte does not move at all, which is the failure mode that matters --
+    a checkbox we mapped to the wrong byte."""
+    rows, ok, bad = [], 0, 0
+    for fld, ob in relevant:
+        idx = off - fld["payload_offset"]
+        o, n = byte_at(ob.get("old"), idx), byte_at(ob.get("new"), idx)
+        if o is None or n is None:
+            rows.append("  ?  line %s %-28s -> record 0x%02x not in this run"
+                        % (ob.get("line"), ob.get("action"), off))
+            continue
+        if p["kind"] == "bit":
+            m = 1 << p["bit"]
+            good = bool((o ^ n) == m)
+            what = ("bit %d flipped %d->%d, rest of the byte held"
+                    % (p["bit"], (o & m) != 0, (n & m) != 0)) if good else (
+                    "0x%02x -> 0x%02x, xor 0x%02x, wanted xor 0x%02x"
+                    % (o, n, o ^ n, m))
+        else:
+            good = (o != n) and o in (0, 1) and n in (0, 1)
+            what = "%d -> %d" % (o, n) if good else (
+                   "0x%02x -> 0x%02x, not a 0/1 toggle" % (o, n))
+        ok, bad = ok + bool(good), bad + (not good)
+        rows.append("  %s  line %s %-28s -> %s"
+                    % ("ok" if good else "XX", ob.get("line"),
+                       ob.get("action"), what))
+    return ("REFUTED" if bad else "CONFIRMED" if ok else "UNTESTED"), rows
+
+
+def score_masked(p, relevant, off):
+    """kind "masked": a sub-field of one byte, keyed by LOG LINE NUMBER rather
+    than by a number in the text -- combo items are named by position, not by
+    value, so there is no number to extract. `mask` and `shift` say which bits;
+    `expect_by_line` says what each numbered line should put there.
+
+    This also checks the bits OUTSIDE the mask held still, because the claim
+    being tested is as much "these two combos share a byte and each owns its own
+    nibble" as it is "the remap is 0->2, 1->0, 2->1"."""
+    rows, ok, bad = [], 0, 0
+    mask, sh = p["mask"], p.get("shift", 0)
+    for fld, ob in relevant:
+        idx = off - fld["payload_offset"]
+        o, n = byte_at(ob.get("old"), idx), byte_at(ob.get("new"), idx)
+        line = str(ob.get("line"))
+        want = p["expect_by_line"].get(line)
+        if o is None or n is None or want is None:
+            rows.append("  ?  line %s %-28s -> no prediction for this line"
+                        % (line, ob.get("action")))
+            continue
+        got = (n & mask) >> sh
+        held = (o & ~mask & 0xFF) == (n & ~mask & 0xFF)
+        good = (got == want) and held
+        ok, bad = ok + bool(good), bad + (not good)
+        rows.append("  %s  line %s %-28s -> field %d, predicted %d%s"
+                    % ("ok" if good else "XX", line, ob.get("action"), got, want,
+                       "" if held else
+                       "; BITS OUTSIDE THE MASK MOVED 0x%02x->0x%02x" % (o, n)))
+    return ("REFUTED" if bad else "CONFIRMED" if ok else "UNTESTED"), rows
+
+
 def score_one(doc, p):
     off = p["record_offset"]
     hits = observations_at(doc, off)
@@ -73,6 +137,14 @@ def score_one(doc, p):
         return ("UNTESTED",
                 ["record 0x%02x moved, but on no line mentioning %r --"
                  " the capture does not test this" % (off, p["match_log"])], [])
+
+    kind = p.get("kind", "value")
+    if kind in ("bit", "toggle"):
+        v, rows = score_bitwise(p, relevant, off)
+        return v, rows, []
+    if kind == "masked":
+        v, rows = score_masked(p, relevant, off)
+        return v, rows, []
 
     ok = bad = 0
     for fld, ob in relevant:

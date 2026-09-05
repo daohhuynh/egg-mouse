@@ -137,6 +137,97 @@ keeping.
 - **#22 `cfg-combo-cpi-downshift`**, and the Smoothing Tuning three-item
   prediction at `wire-predictions.md:3070`. Both are answered by dropping the
   combo open and reading it, and `log.txt` asks for exactly that.
-- Everything in the four **updater** areas (launch, bootloader entry, start
-  command, block write loop, read-back) needs `08-flash.pcapng`, which does not
-  exist yet.
+- Everything in the four **updater** areas (bootloader entry, start command,
+  block write loop, read-back) needs `08-flash.pcapng`, which does not exist
+  yet. The *launch* area is now partly scored — see below.
+
+## Scored 2026-09-05
+
+### CONFIRMED — `updater-idle-window` (`wire-predictions.md:2908`)
+
+> "At launch, before any click, the status box is empty, the progress bar is at
+> 0, and the 'Update Firmware' button is enabled."
+> REFUTED IF: "The updater shows any status text, **a firmware version**, or a
+> non-zero progress bar before the button is clicked, or the button starts
+> greyed."
+
+The owner, 2026-09-05, unprompted: *"the firmware version is not shown by the updater
+before clicking anything, its just what i told you earlier, a text input box, a
+bar, and a start button."*
+
+Observer: the owner. Method: looked at the running updater on the Windows laptop.
+This scores because the `REFUTED IF` names the firmware version explicitly and
+he addressed exactly that, without being asked the question in that form — he
+raised it while querying a different line in `log.txt`. The derivation behind it
+was that fw110's `OnInitDialog` sets two window icons and returns, enumerating
+nothing.
+
+**Not** scored from the same sentence: `updater-ui-four-controls`
+(`wire-predictions.md:2872`) predicts *four* controls — progress bar, button,
+`Status:` static, edit. the owner named three and did not mention the `Status:` label.
+A small static caption is the likeliest thing to go unlisted in an informal
+description, so this is **corroboration, not a confirmation**, and it stays
+unscored until someone counts controls deliberately. Scoring it off a sentence
+that was not answering that question is how a scoreboard starts lying.
+
+### REFUTED — `rgb-block-tag-is-cpi-stage` (`config-protocol.md` §7.3)
+
+> Predicted, before asking: the four 5-byte colour records are the CPI-stage
+> indicator, and the trailing `01 0N` byte says which stage each colour belongs
+> to — so stage 1 yellow, 2 blue, 3 red, 4 green.
+> REFUTED IF: "the observed colour at any stage is not the one predicted, or the
+> colours do not follow the stage order."
+
+The owner, 2026-09-05: *"the official cpi level numbering blue is CPI 1, green is CPI
+2, yellow i CPI 3, and red is CPI 4"*.
+
+Observer: the owner, from Endgame's own level numbering plus the indicator on the
+underside of his mouse. **The colour set matches exactly and the order does
+not** — tag→stage is `1→3, 2→1, 3→4, 4→2`. The prediction was written with the
+`REFUTED IF` naming the order explicitly, so it fails on its own terms and no
+re-reading rescues it.
+
+**This is the first REFUTED entry in the project**, which matters more than the
+three CONFIRMED ones. §6.2 says a harness that never produces a bad result is
+measuring nothing, and until today this scoreboard had never produced one. It
+can. What it caught was not an arithmetic slip but a `[G]` that had been
+restated until it read as a finding — the failure §7.1's closing line names.
+
+Salvage, stated so the refutation is not quietly widened either: the block's
+*shape* survives and is now `[O]` (four × `[3 colour bytes][0x01][position]`,
+stride 5, records `0x0f`–`0x22`, bounded by the CPI block at `0x23`). What died
+is the tail's meaning, and with it the claim that this block is the DPI
+indicator at all.
+
+### CONFIRMED — `led-liftoff-inverted` semantics (`config-protocol.md` §7.8)
+
+Derived, from `sete` (not `setne`) at cfg107 `0x40ecd2`: the "Disable LED on
+Lift-Off" box stores the **inverse** of its tick, so record `0x08` means "LED
+enabled on lift-off" and `1` is the normal state.
+
+The owner, 2026-09-05: *"when i disabled it and then applied and lifted the mouse the
+LED color CPI wasnt there anymore so thats what it does."*
+
+Observer: the owner, on the device. This is a **behavioural** confirmation of a
+polarity derived from one instruction, and it is the strongest kind available
+short of a capture, because it is the direction of the effect rather than a byte
+value — a `setne`-vs-`sete` mix-up would have shown as the LED going out with
+the box *unticked*.
+
+It also settles what "the LED" refers to at all: the underside DPI indicator,
+not a separate light. Note the sequencing — the owner first reported that the setting
+did **not** affect the indicator, then corrected himself once he had pressed
+APPLY. The first report is what the earlier draft of §7.3 briefly rested on, and
+it is a good reminder that an observation taken before the write lands is not an
+observation of the write.
+
+### The technique-diversity caveat now partly lifts
+
+Every prior confirmation used the same technique (`ShowWindow(SW_HIDE)` in
+`OnInitDialog`), which the earlier note flagged as a weakness — three hits from
+one method is close to one hit. This one is a different method on a different
+binary: reading what `OnInitDialog` *omits* rather than what it hides.
+
+And the tally is no longer 4–0. **CONFIRMED 5, REFUTED 1**, all scored the same
+day and all from things the owner volunteered rather than from questions he was asked.
+The refutation is the one that tells us the scoreboard works.

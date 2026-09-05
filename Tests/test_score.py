@@ -97,5 +97,62 @@ out, rc = run(doc([field(0x04, 2, wide)]))
 check("a wide run is indexed to the predicted byte",
       "CONFIRMED polling-divisor" in out, out)
 
+# ---- kind "bit": one named bit flips, the rest of the byte holds ----------
+out, rc = run(doc([field(0x06, 1, [ob(1, "slamclick filter (clicked once)",
+                                      "00", "01")])]))
+check("a clean bit-0 flip CONFIRMS the bitfield prediction",
+      "CONFIRMED slamclick-bit0" in out, out)
+
+# The byte moved and bit 0 did change -- but so did bit 2. That is the whole
+# point of the mask check: a whole-byte rewrite must not pass as a bit flip.
+out, rc = run(doc([field(0x06, 1, [ob(1, "slamclick filter (clicked once)",
+                                      "00", "05")])]))
+check("a bit flip that also disturbs other bits is REFUTED",
+      "REFUTED slamclick-bit0" in out and rc == 1, out)
+
+# Right byte, wrong bit. 0x10 is Motion Jitter's bit, not Slamclick's.
+out, rc = run(doc([field(0x06, 1, [ob(1, "slamclick filter (clicked once)",
+                                      "00", "10")])]))
+check("the wrong bit moving is REFUTED, not CONFIRMED",
+      "REFUTED slamclick-bit0" in out, out)
+
+# ---- kind "toggle" -------------------------------------------------------
+out, rc = run(doc([field(0x0a, 1, [ob(8, "angle snapping (clicked once)",
+                                      "00", "01")])]))
+check("a 0->1 toggle CONFIRMS", "CONFIRMED angle-snapping" in out, out)
+
+out, rc = run(doc([field(0x0a, 1, [ob(8, "angle snapping (clicked once)",
+                                      "00", "07")])]))
+check("a toggle to something outside {0,1} is REFUTED",
+      "REFUTED angle-snapping" in out, out)
+
+# ---- kind "masked": two combos sharing one byte --------------------------
+ds = [ob(8, "downshift -> first", "00", "08"),     # item 1 -> field 2 (0b10<<2)
+      ob(9, "downshift -> second", "08", "0c"),    # item 2 -> field 3
+      ob(10, "downshift -> third", "0c", "04"),    # item 3 -> field 1
+      ob(11, "downshift -> fourth", "04", "00")]   # item 4 -> field 0
+out, rc = run(doc([field(0x0b, 1, ds)]))
+check("the downshift remap CONFIRMS when each line lands where derived",
+      "CONFIRMED cpi-downshift-remap" in out, out)
+
+# Same lines, but the combo index is stored directly (0,1,2,3) instead of
+# through the jump-table remap. This is the single most likely way for the
+# derivation to be wrong, so it must refute.
+ds_direct = [ob(8, "downshift -> first", "00", "00"),
+             ob(9, "downshift -> second", "00", "04"),
+             ob(10, "downshift -> third", "04", "08"),
+             ob(11, "downshift -> fourth", "08", "0c")]
+out, rc = run(doc([field(0x0b, 1, ds_direct)]))
+check("an identity remap REFUTES the downshift prediction",
+      "REFUTED cpi-downshift-remap" in out, out)
+
+# A downshift line that also moves the smoothing bits refutes the claim that
+# the two combos own separate halves of the byte.
+ds_bleed = [ob(8, "downshift -> first", "00", "0a")]   # bit 1 moved too
+out, rc = run(doc([field(0x0b, 1, ds_bleed)]))
+check("bits outside the mask moving REFUTES, and says so",
+      "REFUTED cpi-downshift-remap" in out
+      and "BITS OUTSIDE THE MASK MOVED" in out, out)
+
 print("\n%d/%d passed" % (len(RAN) - len(FAILS), len(RAN)))
 sys.exit(1 if FAILS else 0)

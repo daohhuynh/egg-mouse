@@ -1403,9 +1403,9 @@ sets which byte.
 | record | wire | what | confidence |
 | --- | --- | --- | --- |
 | `0x0f`–`0x22` | `0x1f`–`0x32` | **four 5-byte RGB records**: `ff ff 00 01 01`, `00 00 ff 01 02`, `ff 00 00 01 03`, `00 ff 00 01 04` — yellow/blue/red/green, each followed by `0x01` and a **stage index 1..4** | structure `[O]`, meaning `[G]` |
-| `0x24`–`0x37` | `0x34`–`0x47` | **four 5-byte CPI records**, two 16-bit LE each: 400/400, 800/800, 1600/1600, 3200/3200, then a 5th byte `0x00` | `[O]`, values also `[D]` |
+| `0x23`–`0x36` | `0x33`–`0x46` | **four 5-byte CPI records**, `flag, X lo, X hi, Y lo, Y hi`: 400/400, 800/800, 1600/1600, 3200/3200, each led by an `X≠Y` flag byte | `[D]` — **corrected §7.8** |
 | `0x37`–`0x6f` | `0x47`–`0x7f` | **eight 7-byte button records**. Masks `01 02 04 10 08 f1 01 ff` at stride 7 from record `0x38`; a `0x08` five bytes after each mask | structure `[O]`, field roles `[G]` |
-| `0x70`–`0x72` | `0x80`–`0x82` | three trailing bytes, one of which (`0x71`) is the byte the owner changed | `[G]` |
+| `0x70`–`0x72` | `0x80`–`0x82` | three trailing bytes. `0x70` is **Sensor Angle Tuning** (§7.9, `TBM_GETPOS`), `0x71` is **Force max Sensor fps** (§7.8) and is the byte the owner changed. Only `0x72` is still unattributed | `0x70`/`0x71` `[D]`, `0x72` `[G]` |
 
 **The RGB block resolves `wire-observed.md` §5.1**, which recorded four records
 "reading as RGB" but with a stride that would not close. The stride is 5 and the
@@ -1413,13 +1413,81 @@ block runs record `0x0f`–`0x22`, contiguous from object `0x6e`–`0x81`; the
 trailing `01 02 03 04` are stage indices, which is what makes the grouping
 unambiguous. Four colours indexed by CPI stage is a CPI-stage indicator.
 
-**This does not reopen the LED question and must not be read as doing so.** The
-LED *page* is unreachable in all four config tools (`gui-surface.md` §3), so
-these bytes remain unreachable from the UI and therefore permanently `[G]` as to
-meaning — no capture can attribute them, because no control moves them. They are
-read-modify-write territory under §1.3, exactly as before. What changed is that
-we now know their *shape*, which is why they must be preserved intact rather
-than treated as slack.
+**Corrected 2026-09-05. The paragraph that stood here was wrong, and wrong in a
+way worth keeping visible.** It said these bytes were "permanently `[G]` as to
+meaning — no capture can attribute them, because no control moves them". The
+first clause is still true: the LED *page* is unreachable in all four config
+tools (`gui-surface.md` §3), so no UI control writes these bytes. The conclusion
+does not follow. Attribution does not require a *control*; it requires an
+*observation*, and the device displays these bytes on its own.
+
+The owner, 2026-09-05: the OP1 8k v2 has **a small circular LED on the underside that
+shows the current DPI level as a colour**, lit continuously. That is precisely
+what four colour entries tagged with CPI stages 1–4 describe. So the block is
+not decorative slack and not unknowable — it is the DPI-stage indicator, and it
+is readable by eye with no capture, no write, and no risk.
+
+**Committed prediction, registered before the owner looked** — and **REFUTED the same
+day.** Predicted: stage 1 yellow, 2 blue, 3 red, 4 green, from reading the
+trailing `01 0N` as "this colour belongs to CPI stage N".
+
+The owner, 2026-09-05, giving Endgame's own numbering: **stage 1 blue, stage 2 green,
+stage 3 yellow, stage 4 red.**
+
+| block pos | bytes | colour (RGB) | its tag | stage the owner sees it at |
+| --- | --- | --- | --- | --- |
+| 0 @`0x0f` | `ff ff 00` | yellow | 1 | **3** |
+| 1 @`0x14` | `00 00 ff` | blue | 2 | **1** |
+| 2 @`0x19` | `ff 00 00` | red | 3 | **4** |
+| 3 @`0x1e` | `00 ff 00` | green | 4 | **2** |
+
+The colour **set** matches exactly — all four, none extra. The **order** does
+not: tag→stage is the permutation `1→3, 2→1, 3→4, 4→2`, which is not the
+identity, a reversal, or a rotation.
+
+What survives and what does not:
+
+- **Survives:** the block's shape. Four records of `[3 colour bytes][0x01][index]`
+  at stride 5, records `0x0f`–`0x22`. The re-phasing that would put the index
+  *before* its triple is ruled out by the boundary: record `0x23` is `00` and
+  `0x24`–`0x25` is `90 01` = 400, which is the first CPI stage (§7.8), so the
+  block cannot extend past `0x22`.
+- **Dead:** "the trailing byte is the CPI stage this colour is used for". The
+  index is just the record's own position, 1-based, and carries no stage
+  meaning. Any stage→colour mapping lives somewhere this block does not show.
+- **Still open, and it moved twice in an hour:** whether this block is the DPI
+  indicator's palette. The first version of this bullet said it probably was
+  not, resting on the owner's observation that "Disable LED on Lift-Off" did not
+  affect the indicator. **That observation was superseded within the hour by
+  the owner himself**: with the box ticked *and applied*, lifting the mouse puts the
+  indicator out (2026-09-05). He had not applied it the first time. So the
+  config tool **does** control this LED, through record `0x08`, and there is
+  exactly one LED rather than an indicator plus an absent RGB system.
+
+  That makes "these four colours are the indicator's palette" plausible again.
+  It does **not** rescue the tag: the order refutation is an independent
+  observation and stands. If the block is the palette, the slot→stage mapping
+  lives somewhere else. Meaning stays `[G]`; §1.3 still forbids writing it.
+
+So these bytes go back to `[G]` as to meaning — but for a **reason that was
+tested**, not by assumption, and with the shape now `[O]`. §1.3 forbids writing
+them either way, and this is what §1.3 is for: had we "known" the tail was a
+stage index, we would have written it wrong.
+
+Two lessons, and the second is the more expensive one.
+
+§1.2a, applied to ourselves: "no control moves them" is a statement about the
+*config tool*, and it was silently widened into a statement about the *world*.
+The device is a second observer, and it had not been consulted before the word
+"permanently" was written down.
+
+§1.2, applied to a **[G] that had started reading as a finding.** The words
+"stage index 1..4" and "Four colours indexed by CPI stage is a CPI-stage
+indicator" were written in §7.3 tagged `structure [O], meaning [G]` — correctly
+tagged, and then reasoned from anyway, twice, until the tag stopped being read.
+The refutation cost one sentence from the owner. It would have cost a wrong write if
+this block had ever been reachable. §7.1's last line names this exact failure:
+"a hedge that has become an assertion by its third restatement".
 
 ### The map
 
@@ -1755,3 +1823,227 @@ writes into the mirrors shows the low byte of `a` taking `0x0c 0x09 0x20 0x18
 with an action code — and consistent with several other things. **`[G]`.**
 `05-buttonmapping` is the capture that settles it, and the derivation above
 tells the differ where to look rather than what it will find.
+
+## 7.8 Checkboxes: every one, and where each lands in the record  [D]
+
+`FUN_0040ec20` (`0x40ec20`–`0x40ee50`) is dialog 135's **collect-UI-into-the-
+settings-object** pass: `%esi` = the page object, `%edi` = the settings object,
+and every `movb`/`movw N(%edi)` in it is a settings-object offset. Its **only**
+caller is `0x413f08`, inside the APPLY handler at `0x413ea0` — which takes a
+reentrancy flag at `+0x2fa0`, looks the device up by PID `0x1978` (`0x413edb`),
+then collects each page and serialises. So everything below is on the live write
+path, not in dead code.
+
+Control identities come from `DDX_Control` (`0x4207ed`), which binds a dialog
+member to a control ID; the ID's caption is read straight out of `RT_DIALOG`
+(`Tools/ghidra-export/dlgdump.py`). Object→record is §7.3's serializer table.
+
+| checkbox | dlg | IDC | member | sense | object | **record** | at |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Slamclick Filter | 153 | 1029 | `0x628` | set bit | `0x07` bit 0 | **`0x06` bit 0** | `40677a`/`406786` |
+| Motion Jitter Filter | 140 | 1030 | `0x1a4` | set bit | `0x07` bit 4 | **`0x06` bit 4** | `411e7a`/`411e86` |
+| Angle Snapping | 135 | 1064 | `0xf24` | `setne` | `0x28` | **`0x0a`** | `40ecb8`/`40ecbd` |
+| Disable LED on Lift-Off | 135 | 1066 | `0x127c` | **`sete`** | `0x26` | **`0x08`** | `40ecd2`/`40ecd7` |
+| Force max Sensor fps | 140 | 1032 | `0x320` | `setne` | `0x2d` | **`0x71`** | `412018`/`41201b` |
+
+### Record `0x06` is the record's only bitfield
+**Corrected 2026-09-05, and the correction is the point.** The first version of
+this section scanned only *absolute-addressed* operands, found four instructions
+on `0x57f217`, and asserted the search space was "covered" on the grounds that
+the seven sites loading a mirror base into a register all pass it straight to an
+already-transcribed callee. That was false. `0x413efb` passes `%ebx =
+0x57f210` to `FUN_00411ab0`, which does its **own** bit ops at `0x411aeb` /
+`0x411af1` — `orb $0x10, 0x7(%ebx)`. An absolute-address scan cannot see those.
+This is §1.2a's exact failure: a scan for one encoding form said nothing about
+the others, and the conclusion was stated as coverage rather than as a method
+with a blind spot.
+
+The redone scan is every `or`/`and`/`xor` with an **immediate source and any
+memory destination**, register-relative included, across the vendor range
+`0x401000`–`0x415000`. Thirty-one instructions. Discarding `-0x4(%ebp)` frame
+temporaries in `0x414a`–`0x414e` and two pointer inits at `0x414688`/`0x414716`,
+the settings-object hits are exactly:
+
+| at | op | byte | which |
+| --- | --- | --- | --- |
+| `40619d` / `4061a3` | `$0x1` / `$-0x2` | `0x7(%ebx)` | Slamclick, APPLY collect (dlg 153) |
+| `40677a` / `406786` | `$0x1` / `$-0x2` | `0x57f217` | Slamclick, click handler |
+| `411aeb` / `411af1` | `$0x10` / `$-0x11` | `0x7(%ebx)` | Motion Jitter, APPLY collect (dlg 140) |
+| `411e7a` / `411e86` | `$0x10` / `$-0x11` | `0x57f217` | Motion Jitter, click handler |
+
+So **each checkbox writes the bit twice**: once when clicked, straight into the
+mirror by absolute address, and again when APPLY collects the page, through the
+object pointer. Both agree on which bit, which is why the assignment above
+survives the correction unchanged — but the *coverage* claim did not, and only
+the wider scan established it.
+
+Object `0x07` is still the only byte manipulated bit-wise; every other settings
+byte is written whole. cfg107 writes **only bits 0 and 4**. Bits 1,2,3,5,6,7 are
+never set or cleared by the config tool, so they are §1.3 read-modify-write
+territory: preserve them.
+
+One byte outside the record also takes bit ops — `0x57f335`, at `0x4051e7`,
+`0x40524e`, `0x4052af`, `0x405310`, `0x40866f`, `0x408680`, `0x408689`, setting
+bits `0x1 0x2 0x4 0x8`. It is **not** a settings byte: the two mirrors are 0x90
+apart (§7) and `0x57f335` is `0x95` past the block-1 base, beyond the object.
+Recorded as an open gap rather than chased here.
+
+cfg107 writes **only bits 0 and 4**. Bits 1,2,3,5,6,7 are never set or cleared
+by the config tool, so they are §1.3 read-modify-write territory: preserve them.
+Bit 4's control is `Motion Jitter Filter`, which **the owner confirmed is not visible
+on the Advanced Sensor page** (2026-09-05, `log.txt` 03 line 2) — so bit 4 is
+unreachable from the shipped UI and no capture can attribute it. Note this does
+not make bit 4 *unwritten*: `FUN_00411ab0` runs on every APPLY and clears the
+bit from a hidden, unchecked box. Whatever the device reports in bit 4, the
+vendor tool overwrites it with 0 on the next APPLY from that page.
+
+### Disable LED on Lift-Off is INVERTED — `[D]`, and now confirmed `[O]`
+`0x40ecd2` is `sete`, not `setne`: the box **ticked** stores **0**. Every other
+checkbox here stores 1 when ticked. The record byte therefore means *"LED is
+enabled on lift-off"*, and the caption negates it. This is precisely the shape
+of error that §4.3 says compiles clean in any language, and it is the reason
+`egg-config` must never infer a checkbox's polarity from its name.
+
+**Confirmed on the device, the owner, 2026-09-05:** ticking the box, pressing APPLY
+and lifting the mouse puts the underside DPI indicator out; untouched, it stays
+lit at any height. So the caption is accurate about the *behaviour*, the `sete`
+is accurate about the *byte*, and the two together fix the polarity without
+needing the capture:
+
+    record 0x08 == 1   indicator stays lit when lifted     (vendor default)
+    record 0x08 == 0   indicator goes out when lifted      (vendor box TICKED)
+
+`egg-config` exposes this as **`led-on-liftoff`**, named after the byte rather
+than after the checkbox, precisely so that `1` never has to mean "disabled".
+This also identifies the LED the vendor's caption refers to: it is the DPI
+indicator on the underside, not a second light.
+
+### Record `0x71` is Force max Sensor fps — which closes the 90/91 gap
+§7.3 recorded that 90 of 91 predicted default bytes matched `01-baseline`, with
+the single diff at record `0x71`, and §7.3's structure table could say no more
+than "one of which (`0x71`) is the byte the owner changed". Object `0x2d` is written
+only by `0x41201b`, from dialog 140's IDC 1032. So the byte that differed is
+**Force max Sensor fps**, and the residual is explained rather than outstanding.
+
+### Record `0x0d` (CPI stage index) is now [D], not [G]
+§7.6 derived the range 1..4 but left the *meaning* `[G]`. `0x40edf0`–`0x40ee4c`
+is four `BM_GETCHECK`s on dialog-135 members `0x13f4`, `0x1468`, `0x14dc`,
+`0x1550`, each storing a literal **0, 1, 2, 3** to object `0x0a` → record
+`0x0d`. Four mutually-exclusive checkboxes storing an index is a radio group:
+these are **the four unlabelled radio buttons** in `log.txt` 02 lines 34–37.
+
+### The CPI block is record `0x23`–`0x36`, and §7.3 had the phase wrong
+§7.3's structure table reads the CPI block as `0x24`–`0x37`, "two 16-bit LE
+each … then a 5th byte `0x00`". That was `[O]`, read off the baseline bytes, and
+**with all four flag bytes zero the flag-first and flag-last groupings produce a
+byte-for-byte identical stream** — the capture alone cannot separate them. The
+serializer can. Objects `0x0e/0x10-0x11/0x12-0x13` map to records
+`0x23/0x24-0x25/0x26-0x27`, and `0x40ed47`–`0x40ed6e` shows what each is:
+
+    obj 0x0e  flag   <- setne(dialog 0x4e8 != dialog 0xe7c)   "X differs from Y"
+    obj 0x0f  PAD    <- never written, and NOT SERIALIZED
+    obj 0x10  X lo }  <- movzwl 0x4e8(%esi)   (u16 LE)
+    obj 0x11  X hi }
+    obj 0x12  Y lo }  <- movzwl 0xe7c(%esi)   (u16 LE)
+    obj 0x13  Y hi }
+
+Object stride is 6 with a hole; wire stride is 5 because the pad is dropped.
+The block is bounded on both sides by the map: record `0x22` comes from object
+`0x81` (end of the RGB block) and record `0x37` from object `0x2e` (start of the
+button block). So the CPI block is **record `0x23`–`0x36`, flag first**, and
+§7.3's table is off by one. Corrected there.
+
+The X/Y flag is computed by **comparing X against Y**, never from the "X/Y
+Settings" checkbox — which is consistent with `gui-surface.md` §6 finding that
+the checkbox writes nothing. It only ungreys the Y box.
+
+### A vendor bug: CPI stage 4's X/Y flag reads stage 3's controls
+The four stages use control stride 4 on both arrays. Stages 1–3 are regular:
+
+    stage 1  X<-0x4e8  Y<-0xe7c   flag <- (0x4e8 != 0xe7c)   0x40ed5d
+    stage 2  X<-0x4ec  Y<-0xe80   flag <- (0x4ec != 0xe80)   0x40ed87
+    stage 3  X<-0x4f0  Y<-0xe84   flag <- (0x4f0 != 0xe84)   0x40edb1
+
+Stage 4 loads its values from the right place and its flag from the wrong one:
+
+    40edc8  0f b7 86 f4 04 00 00   movzwl 0x4f4(%esi), %eax   ; X  <- 0x4f4  OK
+    40edcf  66 89 47 22            movw   %ax, 0x22(%edi)
+    40edd3  0f b7 8e 88 0e 00 00   movzwl 0xe88(%esi), %ecx   ; Y  <- 0xe88  OK
+    40edda  66 89 4f 24            movw   %cx, 0x24(%edi)
+    40edde  8b 96 f0 04 00 00      movl   0x4f0(%esi), %edx   ; <-- 0x4f0, stage 3
+    40ede4  3b 96 84 0e 00 00      cmpl   0xe84(%esi), %edx   ; <-- 0xe84, stage 3
+    40edea  0f 95 c0               setne  %al
+    40eded  88 47 20               movb   %al, 0x20(%edi)     ; stage 4 flag
+
+The displacements would have to be `f4 04` and `88 0e` to match the pattern.
+**Record `0x32` therefore tracks CPI stage 3's X≠Y, not stage 4's.**
+
+Two consequences. Ours: §4.2 says mirror the vendor's *verification*; it does
+not say mirror the vendor's arithmetic, and `egg-config` must compute stage 4's
+flag from stage 4. Theirs: this is testable from a capture, and `log.txt` 02
+lines 18d–18f now do exactly that.
+
+## 7.9 The Advanced Sensor page, end to end  [D]
+
+`FUN_00411ab0` (`0x411ab0`–`0x411bbf`) is dialog 140's APPLY collect, called
+from `0x413efb` with `%ebx` = the settings object and `%esi` = the page. It is
+short enough to read whole, and it reads exactly **six** dialog members:
+
+| member | m_hWnd | IDC | caption | how read | object | record |
+| --- | --- | --- | --- | --- | --- | --- |
+| `0xb8` | `0xd8` | 1028 | Motion Sync | `BM_GETCHECK`, `setne` | `0x2a` | **`0x0c`** |
+| `0x1a4` | `0x1c4` | 1030 | Motion Jitter Filter | `BM_GETCHECK`, bit | `0x07` bit 4 | **`0x06` bit 4** |
+| `0x300` | `0x320` | 1032 | Force max Sensor fps | `BM_GETCHECK`, `setne` | `0x2d` | **`0x71`** |
+| `0x218` | `0x238` | 1038 | Sensor Angle Tuning | `TBM_GETPOS` (`0x400`) | `0x2c` | **`0x70`** |
+| `0x378` | `0x398` | 1082 | CPI Downshift Tuning | `CB_GETCURSEL` | `0x29` bits 3:2 | **`0x0b`** |
+| `0x3ec` | `0x40c` | 1084 | Smoothing Tuning | `CB_GETCURSEL` | `0x29` bits 1:0 | **`0x0b`** |
+
+Record numbers via §7.3's serializer table; verify them there rather than
+trusting this column.
+
+### Sensor Angle Tuning is a trackbar, read with TBM_GETPOS
+`0x411b19` pushes `$0x400` = `TBM_GETPOS`, and `0x411b25` stores the **raw
+return byte** into object `0x2c` with no clamping, no offsetting and no
+`setne` — `movb %al, 0x2c(%ebx)`. So whatever the control's range is, the record
+byte is that number as a byte. Whether negatives arrive as two's complement is
+the one thing this cannot settle, because the trackbar's own range lives in a
+`TBM_SETRANGE` elsewhere; `log.txt` 03 lines 5–7 (20, −45, maximum) decide it,
+and −45 is the only line that can.
+
+### Object `0x29` packs two combos, and preserves its high nibble
+Both tuning combos land in one byte. `CB_GETCURSEL` on the **Smoothing** combo
+is remapped by a three-arm ladder at `0x411b36`–`0x411b4d` — index 0→`2`,
+1→`0`, 2→`1` — into bits 1:0. `CB_GETCURSEL` on **CPI Downshift** selects one of
+four arms through the jump table at `0x411bc0`
+(`0x411b70`, `0x411b84`, `0x411b98`, `0x411bac`), which OR in `0x8`, `0xc`,
+`0x4`, `0x0` — bits 3:2, in the order 0→`0b10`, 1→`0b11`, 2→`0b01`, 3→`0b00`.
+
+Every arm begins `movb 0x29(%ebx),%dl` / `andb $-0x10,%dl` and ends
+`movb %dl,0x29(%ebx)`. **The high nibble is read back and preserved**: bits 4–7
+of object `0x29` are never written by this page. That is the vendor doing §1.3's
+read-modify-write on a byte it does not fully own, and it is a direct instance
+of why `egg-config` must do the same.
+
+Neither remap is the identity, and neither is derivable from the combo order —
+which is exactly why `log.txt` 03 lines 8–15 ask for every item by position.
+
+### Sensor Glass Mode is bound but never read  [D]
+IDC 1031 is `DDX_Control`-bound at `0x4118db` to member `0x130` (m_hWnd
+`0x150`), and **nothing reads it**. Search space, stated per §1.2a: every
+instruction with displacement `0x150` off any register in `0x411000`–`0x413000`,
+which is the range containing dialog 140's whole class — its `DoDataExchange`
+(`0x4118xx`), its collect (`0x411ab0`), and both its click handlers
+(`0x411e6a`, `0x41200a`). Zero hits, and the collect reads six members of which
+this is not one. What this method **cannot** see is a two-step address
+computation (`lea 0x100(%esi),%eax` then `0x50(%eax)`) or an access from outside
+that range, so the claim is "not read by dialog 140's class by any single-step
+displacement", not "does not exist".
+
+That matches the other half of the evidence: the owner confirmed on 2026-09-05 that
+Sensor Glass Mode is **not visible** on the page (`log.txt` 03 line 4). A
+control that is bound, hidden, and never read is the same shape as the X/Y
+Settings checkbox (`gui-surface.md` §6) — host-side only, reaching no byte.
+
+**Motion Jitter Filter is different and must not be lumped in with it.** It is
+also hidden, but it *is* read, every APPLY, and it clears record `0x06` bit 4
+when unchecked. Hidden does not imply inert.

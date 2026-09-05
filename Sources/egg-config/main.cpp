@@ -313,6 +313,28 @@ bool encodeCpiLevels(long n, std::uint8_t& out) {
     return true;
 }
 
+// config-protocol.md §7.8/§7.9. Three checkboxes that reach a whole byte, each
+// stored by a `setne` -- so the byte is 0 or 1 and nothing else. They are listed
+// here rather than folded into one encoder because the citation differs per
+// field and a wrong citation is worse than a duplicated four-line function.
+bool encodeBool(long v, std::uint8_t& out) {
+    if (v != 0 && v != 1) return false;
+    out = static_cast<std::uint8_t>(v);
+    return true;
+}
+
+// config-protocol.md §7.9. Record 0x70 is the Sensor Angle Tuning trackbar
+// position, stored raw by `movb %al` at cfg107 0x411b25 -- so a negative angle
+// is two's complement. The RANGE is not derived: the vendor reads TBM_GETPOS
+// and never clamps, so the bound lives in a TBM_SETRANGE we have not read. This
+// encoder therefore accepts the full signed byte and says so, rather than
+// inventing a limit that would silently reject a legal angle.
+bool encodeSensorAngle(long deg, std::uint8_t& out) {
+    if (deg < -128 || deg > 127) return false;
+    out = static_cast<std::uint8_t>(static_cast<signed char>(deg));
+    return true;
+}
+
 const Settable kSettable[] = {
     {"polling",    0x05, encodePolling,
      "125, 250, 500, 1000, 2000, 4000 or 8000 (Hz)",
@@ -320,6 +342,44 @@ const Settable kSettable[] = {
     {"cpi-levels", 0x0e, encodeCpiLevels,
      "1, 2, 3 or 4",
      "config-protocol.md §7.6, cfg107 0x410c47 / 0x410c59 CB_GETCURSEL"},
+    {"angle-snapping", 0x0a, encodeBool, "0 or 1",
+     "config-protocol.md §7.8, cfg107 0x40ecb8 setne -> obj 0x28, serialised 0x4042f8"},
+    {"motion-sync", 0x0c, encodeBool, "0 or 1",
+     "config-protocol.md §7.9, cfg107 0x411ad1 setne -> obj 0x2a, serialised 0x404306"},
+    {"force-max-fps", 0x71, encodeBool, "0 or 1",
+     "config-protocol.md §7.9, cfg107 0x411b0b setne -> obj 0x2d, serialised 0x4045cf"},
+    {"sensor-angle", 0x70, encodeSensorAngle, "-128 to 127 (degrees, two's complement)",
+     "config-protocol.md §7.9, cfg107 0x411b19 TBM_GETPOS / 0x411b25 -> obj 0x2c"},
+    // NAMED AFTER THE BYTE, NOT AFTER THE CHECKBOX, and that is deliberate.
+    // The vendor's control is captioned "Disable LED on Lift-Off" and stores
+    // the INVERSE of its tick (sete at cfg107 0x40ecd2), so a field of that
+    // name taking 0/1 would mean the opposite of what half of all users would
+    // assume. Here 1 = the underside DPI indicator stays lit when the mouse is
+    // lifted, which is the vendor default; 0 = it goes out, which is the
+    // vendor's box TICKED. Confirmed on the device by the owner, 2026-09-05.
+    {"led-on-liftoff", 0x08, encodeBool,
+     "0 or 1 -- 1 = DPI indicator stays lit when lifted (default); "
+     "0 = it goes out, i.e. the vendor's \"Disable LED on Lift-Off\" TICKED",
+     "config-protocol.md §7.8, cfg107 0x40ecd2 SETE -> obj 0x26, serialised 0x4042ea"},
+};
+
+// Derived, deliberately NOT settable, and each for a stated reason. Listed so
+// that "why can I not set this?" has an answer in the tool rather than only in
+// the notes -- §1.2a's rule that absence is a claim applies to our own UI too.
+struct Withheld { const char* name; const char* why; };
+const Withheld kWithheld[] = {
+    {"disable-led-on-liftoff",
+     "the vendor's caption, and deliberately not our field name, because the "
+     "vendor stores its INVERSE (sete at cfg107 0x40ecd2). Use `led-on-liftoff`, "
+     "which is named after the byte: set it to 0 to get this checkbox's effect"},
+    {"slamclick-filter",
+     "record 0x06 BIT 0, not a whole byte. Setting it needs a read-modify-write "
+     "of a single bit inside a byte whose other bits cfg107 never writes (§1.3), "
+     "which is a different code path from every field above"},
+    {"cpi-downshift", "record 0x0b bits 3:2, and the combo index is remapped "
+     "(0->2, 1->3, 2->1, 3->0). Derived but unscored; shares a byte with smoothing"},
+    {"smoothing", "record 0x0b bits 1:0, remapped (0->2, 1->0, 2->1). Derived "
+     "but unscored; shares a byte with cpi-downshift"},
 };
 
 void listSettable() {
@@ -328,6 +388,9 @@ void listSettable() {
         std::printf("  %-12s record 0x%02zx   accepts %s\n"
                     "               %s\n",
                     f.name, f.recordOffset, f.accepts, f.cite);
+    std::puts("\nderived, but deliberately NOT settable yet:");
+    for (const Withheld& w : kWithheld)
+        std::printf("  %-24s %s\n", w.name, w.why);
     std::puts("\nEverything else in the record is writable only via `restore`,\n"
               "which sends back bytes the device itself produced.");
 }
