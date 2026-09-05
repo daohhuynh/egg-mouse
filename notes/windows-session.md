@@ -111,6 +111,35 @@ only the things a table *cannot* say in advance:
 If a line went exactly as the table says and involved no choice of yours, it
 needs no entry at all.
 
+### Start `log.txt` with this block, and just fill in the blanks
+
+Every "note this" scattered through the tables below is collected here, so you
+answer them in one place instead of hunting. Anywhere I ask a question, the
+answer goes here. Copy this in and fill it as you go:
+
+```
+=== ANSWERS ===
+Basic page: is there a button labelled "Apply CPI settings"?      YES / NO
+Basic page: is there a button labelled "Surface Calibration"?     YES / NO
+CPI Downshift Tuning: how many items, and what are they called?   ___
+Smoothing Tuning: what are the items called?                      ___
+LED effect: how many items does the dropdown show?                ___
+Polling Rate: how many options?                                   ___
+LOD: how many options, and what is the highest?                   ___
+Button assignment dropdown: roughly how many options?             ___
+LED window: what is its apply button called?                      ___
+Anything that looked odd, crashed, or refused a value:            ___
+=== END ANSWERS ===
+```
+
+Those first two are the interesting ones. Both buttons exist in the resource but
+are shipped without the visible flag, and we have **predicted in a committed file
+that you cannot see them**. If you *can*, that prediction is wrong and it is a
+real finding — say so plainly, it is worth more than a confirmation.
+
+Same with CPI Downshift Tuning: the resource holds three items, the code fills
+four. Whichever you see settles which list is dead.
+
 ### A complete example of what `log.txt` should look like
 
 ```
