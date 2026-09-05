@@ -1145,11 +1145,81 @@ exactly once unless noted:
 |---|---|---|
 | `'Polling Rate'` 1085 | `0x0040bbd0` | `125Hz 250Hz 500Hz 1000Hz 2000Hz 4000Hz 8000Hz` (§10.4) |
 | `'LOD'` 1024 | `0x0040bbd0` and `0x0040ee80` | `0.7mm`…`1.7mm` in 0.1 steps, then `2.0mm` — twelve |
-| unidentified, page 137 | `0x00405f30` | `OFF` `GX Speed Mode` `GX Safe Mode` |
+| `'SPDT:'` 1062 and 1063 | `0x00405f30` | `OFF` `GX Speed Mode` `GX Safe Mode` |
 
-The six button-assignment combos on 139 and the two `'SPDT:'` combos on 153 are
-not yet traced. **This table is a LIST 3 starting point, not a derivation:**
-which wire byte each index corresponds to is not established by any of it.
+The six button-assignment combos on 139 are not yet traced. **This table is a
+LIST 3 starting point, not a derivation:** which wire byte each index
+corresponds to is not established by any of it.
+
+### 12.2a The SPDT combos ARE the GX combos, and the older builds prove it
+
+The row above said "unidentified, page 137" until 2026-09-04. It was two
+mistakes in one cell: the page was wrong, and the control was sitting in the
+same section two paragraphs earlier under a different name.
+
+`cfg107` fills combos **1062** and **1063** from `0x00405f30` with
+`OFF` / `GX Speed Mode` / `GX Safe Mode`, and 1062/1063 are the two combos
+captioned `'SPDT:'` on DIALOG 153. So `SPDT` is the *label* and the GX triple is
+its *value list*. They are one setting, not two.
+
+The three older builds settle it without needing the filler traced at all,
+because there the same two combos carry a DLGINIT and it names them outright.
+`cfg104`, DIALOG **140** — not 137 — where two `'SPDT:'` STATICs sit
+immediately before 1062 and 1063:
+
+```
+  DLGINIT for dialog 140
+       1062  CB_ADDSTRING    'OFF'
+       1062  CB_ADDSTRING    'GX Speed Mode'
+       1062  CB_ADDSTRING    'GX Safe Mode'
+       1063  CB_ADDSTRING    'OFF'
+       1063  CB_ADDSTRING    'GX Speed Mode'
+       1063  CB_ADDSTRING    'GX Safe Mode'
+```
+
+Identical in `cfg100` and `cfg101`. Between 1.04 and 1.07 the vendor split the
+one long DIALOG 140 into 140 (Advanced Sensor) and 153 (Button Mapping), moved
+1062/1063 to 153, and **dropped the DLGINIT in favour of a code fill** — which
+is why the strings are ASCII in `.rsrc` in the three old builds
+(`cfg104` `0x0059fa74`, `cfg101` `0x005a0a20`, `cfg100` `0x005f90b8`) and
+UTF-16 in `.rdata` in 1.07 (`0x00556f78`, `0x00556f94`).
+
+**Method note, because this is the §1.2a pattern again.** The encoding change is
+what found it. A UTF-16-only scan of 1.07 sees the GX strings; the same scan of
+1.04 sees nothing, and would have concluded 1.04 lacks the feature. It does not
+— the strings are there in ASCII, in a DLGINIT, where `rc.exe` puts them.
+Scanning both encodings in all four builds is what turned an "unidentified"
+row into a derivation.
+
+**Two [D] facts fall out that are not about GX at all:**
+
+1. **Polling rate gained three steps between 1.04 and 1.07.** `cfg104`'s combo
+   **1061** on DIALOG 140 carries a four-item DLGINIT — `1000Hz` `2000Hz`
+   `4000Hz` `8000Hz`. `cfg107`'s combo **1085** is filled from code with seven —
+   `125Hz` … `8000Hz` (§10.4). The low three rates are new in 1.07, and §10.4's
+   one-hot event byte has a bit for each of the seven.
+2. **`Slamclick Filter` and `Multiclick Filter` are different controls.**
+   `1029 'Slamclick Filter'` is a single `AUTOCHECKBOX` — one bit, on or off.
+   Multiclick Filter is **five** `EDIT` + `msctls_trackbar32` pairs, one per
+   button (Left/Right/Middle/Forward/Back), each a numeric value. Both are
+   present together on the same page in all four builds. Neither is a rename of
+   the other, and the vendor's own acknowledgement checkbox `1064` distinguishes
+   the Multiclick Filter from a debounce slider in as many words.
+
+**`Spamclick` appears zero times in any vendor binary.** Search space, stated
+per §1.2a: all nine `.exe` files (four config builds, four updaters, XM1r),
+**whole file** rather than any single section, for `Spamclick` / `spamclick` /
+`SPAMCLICK` / `Spam Click` / `Spam-click` and the bare substring `Spam`, in
+ASCII, UTF-16LE and UTF-16BE. Zero hits anywhere. Positive control on the same
+method in the same run: `Slamclick` → `0x1931b8`, `Multiclick` → `0x193270`,
+`GX Speed Mode` → `0x155978` (file offsets, cfg107), so the method does find
+strings that are present.
+
+What this negative does and does not cover: it is a literal-string scan, so it
+cannot see a name assembled at run time or held only in a resource this repo
+does not parse. It is strong enough for the only use it is put to — that
+`Spamclick` is not Endgame's word for anything — and it is not evidence about
+any *capability*.
 
 ### 12.3 The gap this section opened, and closed the same hour
 
