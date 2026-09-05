@@ -142,6 +142,58 @@
    },
    "refuted_if": "a smoothing line moves no byte at record 0x0b, or bits 1:0 do not take the predicted value for that line's position, or bits outside 1:0 move on a smoothing-only line",
    "match_log": "smoothing"
+  },
+  {
+   "id": "ack-reaches-record-72",
+   "kind": "toggle",
+   "record_offset": 114,
+   "cite": "config-protocol.md §7.11; cfg107 0x4061bd setne / 0x4061c2 store to object 0x08 (dlg 153 IDC 1064); serializer 0x4045d6 maps object 0x08 to record 0x72",
+   "claim": "the \"I understand the Multiclick Filter...\" acknowledgement reaches the DEVICE at record 0x72 -- the last byte of the record and the only one that had no attribution at all",
+   "match_log": "understand",
+   "refuted_if": "ticking the acknowledgement moves no byte at record 0x72. That would mean the ack is host-side after all, which is what log.txt originally guessed and this finding contradicts."
+  },
+  {
+   "id": "spdt1-shares-the-multiclick-byte",
+   "kind": "masked",
+   "record_offset": 61,
+   "mask": 255,
+   "shift": 0,
+   "cite": "config-protocol.md §7.11; cfg107 0x4061cb CB_GETCURSEL, 0x4061d8 -> 0xf1, 0x4061f6 -> 0xf0, 0x406213 stores ALL cases to object 0x34; serializer 0x404463 maps object 0x34 to record 0x3d",
+   "claim": "the LEFT multiclick filter and SPDT-1 are the SAME byte, record 0x3d. GX Speed writes 0xf1 and GX Safe writes 0xf0 to it; Off writes the slider value instead",
+   "expect_by_line": {
+    "10": 240,
+    "11": 241
+   },
+   "refuted_if": "an SPDT-1 line moves no byte at record 0x3d, or GX Safe does not write 0xf0, or GX Speed does not write 0xf1, or any SPDT-1 line ALSO moves a second byte -- a second byte moving would mean the filter and the mode are separate fields after all, which is the whole claim"
+  },
+  {
+   "id": "spdt2-shares-the-multiclick-byte",
+   "kind": "masked",
+   "record_offset": 68,
+   "mask": 255,
+   "shift": 0,
+   "cite": "config-protocol.md §7.11; same shape one entry along, member 0x5d4 / 0x14c, store at 0x406264 to object 0x3c; serializer 0x404494 maps object 0x3c to record 0x44",
+   "claim": "the RIGHT multiclick filter and SPDT-2 are the same byte, record 0x44, with the same 0xf0 / 0xf1 encoding",
+   "expect_by_line": {
+    "13": 240,
+    "14": 241
+   },
+   "refuted_if": "an SPDT-2 line moves no byte at record 0x44, or the GX values differ from SPDT-1's, or a second byte moves"
+  },
+  {
+   "id": "left-multiclick-is-record-3d",
+   "kind": "masked",
+   "record_offset": 61,
+   "mask": 255,
+   "shift": 0,
+   "cite": "config-protocol.md §7.11; cfg107 TBM_GETPOS at 0x406207 on member 0xd8, stored raw at 0x406213 to object 0x34",
+   "claim": "the LEFT multiclick slider writes its position raw to record 0x3d, over a range the owner reports as 0..25",
+   "expect_by_line": {
+    "3": 0,
+    "4": 25,
+    "5": 12
+   },
+   "refuted_if": "a LEFT multiclick line moves no byte at record 0x3d, or the value stored is not the number shown on the slider (which would mean an offset or scale we have not derived). NOTE the 0..25 range is the owner's observation, not derived: if minimum or maximum turn out to be other numbers, that refutes the RANGE, not the byte."
   }
  ]
 }

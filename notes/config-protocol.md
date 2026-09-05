@@ -1404,7 +1404,7 @@ sets which byte.
 | --- | --- | --- | --- |
 | `0x0f`–`0x22` | `0x1f`–`0x32` | **four 5-byte RGB records**: `ff ff 00 01 01`, `00 00 ff 01 02`, `ff 00 00 01 03`, `00 ff 00 01 04` — yellow/blue/red/green, each followed by `0x01` and a **stage index 1..4** | structure `[O]`, meaning `[G]` |
 | `0x23`–`0x36` | `0x33`–`0x46` | **four 5-byte CPI records**, `flag, X lo, X hi, Y lo, Y hi`: 400/400, 800/800, 1600/1600, 3200/3200, each led by an `X≠Y` flag byte | `[D]` — **corrected §7.8** |
-| `0x37`–`0x6f` | `0x47`–`0x7f` | **eight 7-byte button records**. Masks `01 02 04 10 08 f1 01 ff` at stride 7 from record `0x38`; a `0x08` five bytes after each mask | structure `[O]`, field roles `[G]` |
+| `0x37`–`0x6e` | `0x47`–`0x7e` | **eight 7-byte button records** (§7.11). Masks `01 02 04 10 08 f1 01 ff` at `+1`; the `0x08` at `+6` is the **multiclick filter**, default 8. Was written `0x37`–`0x6f` here, which is 57 bytes for 8×7=56 — corrected | structure `[D]`, roles of `+0` and `+2`..`+5` still `[G]` |
 | `0x70`–`0x72` | `0x80`–`0x82` | three trailing bytes. `0x70` is **Sensor Angle Tuning** (§7.9, `TBM_GETPOS`), `0x71` is **Force max Sensor fps** (§7.8) and is the byte the owner changed. Only `0x72` is still unattributed | `0x70`/`0x71` `[D]`, `0x72` `[G]` |
 
 **The RGB block resolves `wire-observed.md` §5.1**, which recorded four records
@@ -1801,20 +1801,27 @@ default writer sets object `0x0a`=`0x01`, `0x0b`=`0x04` (`0x413e31`,
 (`wire-observed.md` §5.2, `config-protocol.md` §7.3). Two independent counts
 agreeing, one from a bound in the code and one from the bytes.
 
-**Object stride is 8**, base `0x2c`, so entry *k* is `obj[0x2c + 8k]`. Against
-the default writer (§7.2b) that gives an entry of:
+**Object stride is 8. The base is `0x2e`, not `0x2c`** — corrected 2026-09-05,
+see §7.11. The stride was right and the base was two bytes low, which put object
+`0x2c` and `0x2d` inside "entry 0" when those are Sensor Angle Tuning and Force
+max Sensor fps (§7.9) and belong to a different page entirely. The serializer
+settles it without ambiguity: objects `0x2e`–`0x34` map to records `0x37`–`0x3d`
+contiguously, then `0x36`–`0x3c` to `0x3e`–`0x44`, and so on for eight entries,
+with one object byte (`0x35`, `0x3d`, `0x45`, …) dropped between each.
+
+The entry layout below is superseded by §7.11, which derives it from the wire
+bytes rather than from the default writer. It is kept only because the
+`0x00407763` evidence above is still good: `0x57f240(,%ecx,8)` is `obj[0x30 +
+8k]`, which under the corrected base is entry `+2`, not entry `+4`.
 
 ```
-+0  u8   type        0x08 in every default entry
-+1  u8   pad         never written
-+2  u16  a           0x0200 0x0400 0x1000 0x0800 0xf109 0x0101 0xff01
-+4  u16  b           0, and zeroed on this path
-+6  u16  c           0, and zeroed on this path
++0  u8   action type   00 for the five physical buttons; 09, 01, 01 for entries 5-7
++1  u8   mask          01 02 04 10 08 f1 01 ff
++2  u16                0, and zeroed on this path  (the 0x57f240 write)
++4  u16                0, and zeroed on this path  (the 0x57f242 write)
++6  u8   multiclick    8 in every default entry -- NOT a "type" byte
++7  u8   pad           never written, never serialized
 ```
-
-The **high** byte of `a` is the button mask — `01 02 04 10 08` for left, right,
-middle, forward, back — which is why those bytes appear at stride 7 on the wire
-once the pad is dropped by the serializer.
 
 **What is NOT derived here, and must not be inferred from the table above.**
 The role of `type`, and of `a`'s low byte, and of `b` and `c`. The scan of
@@ -2133,3 +2140,88 @@ So the record write has **exactly two doors**, APPLY and the live-CPI path, and
 both are now read end to end. No other control in cfg107 reaches the device.
 That is a positive accounting over raw call/jump edges rather than a reading
 impression, which is the standard §1.2b asks for when the claim is an absence.
+
+## 7.11 The Buttons page, and the byte the multiclick filter shares  [D]
+
+`FUN_00406180` (`0x406180`–`0x4062a3`) is dialog 153's APPLY collect, called
+from `0x413f17` with `%ebx` = the settings object and `%esi` = the page. It is
+36 instructions and writes **seven** things:
+
+| what | dlg 153 IDC | member | how read | object | **record** |
+| --- | --- | --- | --- | --- | --- |
+| Slamclick Filter | 1029 | `0x648` | `BM_GETCHECK`, bit | `0x07` bit 0 | `0x06` bit 0 |
+| "I understand…" ack | 1064 | `0x6bc` | `BM_GETCHECK`, `setne` | `0x08` | **`0x72`** |
+| LEFT multiclick / SPDT-1 | — | `0x560`,`0xd8` | see below | `0x34` | **`0x3d`** |
+| RIGHT multiclick / SPDT-2 | — | `0x5d4`,`0x14c` | see below | `0x3c` | **`0x44`** |
+| MIDDLE multiclick | — | `0x1c0` | `TBM_GETPOS` | `0x44` | **`0x4b`** |
+| FORWARD multiclick | — | `0x234` | `TBM_GETPOS` | `0x4c` | **`0x52`** |
+| BACK multiclick | — | `0x2a8` | `TBM_GETPOS` | `0x54` | **`0x59`** |
+
+Five multiclick filters, not eight, and only the first two have an SPDT combo —
+which is exactly what the owner reported from the page on 2026-09-05.
+
+### Record `0x72` is the acknowledgement, and it DOES reach the mouse
+Object `0x08` ← `setne(BM_GETCHECK(IDC 1064))` at `0x4061bd`/`0x4061c2`,
+serialised at `0x4045d6` to **record `0x72`** — the last byte of the record and,
+until now, the only one with no attribution at all. `log.txt` 04 line 2 told the owner
+that if no record byte moved, the acknowledgement lived host-side in the
+registry. **That guess was wrong and the line is corrected**: it has a byte.
+
+### The multiclick filter and the SPDT mode are ONE byte
+The two coupled fields do not merely interact in the UI; they are literally the
+same byte. For the LEFT button:
+
+    4061cb  pushl $0x147                  ; CB_GETCURSEL on the SPDT combo (member 0x560)
+    4061d3  cmpl  $0x1, %eax              ; combo index 1
+    4061d8  movl  $0xf1, %eax             ;   -> 0xf1
+    4061f1  cmpl  $0x2, %eax              ; combo index 2
+    4061f6  movl  $0xf0, %eax             ;   -> 0xf0
+    406207  pushl $0x400                  ; otherwise TBM_GETPOS on the slider (member 0xd8)
+    406213  movb  %al, 0x34(%ebx)         ; ONE destination for all three
+
+The owner's SPDT items top to bottom are Off / GX Speed / GX Safe, so index 0 = Off,
+1 = GX Speed, 2 = GX Safe. Therefore:
+
+    record 0x3d == 0xf1   GX Speed
+    record 0x3d == 0xf0   GX Safe
+    record 0x3d == 0..25  Off, and the value is the multiclick filter
+
+**This explains the coupling the owner observed** — that picking a GX mode locks the
+multiclick filter at 8 and greys it out. The byte cannot hold both, so the UI
+disables the slider rather than let it write. The displayed 8 is the default;
+the byte actually carries `0xf0`/`0xf1`. And "going back to Off ungreys it but
+it still stays 8" is the same fact from the other side: Off restores the
+slider's value, which never left 8.
+
+It also identifies a byte §7.3 could see but not explain: "a `0x08` five bytes
+after each mask". Mask is entry `+1`, so `+1 + 5` = entry `+6` = the multiclick
+filter, default 8 in all eight entries.
+
+### The block boundary, from the wire rather than the code
+`01-baseline` records `0x37`–`0x6e`, laid out as eight 7-byte entries:
+
+    LEFT     0x37   00 01 00 00 00 00 08
+    RIGHT    0x3e   00 02 00 00 00 00 08
+    MIDDLE   0x45   00 04 00 00 00 00 08
+    FORWARD  0x4c   00 10 00 00 00 00 08
+    BACK     0x53   00 08 00 00 00 00 08
+    ?5       0x5a   09 f1 00 00 00 00 08
+    ?6       0x61   01 01 00 00 00 00 08
+    ?7       0x68   01 ff 00 00 00 00 08
+
+Column `+1` is `01 02 04 10 08 f1 01 ff`, the mask set §7.3 already had. Column
+`+6` is `08` throughout, the multiclick default. Entries 5–7 differ from the
+first five in `+0` as well as in mask, and have no slider on the Buttons page;
+`05-buttonmapping` covers wheel up and wheel down, which is the obvious
+candidate for two of the three and is **`[G]` until that capture lands**.
+
+The block ends at `0x6e`, not `0x6f`: eight entries of seven is 56 bytes from
+`0x37`. Record `0x6f` comes from object `0x2b`, is `0x00` in the baseline, and
+is **unattributed**.
+
+### An independent confirmation of §7.8's CPI phase correction
+Record `0x35`/`0x36` read `80 0c` in the baseline, and `0x0c80` is 3200 — CPI
+stage 4's Y value, sitting exactly where the flag-first grouping puts it. Under
+the old flag-last reading those two bytes would have been stage 4's X. Nothing
+was fitted to make that come out: the phase was fixed from the serializer before
+these bytes were looked at.
