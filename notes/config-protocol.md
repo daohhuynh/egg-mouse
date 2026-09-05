@@ -1298,3 +1298,59 @@ was read as `TCM_SETCURSEL`; it is `CB_SETCURSEL`, and `TCM_SETCURSEL` is
 `0x130C`. Nothing in the disassembly says which. Every Win32 message constant in
 these notes deserves the same treatment before it is leaned on — the value
 decides the *control class*, and the control class is what the wire byte means.
+
+## 7.2b The host default record at `0x413db0`, and why it is NOT the wire record
+
+`0x413db0` writes the whole factory-default settings object as inline
+immediates, one field at a time, into the object in `%eax`. Every byte below is
+`[D]` and read from raw disassembly, not from Ghidra's decompiler:
+
+| struct offset | value | instruction |
+| --- | --- | --- |
+| `0x02`–`0x03` | `0x0080` | `413db5 movw %dx,0x2(%eax)` |
+| `0x04`–`0x07` | `0x01010000` | `413e2a movl $0x1010000,0x4(%eax)` |
+| `0x0a`–`0x0b` | `0x0401` | `413e31 movw $0x401,0xa(%eax)` |
+| `0x0e`, `0x10`, `0x12` | `0`, `400`, `400` | `413e02`, `413dbe`, `413dc2` |
+| `0x14`, `0x16`, `0x18` | `0`, `800`, `800` | `413e05`, `413dcb`, `413dcf` |
+| `0x1a`, `0x1c`, `0x1e` | `0`, `1600`, `1600` | `413e08`, `413ddb`, `413ddf` |
+| `0x20`, `0x22`, `0x24` | `0`, `3200`, `3200` | `413e0b`, `413deb`, `413def` |
+| `0x26`–`0x29` | `0x00000301` | `413e37` |
+| `0x2b`–`0x2e`, `0x2f` | `0`, `1` | `413e3e`, `413e27` |
+| `0x34`+`8k`, k=0..6 | `0x08` | `413e45`/`4f`/`59`/`63`/`71`/`7f`/`8d` |
+| `0x36`,`0x3e`,`0x46`,`0x4e` | `0x0200`,`0x0400`,`0x1000`,`0x0800` | `413e48`/`52`/`5c`/`66` |
+| `0x56`,`0x5e`,`0x66` | `0xf109`,`0x0101`,`0xff01` | `413e74`/`82`/`90` |
+| `0x6c` | `0x08` | `413e9b` |
+
+`%cl`, `%si` and `%cx` are all zeroed before use (`413dd3`, `413de9`, `413e0e`)
+and `%bl`=1, `%dl`=8, so every value above is a literal.
+
+**The important negative: this layout is not what goes on the wire.** Sliding
+these 42 non-zero default bytes across the 1040-byte reply in
+`01-baseline.pcapng` gives a best agreement of **10 of 42, at no offset better
+than noise**. The structures genuinely differ:
+
+| | host struct (`0x413db0`) | wire record (`[O]`) |
+| --- | --- | --- |
+| CPI stage stride | **6** — flag at `0x0e`, pad `0x0f`, X `0x10`, Y `0x12` | **5** — `90 01 90 01 00` at wire `0x34` |
+| button record stride | **8** from `0x2c`, code at `+8`, mask at `+3` | **7** from wire `0x48`, code first, `0x08` at `+5` |
+
+That is consistent with what §7.2a already found — the vendor **composes** the
+outgoing blob from UI state in `FUN_004042d0` rather than copying the object it
+read. So `0x413db0`'s offsets are host-side C++ member offsets and **must not be
+used as wire offsets**. They are still worth having: the *values* are the
+factory defaults, and a factory-reset capture makes them directly checkable.
+
+**This is now a pre-registered prediction.** the owner is capturing a factory reset
+(`01b-reset.pcapng`) before re-running `02-basic`. The baseline read in that
+file is the factory-default record on the wire, so:
+
+- **Expect:** its CPI table at wire `0x34` reads 400/400, 800/800, 1600/1600,
+  3200/3200, and its button table at wire `0x48` reads codes
+  `01 02 04 10 08 f1 01 ff` at stride 7 — the same multiset of values as the
+  table above, at the wire's own offsets rather than the struct's.
+- **REFUTED IF:** any default *value* present in `0x413db0` is absent from the
+  post-reset wire record, or the reset record differs from
+  `01-baseline.pcapng`'s in the CPI or button regions (the owner had not changed
+  those before the baseline).
+- **Matters:** it converts the whole default record from `[D]` to `[O]`, and it
+  is the reference blob §4.1 wants saved before any write.

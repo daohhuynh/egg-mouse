@@ -56,30 +56,81 @@ GET_REPORT  wValue=0x03a0  wLength=1041  payload a1 01 00 00 ... (settings)
 report (`0xA1`, 64 bytes) and answered on the large one (`0xA0`, 1041). The
 report id is not a channel; it is a size selector chosen per direction.
 
-### 2.1 Open gap — buffer alignment across three APIs
+### 2.1 RESOLVED — the wire index IS the buffer index  [O]+[D], 2026-09-05
 
-The device returned **1040** bytes against `wLength=1041`, and **63** against 64:
-N−1 in both cases. The returned bytes begin `a1 01`, and `0xA1` is the id of the
-report *requested* in the first case but not the second (that one asked for
-`0xA0`).
+This was the top open gap: the device returned **1040** bytes against
+`wLength=1041` and **63** against 64, N−1 both times, and whether the recorded
+bytes were the whole application buffer or `buffer[1:]` shifted **every field
+offset in this file by one**. It is settled, and it is (a): *the bytes USBPcap
+recorded are the application buffer, index for index.*
 
-Two readings fit the capture equally well and they differ by one byte:
+**The argument, and it is a refutation rather than a preference.** cfg107's
+small-report exchange is at `0x004047cc`, in raw bytes:
 
-- **(a)** the wire carries the full buffer, the device puts `0xA1` at byte 0 in
-  both cases, and USBPcap simply does not count the trailing byte; or
-- **(b)** the wire carries buffer[1:], the host prepends the report id, and the
-  device's own first byte is what we are calling byte 0.
+```
+4047cc  8d bd 70 ff ff ff        leal  -0x90(%ebp), %edi     ; edi = buf
+4047d2  c6 85 70 ff ff ff a1     movb  $0xa1, -0x90(%ebp)    ; buf[0] = 0xA1
+4047d9  e8 42 f1 ff ff           calll 0x403920              ; the exchange
+4047de  85 c0 / 74 18            testl %eax,%eax ; je fail
+4047e2  80 bd 71 ff ff ff 01     cmpb  $0x1, -0x8f(%ebp)     ; buf[1] == 1 ?
+4047e9  75 0f                    jne   fail
+```
 
-Under (a) status is at buffer[1]; under (b) it is at buffer[2]. **Every field
-offset in this file shifts by one if (b) is right.** The vendor code's `resp[1]`
-check favours (a), which is why offsets below are quoted under (a) — but a
-`.exe`-derived offset cannot settle what a USB stack does.
+The host writes the report id into `buf[0]` itself and then requires
+**`buf[1] == 0x01`**. On the wire the reply is `a1 01 00 …`, so `wire[1] = 0x01`.
 
-**This is decidable in one command against the device** and is exactly §4.4
-stage 1's job: `egg-config read` on macOS, then compare the first bytes hidapi
-hands back against the 1040 bytes here. Until then, `wire offset` in this file
-means *offset within the bytes USBPcap recorded*, which is unambiguous, and the
-translation to a hidapi buffer index is **[G]**. Nothing writes until it is [O].
+- Under (a), `buf[1] = wire[1] = 0x01`. The check passes.
+- Under (b), `buf[1] = wire[0] = 0xA1`. The check fails **every time**, and the
+  vendor tool could never read a setting. It demonstrably does.
+
+So (b) is refuted by the vendor's own working code, not chosen against.
+
+**Two independent corroborations**, neither used to reach the conclusion:
+
+1. **Both replies put their content at `0x10`.** `config-protocol.md` §7.2a has
+   the `A0 11` write frame placing its 1024 payload bytes at `buf+0x10`
+   (`rep movsl` to `-0x45c(%ebp)`, base `-0x46c`). The 1040-byte reply's content
+   begins at wire `0x10` and the 63-byte reply's at wire `0x10` as well. Read
+   and write are mirrors about the same origin, which only holds under (a).
+2. **The 1024-byte payload lands flush.** `0x10 + 1024 = 1040`, exactly the
+   returned length. Under (b) it would end one byte short of the transfer.
+
+**The N−1 is not a truncation, and the device has a quirk worth knowing.**
+`buf[0]` is the report-id slot; the device never sends it, so a read of an
+N-byte report returns N−1 bytes of content and the host's own `0xA1` stays in
+`buf[0]`. The quirk: **frame 3 requested report `0xA0` and the reply's byte 0 is
+still `0xA1`** — this device answers every feature read with `0xA1` there
+regardless of which report was asked for. Harmless, and it is the single fact
+that made the two readings look equally good for a day.
+
+**Consequence.** Every `wire offset` in this file is now also the hidapi buffer
+index, and the translation is no longer `[G]`. §4.4 stage 1 should still confirm
+it on macOS — hidapi's own report-id convention is a *third* API and has not
+been observed — but nothing here is waiting on it any more.
+
+## 2.2 The info reply, decoded  [O]
+
+The 63-byte reply to `A1 02` (frame 1 of `01-baseline.pcapng`):
+
+```
+000  a1 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+010  00 07 01 00 67 33 78 19 00 00 …
+```
+
+| offset | bytes | reading |
+| --- | --- | --- |
+| `0x00` | `a1` | report-id slot, always `0xA1` (above) |
+| `0x01` | `01` | status, `0x01` = ready |
+| `0x11`–`0x12` | `07 01` | **firmware 1.07** — the version the owner's device reports |
+| `0x14`–`0x15` | `67 33` | **VID `0x3367`** little-endian |
+| `0x16`–`0x17` | `78 19` | **PID `0x1978`**, the application-mode id |
+
+VID and PID land on even offsets and match values already known independently —
+`0x3367` from `pidwatch.py` `[O]`, and `0x1978` pushed as an immediate at
+cfg107 `0x413edb` `[D]`. The firmware version matches
+`notes/device-predictions.md`. Whether `0x11` is the minor and `0x12` the major,
+or the pair is one little-endian `0x0107`, is **[G]** — one device on 1.07
+cannot separate those, and a post-flash capture on 1.10 settles it for free.
 
 ## 3. The settings record is 114 bytes of content, not 1024
 
