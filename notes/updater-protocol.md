@@ -597,7 +597,15 @@ bootloader, with no application-mode handshake first.**
 6. **Wait for the device to come back**, `0x403c7c`–`0x403cc3` [D]: one immediate
    `FUN_00401000(0x1978)`, then a loop with `Sleep(d)` where `d` starts at
    **800** and increases by **800** while `d <= 16000` — 800, 1600 … 16000, i.e.
-   20 further attempts and about **136 s** of waiting in total. Still not found →
+   20 further attempts and **168 s** of waiting in total (`800 × 20×21/2`;
+   corrected 2026-09-05 from 136 s, which was quoted rather than computed — the
+   loop bound at `0x403cb3` is `cmpl $0x3e80,%ebx` tested *after* the increment,
+   so the last sleep really is the full 16000. 136.8 s is the 18-term sum.
+   **The pre-registration audit already caught this** — `wire-predictions.md`
+   states 168 s and explicitly flags this section as wrong — and the correction
+   never reached here, which is the same failure as the FWFILE-selection
+   duplicate: a finding is not closed until every file that states it agrees).
+   Still not found →
    `L"Update failed, try again"`.
 7. On success: send `0xA1/0x13`, `Sleep(900)`, one `0xA1` read, then display
    `L"Update Succeed, current firmware version is V%.2f"`.
@@ -2773,15 +2781,62 @@ strict sense: **not** covered by a read body hash, **not** settled by
 
 | binary | sized functions | unread | unread bytes | **unread AND device-facing** |
 |---|---|---|---|---|
-| fw110 | 9,076 | 27 | 6,753 | **0** |
-| fw107 | 9,076 | 27 | 6,753 | **0** |
-| fw106 | 9,076 | 27 | 6,753 | **0** |
+| fw110 | 9,076 | **0** (was 27 / 6,753 B — read 2026-09-05, §6.2.12) | 0 | **0** |
+| fw107 | 9,076 | **0** (same `.text`) | 0 | **0** |
+| fw106 | 9,076 | **0** (same `.text`) | 0 | **0** |
 | fw104 | 10,763 | 22 | 4,933 | **0** |
 | cfg107 | 9,528 | 377 | 123,143 | **0** |
 | cfg104 | 9,495 | 404 | 144,187 | **0** |
 | cfg101 | 9,516 | 334 | 115,594 | **0** |
 | cfg100 | 11,071 | 829 | 73,080 | **0** |
 | xm1r | 23,001 | 6,381 | 1,285,978 | 23 |
+
+### 6.2.12 The last 27 of fw110, read 2026-09-05 — and one of them was not a function
+
+**`0x004f0054`, 2,617 bytes and the largest of the 27, is not a function.**
+`FUN_004efed8` is recorded with size 381, which ends at `0x4f0055` — *one byte
+past* where Ghidra puts the next entry, so the two overlap. Disassembling from
+`0x4efed8` syncs cleanly and runs straight through: `0x4f004a` is a `jmp
+0x4f080f` forward into the supposed second function, and `0x4f004f`'s `je
+0x403032`-style branch goes back into the first. The split point itself,
+`0x4f0054`, is the operand byte of the two-byte `je` at `0x4f0053` (`74 dd`).
+It has **zero** call edges in an exhaustive `E8`/`E9` scan of `.text`. One
+function, mis-split; `0x004efed8` was already read, so nothing was missing.
+
+That is §1.2b with a number on it: **the coverage accounting inherits Ghidra's
+boundaries, so a bad boundary manufactures a phantom unread function** — here
+the single largest one in the binary, which is exactly the one a reader would
+prioritise.
+
+**The other 26 (4,136 bytes) are MFC framework code.** Read individually; the
+mechanical facts, none of which rest on a reader's judgement:
+
+- **25 of 26 also appear in cfg101/cfg104/cfg107** — a different application,
+  same vendor. `0x00435914` is the exception and is `CMap`-style `RemoveAll`:
+  walks the block list at `this+4`, releases each element through `0x401820`,
+  zeroes `+4/+8/+0xc/+0x10`, frees the pool via `0x435c2e`. 11 callers.
+- **0 of 26 lie inside 1.10's vendor band** `[0x401000,0x4040ad)`.
+- **0 of 26 are in `closure.py`'s device seed or closure.**
+- **0 of 26 reference** `L"FWFILE"`, the image-buffer fields (`+0x21c`,
+  `+0x220`, `+0x25a20`, `+0x25a3c`) or any protocol byte.
+- Every one opens with the MSVC hotpatch prologue `8b ff` (`mov %edi,%edi`) or
+  the `push $N / mov $addr,%eax / call __EH_prolog3` SEH prologue, and
+  dispatches through vtable offsets of `0x174`, `0x180`, `0x188`, `0x1a0`,
+  `0x1c0`, `0x1c8`, `0x210`, `0x250`, `0x26c`, `0x338` — far deeper than any
+  vendor class in this binary, and characteristic of MFC's `CWnd` hierarchy.
+- The imports they reach are GDI/USER32 only: `BitBlt`,
+  `CreateCompatibleDC/Bitmap`, `SelectObject`, `DeleteObject`, `InflateRect`,
+  `OffsetRect`, `IsRectEmpty`, `SetRectEmpty`, `UnionRect`, `EqualRect`,
+  `PtInRect`, `GetClientRect`, `GetParent`, `MapWindowPoints`, `ScreenToClient`,
+  `GetSysColor`, `BringWindowToTop`, `RedrawWindow`, `TlsGetValue`,
+  `Enter/LeaveCriticalSection`, `RaiseException`.
+
+**This is also the test §6.1 asks for.** The amendment says a cross-binary body
+match is a *hypothesis* — "a body appearing in an unrelated product is library"
+— and that reading the matched set is how it gets tested, because one vendor
+function that byte-matches elsewhere would invalidate the inference everywhere.
+Twenty-five matched bodies were read and none is vendor code. The premise
+survives this test; it is not proven by it.
 
 The last column is `readpartition.py`'s unread set intersected with
 `closure.py`'s device closure **and** seed for that binary — the mechanical

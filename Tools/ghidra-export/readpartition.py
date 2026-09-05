@@ -130,6 +130,32 @@ def main():
                 h = bodyhash(r)
                 if h:
                     readhash.add(h)
+    # A queue can be short for two completely different reasons and the label
+    # has to say which, or the harmless one gets investigated. Added 2026-09-05
+    # after fw110 sat at "*** INCOMPLETE 70 short" for a day: 37 of those were
+    # bodies under 16 bytes that classify.sigs() refuses to hash, so they can
+    # never match no matter how often they are read, and 8 more were hand-read
+    # and recorded. Only 27 were real, and one of those was not a function.
+    def status(unmatched_reps, tag_of):
+        """unmatched_reps: [(tag, entry, size)] for every body not hash-matched."""
+        artefact, real = 0, 0
+        for rep in unmatched_reps:
+            t, entry = rep[0], rep[1]
+            done = set(hand.get(t, ()))
+            rp2 = os.path.join(AN, f"read_{t}.json")
+            if os.path.exists(rp2):
+                with open(rp2) as fh2:
+                    done |= {e.lower() for e in json.load(fh2)}
+            if entry.lower() in done:
+                artefact += 1          # read; simply not hashable/harvested
+            else:
+                real += 1
+        if not unmatched_reps:
+            return "OK"
+        if real == 0:
+            return "all %d short are READ but unhashable -- artefact, not a task" % artefact
+        return "*** %d UNREAD (+%d read-but-unhashable)" % (real, artefact)
+
     print("\nQUEUE STATUS -- 'in-queue' above means QUEUED; harvested means a "
           "reader\nactually returned it (harvest_reads.py --write):")
     qf = [("readqueue_fw110.json", "hashes"), ("openqueue.json", "hashes")]
@@ -137,30 +163,50 @@ def main():
         fp = os.path.join(AN, name)
         if not os.path.exists(fp):
             continue
-        ks = set(json.load(open(fp)).keys())
+        with open(fp) as fh:
+            q = json.load(fh)
+        ks = set(q.keys())
         d = len(ks & readhash)
+        reps = [tuple(q[h][0])[:3] for h in ks - readhash if q[h]]
         print("  %-26s %6d bodies, %6d harvested  %s"
-              % (name, len(ks), d, "OK" if d == len(ks) else "*** INCOMPLETE"))
+              % (name, len(ks), d, status(reps, None)))
     for tag in UNIQUE:
         fp = os.path.join(AN, f"unique_{tag}.json")
         if not os.path.exists(fp):
             continue
-        u = {x.lower() for x in json.load(open(fp))}
-        hs = {bodyhash(r) for r in records(tag) if r["entry"].lower() in u}
+        with open(fp) as fh:
+            u = {x.lower() for x in json.load(fh)}
+        rec = [r for r in records(tag) if r["entry"].lower() in u]
+        hs = {bodyhash(r) for r in rec}
         hs.discard(None)
         d = len(hs & readhash)
+        # ONE representative per distinct body, so real+artefact reconciles
+        # with (bodies - harvested). Counting records instead double-counts
+        # twins and made xm1r read 5511 against a 4909 shortfall.
+        seen_h = {}
+        for r in rec:
+            h2 = bodyhash(r)
+            if h2 and h2 not in readhash:
+                seen_h.setdefault(h2, (tag, r["entry"], int(r["size"])))
+        reps = list(seen_h.values())
         print("  %-26s %6d bodies, %6d harvested  %s"
-              % (f"unique_{tag}.json", len(hs), d,
-                 "OK" if d == len(hs) else "*** INCOMPLETE"))
+              % (f"unique_{tag}.json", len(hs), d, status(reps, tag)))
     fp = os.path.join(AN, "readqueue_xm1r.json")
     if os.path.exists(fp):
-        u = {x.lower() for x in json.load(open(fp))}
-        hs = {bodyhash(r) for r in records("xm1r") if r["entry"].lower() in u}
+        with open(fp) as fh:
+            u = {x.lower() for x in json.load(fh)}
+        rec = [r for r in records("xm1r") if r["entry"].lower() in u]
+        hs = {bodyhash(r) for r in rec}
         hs.discard(None)
         d = len(hs & readhash)
+        seen_h = {}
+        for r in rec:
+            h2 = bodyhash(r)
+            if h2 and h2 not in readhash:
+                seen_h.setdefault(h2, ("xm1r", r["entry"], int(r["size"])))
+        reps = list(seen_h.values())
         print("  %-26s %6d bodies, %6d harvested  %s"
-              % ("readqueue_xm1r.json", len(hs), d,
-                 "OK" if d == len(hs) else "*** INCOMPLETE"))
+              % ("readqueue_xm1r.json", len(hs), d, status(reps, "xm1r")))
     print()
     print("%-8s %7s %8s %8s %6s %7s %11s" %
           ("binary", "sized", "in-queue", "micrord", "hand", "OPEN", "open bytes"))
