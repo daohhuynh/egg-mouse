@@ -2047,3 +2047,89 @@ Settings checkbox (`gui-surface.md` §6) — host-side only, reaching no byte.
 **Motion Jitter Filter is different and must not be lumped in with it.** It is
 also hidden, but it *is* read, every APPLY, and it clears record `0x06` bit 4
 when unchecked. Hidden does not imply inert.
+
+## 7.10 APPLY is not the only thing that writes to the device  [D]
+
+Everything derived from captures so far rests on an assumption nobody wrote
+down: that the config tool talks to the mouse **only** when APPLY is pressed.
+`log.txt`'s core rule — "every numbered line = exactly one APPLY" — is that
+assumption in procedural form. It is false.
+
+The owner, 2026-09-05: *"when you change a CPI level on the software it isnt a real
+change so you cant apply anything, but it changes the CPI level currently on the
+mouse."* The path is in the binary.
+
+Each of the four CPI-stage radio buttons on dialog 135 has its own click handler
+(`0x4110a0`, `0x4111e0`, `0x411320`, `0x411460`, one per member `0x13f4`,
+`0x1468`, `0x14dc`, `0x1550`). Taking the first:
+
+    4110ae  movl  0x13f4(%esi), %eax     ; already checked?
+    4110b4  pushl $0xf0                  ;   BM_GETCHECK
+    4110be  jne   0x4111cf               ; yes -> return, do nothing
+    4110c8  calll 0x417247               ; CWnd::UpdateData(TRUE)
+    ...                                  ; BM_SETCHECK this one on, other three off
+    411119  movb  $0x0, 0x57f21a         ; object 0x0a = stage index 0
+    411120  <CB_GETCURSEL on member 0xf0 ladder> -> object 0x0b = 1..4
+    411199  movw  0x4e8(%esi), %ax  -> 0x57f220     ; stage 1 X
+    4111a6  movw  0xe7c(%esi), %cx -> 0x57f222      ; stage 1 Y
+    4111b4  cmpl / setne           -> 0x57f21e      ; stage 1 X!=Y flag
+    4111ca  jmp   0x414010                          ; TAIL CALL, and it sends
+
+`0x417247` is MFC's `CWnd::UpdateData` — it saves and restores `0x13c` in the
+module thread state around a virtual call at vtable `+0x100`, which is
+`DoDataExchange`. It moves no bytes to the device and is not the write.
+
+`0x414010` is. It carries the **same prologue as the APPLY handler** at
+`0x413ea0`: the reentrancy flag at `+0x2fa0` off the window object in
+`0x57f754`, the `cmpw $0x0, 0x57f194` guard, and `pushl $0x1978` /
+`calll 0x4035f0` — opening the mouse by product id. It then syncs bytes between
+the two mirrors and calls **`0x404180`**.
+
+### The command set survives, and that is the point of checking
+`0x404180` is one of the four command functions enumerated in §7.1 and confirmed
+by the raw-byte caller scan in §4 — the full-record `A0 11` write, the one that
+does its own inline `HidD_GetFeature` instead of using the receive wrapper. Its
+only calls are `0x4035f0` (open), `0x404180` (the write) and `0x41b600`.
+
+So this is a second **trigger**, not a fifth **command**. Had it been a fifth,
+every "the command set is exactly four" statement in these notes would have been
+wrong, and §1.2a's warning about "the set is exactly N" would have been earned
+the expensive way. It was not — but the claim was only ever checked against
+functions reachable from APPLY, and this path is not one of them.
+
+### What it changes
+1. **`log.txt` gains section 06**, four radio-button clicks with no APPLY, so the
+   bypass gets an isolated capture instead of arriving as noise at the end of a
+   long section. `02-basic` lines 34–37 are marked SKIPPED and moved there.
+2. **`fieldmap.py` must not assume a diff implies an APPLY.** It attributes by
+   log line, not by APPLY count, so it is already correct — but the reasoning
+   was accidental and is now deliberate.
+3. **For `egg-config`, nothing changes yet**: we send the same command either
+   way. What would change is a future "set the live CPI stage without writing
+   the rest of the record" feature — and this path shows the vendor does not do
+   that. It rewrites the whole record too.
+
+### Closed the same day: how many doors the write has
+
+The four radio handlers were found by following one observation of the owner's, which
+is not a search. The search is: every `call` **and every `jmp`** targeting
+`0x414010` and `0x404180` — jumps included, because the handler above reaches
+`0x414010` by tail call and a call-only scan would have missed all of them.
+
+    -> 0x414010   EIGHT edges, all jmp, all in 0x410b-0x4115:
+                  0x410cf9  0x410e29  0x410f59  0x411089
+                  0x4111ca  0x41130a  0x41144a  0x41158a
+    -> 0x404180   TWO edges:
+                  0x413f2f  the APPLY handler (0x413ea0)
+                  0x414356  inside 0x414010
+
+**Eight, not four.** Each radio button has *two* handlers, distinguished only by
+their guard: the set at `0x4110a0`+ tests `testl %eax,%eax` / `jne return` and
+so runs when the button was **not** already checked; the set at `0x410be0`+
+tests `cmpl $0x1,%eax` / `jne return` and runs when it **was**. Both then write.
+Same four dialog-135 members (`0x13f4`, `0x1468`, `0x14dc`, `0x1550`) either way.
+
+So the record write has **exactly two doors**, APPLY and the live-CPI path, and
+both are now read end to end. No other control in cfg107 reaches the device.
+That is a positive accounting over raw call/jump edges rather than a reading
+impression, which is the standard §1.2b asks for when the claim is an absence.
