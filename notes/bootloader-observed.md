@@ -134,6 +134,37 @@ Also outstanding: we have never captured the **mouse interface** (`usage 0x02`)
 descriptor in application mode at all — only the bootloader's 69-byte one. Grab
 it on the next replug.
 
+## 5a. Bootloader mode is NOT latched — a power cycle exits it [O]
+
+Observed 2026-09-05. The device sat in the bootloader for **about four hours**,
+continuously powered, and stayed there — so the mode does not time out. Unplug
+and replug with no button held, and it returns to `PID 0x1978`, ver `0x0107`,
+application mode, first try.
+
+```
+[03:21:28]  PID 0x1977 BOOTLOADER   ver=0x0006      <- 4 hours after entry
+   ... unplug, replug, no buttons ...
+[03:23:37]  PID 0x1978 APPLICATION  ver=0x0107
+```
+
+Two consequences, and they pull in opposite directions:
+
+- **Good:** a stray bootloader entry is self-correcting. A user who fumbles the
+  button combo is one replug from normal, with nothing to explain.
+- **Watch:** it means the bootloader hands off to the application whenever one
+  looks valid. So a device with a *partially written* application will attempt
+  to run it rather than sitting safely in the bootloader — which is exactly why
+  the button entry matters, and why it is the recovery path rather than a power
+  cycle.
+
+Note also that the entry survived four hours of being powered without reverting,
+so nothing in our flasher needs to race a timeout after `A1 3A`.
+
+**Still `[G]`:** whether the bootloader validates the application before handing
+off. If it does, a corrupt application would leave the device in the bootloader
+by itself, which would be a second recovery path. Nothing observed either way,
+and the button makes it unnecessary to know.
+
 ## 6. What this does NOT establish
 
 - **That the bootloader survives a corrupted application.** What was shown is
