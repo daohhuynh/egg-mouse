@@ -17,11 +17,21 @@ Holding a button while plugging the mouse in re-enumerates it as **PID
 [23:18:19]  PID 0x1977 BOOTLOADER   ver=0x0006
 ```
 
-**WHICH BUTTON IS NOT YET RECORDED.** the owner performed the entry; the exact button
-or combination, and how long it was held, must be written down here before this
-section is relied on. Until then the *existence* of the mechanism is `[O]` and
-the *procedure* is unrecorded. That is a gap, per §1.7, and it is the single
-most important sentence in this repo to get right.
+### The procedure [O]
+
+> **Hold LEFT and RIGHT mouse buttons together. Keep holding. Plug the cable in.
+> Keep holding for a few more seconds, then release.**
+
+Reported by the owner, 2026-09-05, as performed in the run logged above. This is the
+recovery procedure for the entire project and it belongs in the README, in
+`egg-flash --help`, and printed by the flasher before it sends anything.
+
+**Not yet established, and each is worth a line when someone next has the device
+in hand:** the minimum hold time; whether left alone or right alone also works;
+whether the buttons must be held *before* the cable goes in or can be pressed
+after; and whether releasing early aborts the entry. Nothing here depends on
+those answers, but a recovery procedure with unknown tolerances is worse than
+one with known ones.
 
 ### Why this is the most important observation in the project
 
