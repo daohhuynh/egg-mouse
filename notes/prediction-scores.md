@@ -221,6 +221,30 @@ APPLY. The first report is what the earlier draft of §7.3 briefly rested on, an
 it is a good reminder that an observation taken before the write lands is not an
 observation of the write.
 
+### CONFIRMED — the `send firmware block data...` status string
+
+`wire-predictions.md:2917` committed the updater's observable sequence after one
+click, including that the status becomes exactly **`send firmware block data...`**
+while the progress bar advances.
+
+The owner, 2026-09-05, mid-flash and unprompted: *"while the firmware was downloading
+and the progress bar was progressing it said something like 'send firmware block
+data...'"* — he flagged it as possibly mistyped. It is not: the string sits at
+file offset `0x143960` in updater 1.10 as UTF-16, character for character
+including the three dots.
+
+Observer: the owner, on the running updater. Scored narrowly: this confirms the
+**string** and that it appears during the block phase with the bar moving. It
+does **not** yet score the surrounding sequence, the 2% jump, or the timing,
+which need `08-flash.pcapng` and the screen order.
+
+Worth recording as method rather than as a hit: he was about to spend effort
+re-deriving a string that was already in the binary. Pulling all 11 status
+strings out of updater 1.10 (`0x1437d0`–`0x143ab4`) converted the rest of that
+section from transcription into ticking boxes, and turned "anything else on
+screen" into a positive finding — a string not in that list would mean text from
+code that has not been read.
+
 ### The technique-diversity caveat now partly lifts
 
 Every prior confirmation used the same technique (`ShowWindow(SW_HIDE)` in
@@ -228,6 +252,6 @@ Every prior confirmation used the same technique (`ShowWindow(SW_HIDE)` in
 one method is close to one hit. This one is a different method on a different
 binary: reading what `OnInitDialog` *omits* rather than what it hides.
 
-And the tally is no longer 4–0. **CONFIRMED 5, REFUTED 1**, all scored the same
+And the tally is no longer 4–0. **CONFIRMED 6, REFUTED 1**, all scored the same
 day and all from things the owner volunteered rather than from questions he was asked.
 The refutation is the one that tells us the scoreboard works.
