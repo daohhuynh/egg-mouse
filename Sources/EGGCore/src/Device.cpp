@@ -128,15 +128,28 @@ std::unique_ptr<Device> Device::open(std::uint16_t productId, Log& log) {
             return nullptr;
         }
         log.note("the interface is still present, so it is being refused "
-                 "rather than missing. Known causes, in no particular order:");
-        log.note("  1. another process holds the device. Observed 2026-09-05: "
-                 "a browser held this exact mouse open for exclusive access "
-                 "and the kernel refused another process's open. Quit browsers "
-                 "and any vendor or web configurator, then re-run.");
-        log.note("  2. macOS Input Monitoring. Grant it to your terminal in "
-                 "System Settings > Privacy & Security > Input Monitoring. "
-                 "Root is not required and will not help.");
-        log.note("  3. the OS has claimed it as an input device.");
+                 "rather than missing.");
+        log.note("MOST LIKELY: macOS Input Monitoring. Confirmed 2026-09-05 on "
+                 "this device -- hidapi returned 0xE00002E2 kIOReturnNotPermitted "
+                 "and tccd logged service=kTCCServiceListenEvent for egg-config. "
+                 "macOS does NOT hand over the 0xFF01 vendor collection without "
+                 "it. Root is not required and will not help.");
+        log.note("  GRANT IT TO THE APP THAT OWNS YOUR TERMINAL WINDOW, not to "
+                 "egg-config. tccd attributes the request to the RESPONSIBLE "
+                 "process: Terminal.app, iTerm, or the editor if you launched "
+                 "the shell from one. Granting the wrong one leaves the "
+                 "permission visibly on and the open still failing.");
+        log.note("  System Settings > Privacy & Security > Input Monitoring. "
+                 "Then QUIT that app fully (Cmd-Q) and reopen it -- a running "
+                 "process does not pick up a new grant.");
+        log.note("  Confirm with:  log show --last 5m --predicate "
+                 "'process == \"tccd\"' | grep -i ListenEvent");
+        log.note("OTHER CAUSES, if the grant is in place and it still fails:");
+        log.note("  - another process holds the device. Observed 2026-09-05: a "
+                 "browser held this exact mouse open for exclusive access. That "
+                 "reports 0xE00002C5 kIOReturnExclusiveAccess, NOT 0xE00002E2, "
+                 "so the code above tells the two apart -- read it.");
+        log.note("  - the OS has claimed it as an input device.");
         log.note("To see who holds it:  log show --last 5m --predicate "
                  "'eventMessage CONTAINS \"exclusive access\"'");
         return nullptr;
