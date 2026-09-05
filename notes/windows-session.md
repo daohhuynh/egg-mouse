@@ -53,8 +53,13 @@ taken against.
 
 ## 2. Screenshots (10 min) — into `windows-run/screenshots/`
 
-Take one of **every** page and name them plainly. These test predictions that
-are already committed, so they are evidence, not decoration.
+All of these go in `windows-run/screenshots/` — one flat folder, no
+subfolders. Name them plainly (`basic.png`, `sensor-cpi-downshift-open.png`).
+
+Take one of **every** page. These test predictions that are already committed,
+so they are evidence, not decoration. **Do this section BEFORE section 3**, while
+every page is still in its original state — that is what makes the starting
+values recoverable without writing them down.
 
 - The main window, showing the tab bar, the firmware/software version readouts,
   and both buttons.
@@ -84,32 +89,33 @@ are already committed, so they are evidence, not decoration.
 One capture file per page. Inside each file: change one setting, **click APPLY**,
 change the next, **click APPLY**, and so on, in the order the table gives.
 
-### Before you touch a page, screenshot it
+### The table order IS most of the log
 
-**Screenshot each page BEFORE changing anything on it.** That records every
-starting state in one image, which is most of what I would otherwise have to ask
-you to write out. Name them `before-basic.png`, `before-sensor.png`, and so on.
+Do section 2's screenshots first and you have already captured every page in its
+untouched state — **there is no second round of "before" screenshots.** Those
+images give me every starting value, so you do not have to write any of them out.
 
-### What to actually write in `log.txt`
+Then: follow each table **in order, one APPLY per line**. The first record diff
+in the capture is line 1, the second is line 2, and so on. That correspondence is
+the log, and it costs you nothing to maintain beyond not skipping around.
 
-The tables below are already numbered — **you do not copy them out.** Write down
-only the things a table *cannot* say in advance:
+So `log.txt` only needs the things neither the screenshots nor the order can
+supply:
 
-1. **Which direction you toggled.** "Toggle it" doesn't tell me whether the
-   feature ended up on or off, and that is exactly what decides whether the byte
-   means enabled or disabled. So: `2 angle snapping OFF -> ON`.
-2. **Any number or item you chose yourself**, where the table says "note it" or
-   "distinctive". So: `5 sensor angle tuning 0 -> 37`.
-3. **What a dropdown item was actually called**, when the table says something
-   like "last item". So: `6 cpi downshift -> "Default"` — and if the list has
-   four entries rather than three, say so, because that alone settles a
-   prediction.
-4. **Anything that went differently.** Skipped, out of order, value refused,
-   app misbehaved, you clicked APPLY twice. Say so plainly. **A noted mistake
-   costs nothing; an unnoted one can make a whole file unreadable.**
+1. **Values and items you chose yourself** — the sensor angle number, which
+   button you remapped and to what, what a dropdown's entries are actually
+   called and how many there are.
+2. **Anything that deviated.** Skipped a line, did them out of order, a value
+   was refused, the app hiccupped, you clicked APPLY twice by accident. Say so
+   plainly. **A noted mistake costs nothing; an unnoted one can make a whole
+   file unreadable**, because it breaks the order-to-diff correspondence
+   everything else depends on.
 
-If a line went exactly as the table says and involved no choice of yours, it
-needs no entry at all.
+You do **not** need to write out toggle directions — the before screenshot has
+them. Note one only if you toggled something twice or the checkbox did not do
+what you expected.
+
+`log.txt` at the repo root already has a blank for every one of these.
 
 ### Start `log.txt` with this block, and just fill in the blanks
 
