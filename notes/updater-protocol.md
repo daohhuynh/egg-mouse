@@ -2157,6 +2157,127 @@ holds if Endgame ships a 1.11 and we deliberately move to it. **Note the third
 line is the discriminator that would have caught a swapped 143** — its filler
 is `e0cac456c107…`.
 
+### 8.5b The cipher, measured — statistics, what they rule out, and what they do not
+
+Added 2026-09-05. §8.5 recorded the observations; this section adds the numbers
+behind them, corrects one claim, and states each ruling's blind spot so nobody
+re-opens this as a task. **The cipher is still not identified, and §8.3 still
+means we do not need it: the host never decrypts and `egg-flash` ships resource
+140's bytes unmodified.**
+
+Regenerate everything here from `.analysis/res/<tag>/tFWFILE_n<name>_l2052.bin`
+(21 blobs: fw104/fw106/fw107/fw110 x names 133/135/137/140/142, plus 143 in
+fw110 only). Ground truth also frozen at `scratchpad/fwfile/ground-truth.md`.
+
+#### It is encryption, not compression  [O]
+
+| measure | value | uniform-random expectation |
+| --- | --- | --- |
+| per-block Shannon entropy | 7.79-7.83 | ~7.83 ceiling for 1024 bytes |
+| byte chi2, whole file | 5137.5 | 255 +- 23 |
+| byte chi2, **deduplicated** (n=31744) | **243.7** | 255 +- 23 |
+| byte chi2, all 314 distinct blocks pooled (n=321536) | **247.1** | 255 +- 23 |
+| mean pairwise bit distance, distinct blocks | 4096.5 / 8192 | 4096 |
+| internal period at unit 4/8/16/32/64 B | none; every unit distinct | none |
+
+**The whole-file chi2 of 5137 is an artefact and must not be quoted.** 35 of the
+65 blocks are the same filler block, so that one block's sampling noise is
+counted 35 times. Deduplicate before testing uniformity. Having done so, the
+byte distribution is indistinguishable from uniform, which **rules out
+compression** — LZ/deflate output is measurably non-uniform.
+
+#### Which blocks change between releases  [O] — and a correction
+
+`.text`-style intuition does not transfer here; the answer depends on the pair.
+
+| pair (name 140 and 142 alike) | content blocks differing |
+| --- | --- |
+| fw104 -> fw106 | **4** — blocks 8, 27, 28, 64. Blocks 9-26 byte-identical. |
+| fw106 -> fw107 | all 30 |
+| fw107 -> fw110 | all 30 |
+
+**Correction:** a working draft of this analysis asserted that all 30 content
+blocks differ between *any* two versions. That generalised from the 106/107 and
+107/110 pairs and is false. §8.5's original statement was correct and is
+restored here with the numbers attached.
+
+#### Diffusion is bidirectional, and that is the load-bearing measurement  [O]
+
+In **every** differing block, in **every** version pair, the first differing byte
+is byte **0**, and 1015-1024 of 1024 bytes differ (99.1-100%). The
+full-avalanche expectation for independent random bytes is 1024 x 255/256 =
+1020, and the observations sit on it.
+
+The `fw104 -> fw106` pair is what makes this an argument rather than a
+statistic. Blocks 9-26 are byte-identical across it, so nothing in the image
+shifted; the edits in blocks 8, 27, 28 and 64 are therefore localized and
+in-place. Yet each of those four differs **from byte 0** across ~99.5% of the
+block. An edit late in a block is changing byte 0 of the same block.
+
+So diffusion runs in **both** directions inside the 1024-byte unit. That rules
+out, together:
+
+- **CBC** with any IV, fixed or derived — a plaintext change leaves every
+  earlier ciphertext block untouched;
+- **CFB**, **OFB**, **CTR**, and any stream cipher whose state is not
+  plaintext-dependent — same reason, forward-only propagation.
+
+Consistent with what remains: a wide-block 1024-byte SPRP (EME/XCB/HCTR-class),
+or any two-pass construction that chains forward and then backward. Neither is
+confirmed.
+
+**Blind spot, stated because rule §1.2a requires it:** the argument assumes the
+four edits really were localized. The evidence is that adjacent blocks did not
+move, which is strong but is not proof. A rebuild that happened to change the
+first 16 bytes of exactly blocks 8, 27, 28 and 64 and nothing else would fit the
+data equally well and would leave CBC alive. Nobody has found a way to separate
+those two readings from ciphertext alone.
+
+#### The key is indexed by resource name and has never been rotated  [O]
+
+Each resource name has its own filler ciphertext, constant across all four
+releases:
+
+| name | filler ciphertext (sha256[:12]) | constant across |
+| --- | --- | --- |
+| 133 | `a6632c2e2504` | fw104, fw106, fw107, fw110 |
+| 135 | `fe2e7a5c0920` | fw104, fw106, fw107, fw110 |
+| 137 | `a744b0294fe5` | fw104, fw106, fw107, fw110 |
+| 140 | `cefe77fb6c23` | fw104, fw106, fw107, fw110 |
+| 142 | `ec43b18e4646` | fw104, fw106, fw107, fw110 |
+| 143 | `e0cac456c107` | fw110 only |
+
+The six are pairwise ~50% bit-different (4055-4164 of 8192), so no relation
+between names is visible. Under the `[G]` that the filler plaintext is the same
+constant in all six — almost certainly erased flash — this says the key or tweak
+is a function of the resource name and is **unchanged across the product's
+entire release history**.
+
+#### Layout, identical in all 21 blobs  [O]
+
+Blocks 0-28 content, blocks 29-63 the filler repeated 35 times, block 64
+content. 30 content blocks, so ~30 KiB of firmware in a 65 KiB container. The
+filler repeating byte-identically at 35 different offsets is what establishes
+that the transform is **position-independent** at 1024-byte granularity: same
+plaintext block, same ciphertext block, wherever it sits.
+
+#### What decrypting this would and would not buy
+
+**Would:** the `A0 11` settings handler, which is the one thing that could
+upgrade the record `0x01`-`0x04` policy (`ConfigRecord.h`, `kDefaultUnknownBytes`)
+from a defensible default to a derivation. That policy is already decided,
+already matches the vendor's 73 captured writes, and is one line to reverse.
+
+**Would not:** anything about whether the bootloader validates the image it is
+given. Blob block *i* is device block `0x34 + i` (§10.1), so the 65 blocks span
+`0x34`-`0x74` and **the bootloader, which lives below `0x34`, is in none of the
+21 blobs.** CLAUDE.md §2's load-bearing assumption stays untestable short of a
+flash, and every guard against a wrong image therefore stays ours. A previous
+note claimed the opposite; it was wrong.
+
+**Nothing in `egg-flash` is gated on any of this.**
+
+
 ### 8.6 Consequences for the ingest design
 
 1. Extract `FWFILE`/**140** only. The name stays a hardcoded constant (§1.4).
