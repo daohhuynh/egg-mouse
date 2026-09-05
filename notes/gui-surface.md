@@ -168,3 +168,29 @@ Mechanism not derived. MFC's usual shape is `SetModified(TRUE)` on each control
 notification with the sheet enabling `ID_APPLY_NOW`, which would fit, but no
 address has been traced and it is **[G]** whether that is what this program
 does. Nothing depends on it.
+
+
+## 6. `X/Y Settings` is a host-side control that writes nothing  [O]
+
+The owner, 2026-09-05, mid-capture: *"the X/Y settings ticking does not enable apply
+because i guess it doesnt count as changing anything"*. Earlier the same
+session: *"the slider snaps the other axis if X/Y settings is not ticked and if
+it is ticked then it doesnt snap the other"*.
+
+Together those say the checkbox changes **host behaviour only** — whether the
+dialog mirrors one axis into the other — and touches no byte of the settings
+record. `gui-surface.md` §5's dirty-state gate is what makes this observable:
+a control that writes nothing cannot dirty the page, so APPLY stays greyed.
+
+**It agrees with the wire, which was the prediction.** The CPI table has held
+*two* independent 16-bit values per stage since the first capture — `90 01 90
+01` for 400/400 (`wire-observed.md` §4, record `0x24`–`0x37` in
+`config-protocol.md` §7.3) — so X and Y have always been stored separately on
+the device. There was never a "locked" representation for a checkbox to switch
+into. The lock is the host mirroring, and the tick turns the mirroring off.
+
+Consequence for the capture: the tick gets `NO APPLY` on its own line, and the
+following lines set X and Y to different values, which dirty normally. It also
+means the **fifth byte of each 5-byte CPI record is still unexplained** — it was
+the obvious candidate for an X/Y-independent flag, and this rules that out: a
+control that never writes cannot be what sets it.
