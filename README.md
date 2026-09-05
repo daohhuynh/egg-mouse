@@ -34,7 +34,9 @@ cmake -S . -B build
 cmake --build build
 ```
 
-Produces `build/egg-config`, `build/egg-flash`, and `build/test-flash`.
+Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
+`build/test-config`. `ctest --test-dir build` runs everything — eleven suites,
+none of which needs the mouse.
 
 ## egg-config
 
@@ -43,27 +45,56 @@ egg-config devices                 list every VID 0x3367 interface
 egg-config read [--save FILE]      read the settings record, dump it, save it
 egg-config info                    small query (A1 02)
 egg-config diff A B                compare two saved records, offline
+egg-config set                     list the settable fields and their citations
+egg-config set FIELD VALUE --yes   change ONE derived field
+egg-config encode F V IN OUT       offline: apply one field to a saved record
 egg-config factory-reset --yes     device-side reset (A1 13)
 egg-config restore FILE --yes      write a saved record back, then verify
 ```
 
-There is deliberately **no `set`**. Naming one field means knowing which byte it
-is, which is what the capture work produces. Until then, writing a named field
-would mean writing a byte whose meaning is a guess, and that is the one thing
-this project will not do.
+`set` covers **twelve** fields, and a field is in the table only when its
+*meaning* is derived from the vendor binary and cited to an address. Knowing
+where a byte lives is not enough: all 115 record bytes are mapped, and most of
+them are still nameless. `egg-config set` with no arguments prints the list with
+each citation, and a second list of fields that are derived and deliberately
+**withheld**, each with the reason — because "why can I not set this?" deserves
+an answer in the tool, not only in the notes.
 
 `restore` is different in kind: it sends back bytes the *device* produced, so
 nothing in it is invented, even though most of it is not yet understood.
 
 Every write path reads first, requires the read to be structurally plausible,
-writes, reads back, and diffs. A write that is acknowledged but does not verify
-is reported as a failure, loudly, and exits non-zero.
+**self-checks the frame it is about to send against the record it just read**,
+writes, reads back, and verifies the data rather than the acknowledgement. A
+write that is acknowledged but does not verify is reported as a failure, loudly,
+and exits non-zero. All of that lives in one file, `ConfigSession.cpp`, small
+enough to audit by eye.
+
+Two flags worth knowing:
+
+`--vault FILE` — the **first** structurally plausible record ever read on this
+machine is saved to `~/.egg-mouse-known-good.bin` automatically, by every
+command that reads, and is never overwritten. It is the undo. You do not have to
+remember to ask for it, because the run where nobody remembered is the run where
+it mattered.
+
+`--unknown-bytes=preserve|vendor` — record bytes `0x01..0x04` are the one place
+where read-modify-write and copying the vendor produce different wire bytes: the
+device reports `80 00 00 00` there and all 73 captured vendor writes carry
+`00 00 00 00`. The default is `vendor`, decided on the evidence and reversible
+in one line; `ConfigRecord.h` carries the argument and both arms are scored
+against the captures.
+
+**A successful read-back proves what the mouse holds now, not what survives
+unplugging.** In the capture run the vendor's own writes were gone by the next
+session in five gaps out of six. `egg-config` says so after every write.
 
 ## egg-flash
 
 ```
 egg-flash image  <updater.exe>     validate the firmware image and stop
 egg-flash dryrun <updater.exe>     emit the exact byte stream, send nothing
+egg-flash stream <updater.exe>     the same stream in full, one frame per line
 egg-flash help
 ```
 
@@ -78,14 +109,34 @@ structural check passes on all of them. **Only the hash separates the right
 firmware from the wrong one**, because the device is assumed to validate nothing
 it is given.
 
+`egg-flash` also tells you, on **stderr**, whether a settings undo exists. Its
+last command is `A1 13` — byte for byte the config tool's Factory Reset. Whether
+it means the same thing in both places is a guess and is not testable without
+flashing, and no config write has been observed to survive a power cycle, so a
+wipe might not be undoable from the device. Run `egg-config read` first.
+
+That message is on stderr and not stdout deliberately: `stream` exists so the
+whole outbound byte sequence can be diffed against a capture of the vendor's
+tool doing the same flash, and a warning on stdout would make that diff depend
+on whether a backup file happened to exist. A test pins it.
+
 There is no `flash` verb yet, on purpose.
 
 ## Tests
 
 ```sh
-./build/test-flash          # byte maps, invariants, adversarial device
+ctest --test-dir build      # all eleven suites, no hardware needed
+```
+
+or individually:
+
+```sh
+./build/test-flash          # byte maps, invariants, adversarial bootloader
+./build/test-config         # the same, for the config write path
 ./Tests/mutants.sh          # does test-flash actually catch anything?
-python3 Tests/test_fieldmap.py
+./Tests/test_config_set.sh  # everything `set` must refuse
+./Tests/test_flash_undo.sh  # the A1 13 settings warning
+python3 -m unittest Tests.test_config_replay   # replay the vendor's own writes
 ```
 
 `test-flash` drives the flasher against a mock bootloader that rejects commands,
@@ -93,11 +144,28 @@ returns malformed responses, **reports success for writes it did not store**,
 goes silent mid-write, disconnects, stalls past every timeout, corrupts what it
 stores, and lies about checksums. None of it needs hardware.
 
+`test-config` does the same for the config path, against a device that
+acknowledges writes it never performed, corrupts what it stores, changes an
+extra byte of its own accord, returns garbage, returns a short record, and goes
+silent — plus a **cooperative** control, because if the friendly case failed
+too, none of the hostile ones would prove anything. Its invariants run over
+seeds rather than examples: never-writes-after-a-bad-read over 200 seeds,
+only-sanctioned-bytes-differ over 400 runs, and bit preservation checked
+exhaustively over all 256×256 byte pairs.
+
+`test_config_replay.py` is the strongest check either tool has, because the
+reference is not something we produced: the captures give 33 pairs of (record
+before, record after) where exactly one setting changed and we know which. Our
+own composition code is handed the before-record and the same change, and must
+reproduce the vendor's after-record. Under `--unknown-bytes=vendor` it matches
+all 33 byte for byte across all 1024 payload bytes.
+
 `mutants.sh` exists because `test-flash` passed 47/47 on its first run, and a
-suite that has never failed has not been shown to work. It plants ten known bugs
-— several of them the vendor's own — and requires the suite to notice. It
-currently kills 8 of 8 real defects and correctly lets 2 provably-equivalent
-mutants survive. **If that number drops, a test stopped working.**
+suite that has never failed has not been shown to work. It plants known bugs —
+several of them the vendor's own — and requires the suite to notice. It
+currently kills **13 of 13** real defects and correctly lets 2
+provably-equivalent mutants survive. **If that number drops, a test stopped
+working.**
 
 ## Staged bring-up
 
@@ -116,6 +184,9 @@ By stage 4 the only untested code is erase and write.
 ```
 Sources/EGGCore/        HID transport, enumeration, device identity, protocol
                         constants as DATA with a citation on every value
+Sources/EGGConfigCore/  the config write path: read-modify-write, validation,
+                        diff-verify, the settable field table, the known-good
+                        vault, and a config device that lies on demand
 Sources/EGGFlashCore/   image handling, command builders, the write phase,
                         the adversarial mock
 Sources/egg-config/     the config CLI

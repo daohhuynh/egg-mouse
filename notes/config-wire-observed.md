@@ -176,7 +176,38 @@ where it reads `0x00` — and `0x00` is what the vendor always writes there.
 The likeliest reading is that the record lives in RAM, reloads from
 firmware-held defaults on power cycle, and that the owner replugged the mouse between
 most captures because USBPcap generally needs the device reattached to see it.
-That is `[G]`. What is **not** a guess is the consequence, and it is load-bearing
+That is `[G]`, and **the capture argues against the replug half of it.**
+
+Machine-checked 2026-09-05, over `usbpcap.read()` on all eleven files: the
+device's USB address is **4 in every capture from 00 through 07**, and changes
+only at the flash captures (`08` sees 5 and 6, `09` sees 6, 7 and 8, `10` sees
+8) — which is what a bootloader re-enumeration looks like. So no address change
+is visible across the very boundaries where the settings vanished. Windows can
+reuse an address on the same port, so this is evidence rather than proof; but
+"The owner replugged between sections" is no longer the comfortable explanation it
+looked like, and something that reverts the record **without** re-enumeration
+now has to be considered.
+
+The gaps themselves, end of one capture to start of the next, in chronological
+order (note that `07` runs **before** `06` by timestamp — the file numbering is
+not chronological, and any analysis that assumes it is will mis-pair a write
+with the read that follows it):
+
+```
+01 -> 02   5501 s   reverted        05 -> 07    958 s   reverted
+02 -> 03    648 s   reverted        07 -> 06    231 s   reverted (07 was a reset)
+03 -> 04    124 s   HELD, 0/115     06 -> 08      -     no read
+04 -> 05    388 s   reverted        09 -> 10    269 s   reverted (fw 1.10)
+```
+
+The survivor is the shortest gap by a factor of three, which is consistent with
+a timeout and equally consistent with the tester having done something in the
+longer ones. `[G]` either way.
+
+The correlation that does hold without exception across all nine reads is
+simply: `record 0x01 == 0x80` exactly when the record is at firmware defaults,
+`0x00` exactly when it holds what a host wrote. n=9, one negative case, and
+still a correlation — **not a basis for a write** (§1.3). What is **not** a guess is the consequence, and it is load-bearing
 for §4.1: **we have no evidence that `a0 11` persists across a power cycle, and
 direct evidence that written settings vanished across most capture boundaries.**
 Reading back after a write therefore verifies RAM. It does not verify what

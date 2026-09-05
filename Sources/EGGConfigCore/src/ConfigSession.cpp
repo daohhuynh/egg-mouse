@@ -40,6 +40,7 @@ bool policyPermits(const ByteChange& c, UnknownBytes policy) {
 }  // namespace
 
 bool ConfigSession::read(std::vector<std::uint8_t>& out, Result& result) {
+    justStored_ = false;
     Reply r = link_.readRecord();
     if (!r.ok()) { result = Result::ReadFailed; return false; }
     if (!(log_ ? plausible(r.buf, *log_) : plausible(r.buf))) {
@@ -47,6 +48,10 @@ bool ConfigSession::read(std::vector<std::uint8_t>& out, Result& result) {
     }
     out = std::move(r.buf);
     result = Result::Ok;
+
+    // AFTER validation and never before it. A vault filled from an implausible
+    // read is worse than an empty one: it looks like an undo and is not.
+    if (vault_) justStored_ = vault_->offer(out);
     return true;
 }
 

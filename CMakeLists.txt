@@ -30,6 +30,7 @@ add_library(EGGConfigCore STATIC
   Sources/EGGConfigCore/src/ConfigRecord.cpp
   Sources/EGGConfigCore/src/ConfigSession.cpp
   Sources/EGGConfigCore/src/MockConfigDevice.cpp
+  Sources/EGGConfigCore/src/RecordVault.cpp
 )
 target_include_directories(EGGConfigCore PUBLIC Sources/EGGConfigCore/include)
 target_link_libraries(EGGConfigCore PUBLIC EGGCore)
@@ -47,7 +48,13 @@ target_include_directories(EGGFlashCore PUBLIC Sources/EGGFlashCore/include)
 target_link_libraries(EGGFlashCore PUBLIC EGGCore)
 
 add_executable(egg-flash Sources/egg-flash/main.cpp)
-target_link_libraries(egg-flash PRIVATE EGGFlashCore)
+# EGGConfigCore too, and for a reason worth stating rather than hiding behind a
+# link line: egg-flash's last command is A1 13, byte-for-byte the config tool's
+# Factory Reset. Whether it wipes settings is [G], so the flasher has to know
+# what a settings record is in order to report whether an undo exists. §3 keeps
+# the two EXECUTABLES apart because they have contradictory quit semantics; it
+# never said they may not share a library.
+target_link_libraries(egg-flash PRIVATE EGGFlashCore EGGConfigCore)
 
 # Tests. §4.3: "Assert invariants, not examples, over randomised runs." These
 # need no hardware and no capture, which is the point -- they are the only
@@ -91,6 +98,9 @@ endif()
 
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)
 set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_test(NAME flash_undo COMMAND Tests/test_flash_undo.sh)
+set_tests_properties(flash_undo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Mutation testing: §6.2's check that the flash suite can produce a bad result.
 # RUN_SERIAL because it edits the source tree, rebuilds, and restores -- nothing

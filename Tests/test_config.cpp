@@ -20,8 +20,10 @@
 #include "egg/ConfigSession.h"
 #include "egg/MockConfigDevice.h"
 #include "egg/Protocol.h"
+#include "egg/RecordVault.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -376,6 +378,150 @@ static void testUnknownBytePolicy() {
     }());
 }
 
+// ---------------------------------------------------------------------------
+// §4.1: "Save a known-good blob to disk on first connect."
+// ---------------------------------------------------------------------------
+// The dangerous failure is not "no file". It is a file that LOOKS like an undo
+// and is not -- one written from a bad read, or one overwritten later by
+// whatever a half-broken session left on the device. Both are checked here.
+static std::string tmpPath(const char* leaf) {
+    const char* d = std::getenv("TMPDIR");
+    std::string dir = d ? d : "/tmp";
+    if (!dir.empty() && dir.back() != '/') dir += '/';
+    return dir + "egg-vault-test-" + leaf;
+}
+
+static void testVault() {
+    std::printf("\nknown-good blob (§4.1)\n");
+
+    const std::string path = tmpPath("first.bin");
+    std::remove(path.c_str());
+
+    // The device's own first record, kept, and the exact bytes recoverable.
+    std::vector<std::uint8_t> first;
+    {
+        MockConfigDevice dev;
+        first = dev.stored();
+        FileRecordVault v(path);
+        ok("a fresh vault holds nothing", !v.holds());
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        s.setVault(&v);
+        std::vector<std::uint8_t> rec; Result r = Result::Ok;
+        const bool got = s.read(rec, r);
+        ok("the first plausible read fills the vault", got && v.holds() && s.justStored());
+    }
+
+    // NEVER OVERWRITTEN. A second session, a device now holding something else,
+    // and the file must still be the original.
+    {
+        MockConfigDevice dev;
+        // Move the device away from what the vault holds.
+        dev.writeRecord(ConfigSession::buildFrame(dev.stored(), field("polling"), 64,
+                                                  UnknownBytes::Preserve));
+        FileRecordVault v(path);
+        ok("a later session sees the vault as already held", v.holds());
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        s.setVault(&v);
+        std::vector<std::uint8_t> rec; Result r = Result::Ok;
+        s.read(rec, r);
+        ok("...and does not overwrite it", !s.justStored());
+
+        std::vector<std::uint8_t> onDisk;
+        std::FILE* f = std::fopen(path.c_str(), "rb");
+        if (f) {
+            onDisk.resize(kLargeLen);
+            const std::size_t n = std::fread(onDisk.data(), 1, kLargeLen, f);
+            onDisk.resize(n);
+            std::fclose(f);
+        }
+        ok("the file still holds the FIRST record, byte for byte",
+           onDisk == first,
+           onDisk.size() != kLargeLen ? "wrong length on disk" : "");
+        ok("...and the device has genuinely moved on, so that meant something",
+           rec != first);
+    }
+
+    // A record that failed validation must never reach the vault, even if the
+    // caller offers it. The session already screens; the vault screens again,
+    // because this file exists so a bad session cannot destroy a good record.
+    {
+        const std::string p2 = tmpPath("implausible.bin");
+        std::remove(p2.c_str());
+        FileRecordVault v(p2);
+        std::vector<std::uint8_t> junk(kLargeLen, 0xFF);
+        junk[0] = kReportLarge;
+        ok("the vault refuses an implausible record offered directly",
+           !v.offer(junk) && !v.holds(), v.lastError());
+
+        MockConfigDevice dev(ConfigFaults{.implausibleRate = 1.0});
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        s.setVault(&v);
+        std::vector<std::uint8_t> rec; Result r = Result::Ok;
+        const bool got = s.read(rec, r);
+        ok("a session whose every read is garbage saves nothing",
+           !got && r == Result::ReadImplausible && !v.holds());
+        std::remove(p2.c_str());
+    }
+
+    // A truncated file from an interrupted run is not a known-good blob, and
+    // must not suppress the save that would replace it.
+    {
+        const std::string p3 = tmpPath("truncated.bin");
+        std::FILE* f = std::fopen(p3.c_str(), "wb");
+        ok("(setup) a short file exists", f != nullptr);
+        if (f) { std::fputs("not a record", f); std::fclose(f); }
+        FileRecordVault v(p3);
+        ok("a truncated file does not count as a saved record", !v.holds());
+        MockConfigDevice dev;
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        s.setVault(&v);
+        std::vector<std::uint8_t> rec; Result r = Result::Ok;
+        s.read(rec, r);
+        ok("...and is replaced by a real one", v.holds() && s.justStored());
+        std::remove(p3.c_str());
+    }
+
+    // An unwritable path must be REPORTED, not swallowed -- and must not stop
+    // the session, because losing access to the device to protect a backup
+    // would be the wrong trade.
+    {
+        FileRecordVault v("/this/directory/does/not/exist/known-good.bin");
+        MockConfigDevice dev;
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        s.setVault(&v);
+        std::vector<std::uint8_t> rec; Result r = Result::Ok;
+        const bool got = s.read(rec, r);
+        ok("an unwritable vault path fails loudly and does not break the read",
+           got && r == Result::Ok && !v.holds() && !v.lastError().empty(),
+           v.lastError());
+    }
+
+    // Every path that reads must fill it, not just `read`. This is the reason
+    // the vault hangs off the session rather than off a call site.
+    {
+        for (const char* which : {"set", "restore", "factory-reset"}) {
+            const std::string p4 = tmpPath(which);
+            std::remove(p4.c_str());
+            MockConfigDevice dev;
+            FileRecordVault v(p4);
+            ConfigSession s(dev, kDefaultUnknownBytes);
+            s.setVault(&v);
+            if (std::string(which) == "set") {
+                s.set(field("polling"), 2);
+            } else if (std::string(which) == "restore") {
+                s.restore(dev.stored());
+            } else {
+                std::vector<std::uint8_t> rec; Result r = Result::Ok;
+                s.read(rec, r);          // what cmdFactoryReset does before A1 13
+                s.factoryReset();
+            }
+            ok((std::string("`") + which + "` fills the vault too").c_str(), v.holds());
+            std::remove(p4.c_str());
+        }
+    }
+    std::remove(path.c_str());
+}
+
 int main() {
     std::printf("EGGConfigCore\n");
     testTable();
@@ -383,6 +529,7 @@ int main() {
     testInvariants();
     testAdversarial();
     testUnknownBytePolicy();
+    testVault();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILURES" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

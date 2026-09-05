@@ -2,13 +2,69 @@
 // quit item, and the output is a log by construction.
 #include "egg/FlashCommands.h"
 #include "egg/Firmware.h"
+#include "egg/RecordVault.h"
 #include "egg/WritePhase.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
 using namespace egg::fw;
+
+// ---------------------------------------------------------------------------
+// The settings undo. working-memory.md, open gaps:
+//
+//   "A1 13 is both the Factory Reset button and the updater's last command. If
+//    it means the same in both places, flashing wipes the user's settings. The
+//    flasher must save a blob first and say so."
+//
+// It is [G] whether the two mean the same thing, and it is not testable without
+// the device -- section 07 of the capture run sent A1 13 from a record that was
+// already at defaults, so before == after proved nothing. §2's standing
+// instruction for exactly this shape of unknown is to build as if the bad
+// reading were true.
+//
+// Compounding it, and also from the open gaps: there is no evidence any config
+// write persists across a power cycle, and no persist command has been seen. So
+// settings lost here may not be recoverable by asking the device again.
+//
+// Hence: this tool states, every time, whether an undo exists. It cannot make
+// one itself -- reading settings is `egg-config`'s job and lives in the other
+// executable by §3 -- but it can refuse to let the question go unasked.
+static std::string defaultVaultPath() {
+    const char* home = std::getenv("HOME");
+    return home ? std::string(home) + "/.egg-mouse-known-good.bin"
+                : std::string(".egg-mouse-known-good.bin");
+}
+
+// Returns true if an undo exists. Prints either way; the silent case is the one
+// this function exists to prevent.
+//
+// ON STDERR, DELIBERATELY, and Tests/test_flash_undo.sh caught why. `stream`
+// exists so the whole outbound byte sequence can be diffed against a capture of
+// the vendor's tool doing the same flash -- that is the strongest check §4.3
+// has, and it only works if stdout carries nothing but frames. A warning on
+// stdout would have made the diff depend on whether a backup file happened to
+// exist. Stderr keeps it in front of a terminal user and out of every pipe.
+static bool reportSettingsUndo(const std::string& vaultPath) {
+    egg::cfg::FileRecordVault v(vaultPath);
+    if (v.holds()) {
+        std::fprintf(stderr, "settings   undo present: %s\n", v.where().c_str());
+        return true;
+    }
+    std::fprintf(stderr,
+        "settings   *** NO SETTINGS UNDO EXISTS ***\n"
+        "           This tool's last command is A1 13, which is byte-for-byte\n"
+        "           the config tool's Factory Reset. Whether it means the same\n"
+        "           thing in both places is a GUESS and is not testable without\n"
+        "           flashing. Nor is there any evidence that settings survive a\n"
+        "           power cycle, so a wipe may not be undoable from the device.\n"
+        "           Run `egg-config read` first. It saves a known-good record to\n"
+        "           %s automatically and never overwrites it.\n",
+        vaultPath.c_str());
+    return false;
+}
 
 static int usage() {
     std::printf(
@@ -27,23 +83,38 @@ static int usage() {
         "\n"
         "There is deliberately no 'flash' verb yet. Staged bring-up (§4.4) puts a\n"
         "real flash last, after a read-back against the device.\n"
+        "\n"
+        "  --vault F   where egg-config keeps the known-good settings record.\n"
+        "              Default ~/.egg-mouse-known-good.bin. This tool's last\n"
+        "              command is A1 13, the same byte as Factory Reset, so it\n"
+        "              reports whether that undo exists before doing anything.\n"
         "\n%s\n", kResourceName, kRecoveryProcedure);
     return 2;
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) return usage();
-    const std::string verb = argv[1];
+    std::string vaultPath = defaultVaultPath();
+    std::string args[3];
+    int n = 0;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--vault" && i + 1 < argc) { vaultPath = argv[++i]; continue; }
+        if (n < 3) args[n++] = a;
+    }
+
+    if (n < 1) return usage();
+    const std::string verb = args[0];
     if (verb == "help" || verb == "--help" || verb == "-h") return usage();
-    if (argc < 3) return usage();
+    if (n < 2) return usage();
+    const std::string exePath = args[1];
 
     Image img;
     std::string err;
-    if (!img.loadFromExecutable(argv[2], err)) {
+    if (!img.loadFromExecutable(exePath.c_str(), err)) {
         std::printf("REFUSED: %s\n", err.c_str());
         return 1;
     }
-    std::printf("image      FWFILE/%u from %s\n", kResourceName, argv[2]);
+    std::printf("image      FWFILE/%u from %s\n", kResourceName, exePath.c_str());
     std::printf("size       %zu bytes, %zu blocks of %zu\n",
                 img.bytes().size(), img.blockCount(), kBlockSize);
     std::printf("sha256     %s  (matches the pinned constant)\n", img.sha256().c_str());
@@ -51,6 +122,7 @@ int main(int argc, char** argv) {
                 img.checksum());
     std::printf("blocks     device indices 0x%02x..0x%02x\n",
                 img.deviceIndex(0), img.deviceIndex(img.blockCount() - 1));
+    reportSettingsUndo(vaultPath);
 
     if (verb == "image") return 0;
 
@@ -107,5 +179,10 @@ int main(int argc, char** argv) {
          wholeImageChecksumQuery(img.deviceIndex(img.blockCount() - 1)));
     show("A1 09 complete", bootloaderComplete());
     show("A1 13 post-success", postSuccess());
+
+    // Repeated at the END as well as the top, because the top of a long dry-run
+    // scrolls away and this is the frame the warning is about.
+    std::printf("\n");
+    reportSettingsUndo(vaultPath);
     return 0;
 }

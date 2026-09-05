@@ -21,6 +21,7 @@
 #include "egg/Device.h"
 #include "egg/Log.h"
 #include "egg/Protocol.h"
+#include "egg/RecordVault.h"
 #include "egg/Transport.h"
 
 #include <cstdio>
@@ -100,6 +101,11 @@ void usage() {
       "                                    nothing and needs no device.\n"
       "\n"
       "  -v                        hex-dump every frame\n"
+      "  --vault F                 where the known-good record is kept.\n"
+      "                            Default ~/.egg-mouse-known-good.bin. The\n"
+      "                            FIRST plausible record read on this machine\n"
+      "                            is written there automatically and is never\n"
+      "                            overwritten (§4.1).\n"
       "  --unknown-bytes=P         P is `preserve` or `vendor`. Record bytes\n"
       "                            0x01..0x04 are the ONE place where read-\n"
       "                            modify-write and copying the vendor give\n"
@@ -235,6 +241,29 @@ int rcFor(Result r) {
     return 1;
 }
 
+// A successful read-back proves the device holds what we sent RIGHT NOW. It
+// does not prove the setting survives a power cycle, and the capture run says
+// plainly that it may not -- so the tool says so too rather than letting
+// "confirmed" carry a weight it has not earned.
+//
+// [O] windows-run, chronological order (which is NOT the file numbering -- 07
+// runs before 06): of the six session gaps with a settings read on both sides,
+// FIVE showed the vendor's own writes gone, the record back at firmware
+// defaults byte for byte. The one survivor, 04-buttons, is the shortest gap at
+// 124 s; the others are 231-5501 s. The device's USB address stayed 4 across
+// every one of those captures, so no re-enumeration is visible in the data.
+// [G] why. Idle reload from non-volatile storage fits; so does something in the
+// gaps, which are outside every capture. No persist or commit command has been
+// found in the four config binaries (§7.1: cmdscan over ALL of .text finds
+// exactly A1 12, A0 11, A1 02, A1 13 and no others).
+void noteOnPersistence() {
+    std::puts(
+      "\nThis was verified by reading the device back, so it is what the mouse\n"
+      "holds now. It is NOT evidence that the setting survives unplugging: in\n"
+      "the capture run the vendor's own writes were gone by the next session in\n"
+      "five gaps out of six. If it matters, unplug, replug and `egg-config read`.");
+}
+
 // ---------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------
@@ -262,10 +291,41 @@ bool saveRecord(const std::string& path, const std::vector<std::uint8_t>& r) {
     return static_cast<bool>(f);
 }
 
+// §4.1: "Save a known-good blob to disk on first connect."
+//
+// The home directory, not the working directory, and deliberately: a blob whose
+// location depends on where you happened to be standing is not an undo you can
+// find in six months. One well-known path, written once, never overwritten.
+std::string defaultVaultPath() {
+    const char* home = std::getenv("HOME");
+    return home ? std::string(home) + "/.egg-mouse-known-good.bin"
+                : std::string(".egg-mouse-known-good.bin");
+}
+
+// Say what the vault did, once, after a session that read something. Silence
+// would make the difference between "we have an undo" and "we do not" invisible
+// -- and that difference is the whole reason the file exists.
+void reportVault(const ConfigSession& s, const FileRecordVault& v) {
+    if (s.justStored()) {
+        std::printf("\nsaved the first known-good record to %s (§4.1).\n"
+                    "This file is never overwritten. `egg-config restore` it if\n"
+                    "settings are ever lost -- including by a firmware flash,\n"
+                    "since A1 13 is both Factory Reset and the updater's last\n"
+                    "command and we cannot yet tell whether it means the same in\n"
+                    "both places.\n", v.where().c_str());
+    } else if (!v.holds()) {
+        std::printf("\n*** NO known-good record is saved");
+        if (!v.lastError().empty())
+            std::printf(": %s", v.lastError().c_str());
+        std::printf(".\n    Settings lost from here would not be recoverable from disk.\n");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Read-only commands
 // ---------------------------------------------------------------------------
-int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy) {
+int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy,
+            const std::string& vaultPath) {
     Log log(verbose);
     auto dev = Device::open(kProductIdApplication, log);
     if (!dev) return 1;
@@ -273,6 +333,8 @@ int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy) {
     Transport t(*dev, kConfigBusy, log);
     DeviceConfigLink link(t, log);
     ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
 
     std::vector<std::uint8_t> rec;
     Result r = Result::Ok;
@@ -291,6 +353,7 @@ int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy) {
         std::printf("\nsaved all %zu bytes (frame included, not just the payload) to %s\n",
                     rec.size(), savePath.c_str());
     }
+    reportVault(s, vault);
     return 0;
 }
 
@@ -326,7 +389,8 @@ int cmdDiff(const std::string& a, const std::string& b) {
 // ---------------------------------------------------------------------------
 // Writing commands
 // ---------------------------------------------------------------------------
-int cmdFactoryReset(bool verbose, bool yes, UnknownBytes policy) {
+int cmdFactoryReset(bool verbose, bool yes, UnknownBytes policy,
+                    const std::string& vaultPath) {
     if (!yes) {
         std::puts("factory-reset restores the DEVICE's own defaults and loses every\n"
                   "setting on the mouse. It does not touch firmware. Re-run with --yes.");
@@ -338,12 +402,15 @@ int cmdFactoryReset(bool verbose, bool yes, UnknownBytes policy) {
     Transport t(*dev, kConfigBusy, log);
     DeviceConfigLink link(t, log);
     ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
 
     // §4.1: "Never write after a failed read." A reset is still a write, and it
     // is the one write whose undo is the file we are about to save.
     std::vector<std::uint8_t> before;
     Result r = Result::Ok;
     if (!s.read(before, r)) { explain(r); return rcFor(r); }
+    reportVault(s, vault);
 
     std::puts("read ok. saving the pre-reset record to egg-before-reset.bin");
     if (!saveRecord("egg-before-reset.bin", before)) {
@@ -463,7 +530,8 @@ int cmdEncode(const std::string& field, const std::string& value,
 }
 
 int cmdSet(const std::string& field, const std::string& value,
-           bool verbose, bool yes, UnknownBytes policy) {
+           bool verbose, bool yes, UnknownBytes policy,
+           const std::string& vaultPath) {
     long v = 0;
     std::uint8_t encoded = 0;
     const Settable* f = resolve(field, value, v, encoded, true);
@@ -497,11 +565,14 @@ int cmdSet(const std::string& field, const std::string& value,
     Transport t(*dev, kConfigBusy, log);
     DeviceConfigLink link(t, log);
     ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
 
     // Everything §4.1 requires happens inside this one call: read, validate,
     // read-modify-write, self-check the frame before it goes out, write, read
     // back, verify the DATA rather than the acknowledgement.
     SetOutcome o = s.set(*f, encoded);
+    reportVault(s, vault);
 
     if (!o.before.empty())
         warnIfActiveStageWouldBeOutOfRange(o.before, *f, v);
@@ -529,10 +600,12 @@ int cmdSet(const std::string& field, const std::string& value,
                     "      before trusting this field.\n",
                     changed, o.weChanged.size());
     std::printf("\n%s = %ld confirmed on the device.\n", f->name, v);
+    noteOnPersistence();
     return 0;
 }
 
-int cmdRestore(const std::string& path, bool verbose, bool yes, UnknownBytes policy) {
+int cmdRestore(const std::string& path, bool verbose, bool yes, UnknownBytes policy,
+               const std::string& vaultPath) {
     std::vector<std::uint8_t> want;
     if (!loadRecord(path, want)) return 1;
     if (!yes) {
@@ -546,8 +619,11 @@ int cmdRestore(const std::string& path, bool verbose, bool yes, UnknownBytes pol
     Transport t(*dev, kConfigBusy, log);
     DeviceConfigLink link(t, log);
     ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
 
     RestoreOutcome o = s.restore(want);
+    reportVault(s, vault);
 
     if (!o.before.empty())
         printDiff(o.incoming, "on the device now", path.c_str());
@@ -579,6 +655,7 @@ int cmdRestore(const std::string& path, bool verbose, bool yes, UnknownBytes pol
         return rcFor(o.result);
     }
     std::puts("\nverified: the device holds exactly what was sent.");
+    noteOnPersistence();
     return 0;
 }
 
@@ -588,12 +665,14 @@ int main(int argc, char** argv) {
     bool verbose = false, yes = false;
     std::string save;
     UnknownBytes policy = kDefaultUnknownBytes;
+    std::string vaultPath = defaultVaultPath();
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "-v" || a == "--verbose") verbose = true;
         else if (a == "--yes") yes = true;
         else if (a == "--save" && i + 1 < argc) save = argv[++i];
+        else if (a == "--vault" && i + 1 < argc) vaultPath = argv[++i];
         else if (a.rfind("--unknown-bytes=", 0) == 0) {
             // No silent fallback. A mistyped policy would otherwise choose one
             // of two different byte streams without saying so.
@@ -608,13 +687,14 @@ int main(int argc, char** argv) {
     if (args.empty()) { usage(); return 0; }
     const std::string& cmd = args[0];
     if (cmd == "devices") return cmdDevices();
-    if (cmd == "read")    return cmdRead(verbose, save, policy);
+    if (cmd == "read")    return cmdRead(verbose, save, policy, vaultPath);
     if (cmd == "info")    return cmdInfo(verbose);
-    if (cmd == "factory-reset") return cmdFactoryReset(verbose, yes, policy);
-    if (cmd == "restore" && args.size() > 1) return cmdRestore(args[1], verbose, yes, policy);
+    if (cmd == "factory-reset") return cmdFactoryReset(verbose, yes, policy, vaultPath);
+    if (cmd == "restore" && args.size() > 1)
+        return cmdRestore(args[1], verbose, yes, policy, vaultPath);
     if (cmd == "diff" && args.size() > 2)    return cmdDiff(args[1], args[2]);
     if (cmd == "set" && args.size() > 2)
-        return cmdSet(args[1], args[2], verbose, yes, policy);
+        return cmdSet(args[1], args[2], verbose, yes, policy, vaultPath);
     if (cmd == "encode" && args.size() == 5)
         return cmdEncode(args[1], args[2], args[3], args[4], policy);
     if (cmd == "set") { listSettable(); return 2; }

@@ -146,55 +146,50 @@ class Replay(unittest.TestCase):
                     "%s write %d (%s=%s): differs from the vendor at record %s"
                     % (capture, i, field, value, [hex(x) for x in d]))
 
-    def test_the_only_divergence_from_the_vendor_is_record_0x01(self):
-        """The one byte where we deliberately do not match, stated as a claim.
+    def test_the_compiled_in_default_matches_the_recorded_decision(self):
+        """Which policy is compiled in must be a visible, deliberate choice.
 
-        The device REPORTS 0x80 at record 0x01. On its first write after a read
-        the vendor sends 0x00 there -- it does not preserve what it was given.
-        We do preserve it, because §1.3 says read-modify-write keeps bytes whose
-        meaning is unknown, and 0x01's meaning is unknown.
-
-        So this is not a bug to fix quietly; it is an open decision for the owner,
-        recorded in working-memory.md. What the test pins down is the shape of
-        the divergence: it happens ONLY where the starting record came from a
-        device read, only at record 0x01, and nowhere else in 1024 bytes. If it
-        ever spreads to another byte, or shows up between two vendor writes,
-        that is new behaviour and this test fails.
+        The default was flipped to MatchVendor on 2026-09-05 (ConfigRecord.h
+        carries the evidence and the one-line reversal). This test exists so
+        that flipping it back is something a person did on purpose, not
+        something that drifted -- the two explicit-policy tests above already
+        prove BOTH arms work, so nothing here is about correctness. It is about
+        the default being stated in two places that must agree.
         """
-        seen_read_start, seen_write_start = 0, 0
+        before, after = before_after("02-basic", 0)
+        self.assertEqual(before[PAYLOAD_OFFSET + 1], 0x80,
+                         "this case must start from a record reporting 0x80, "
+                         "or it cannot tell the two policies apart")
+        got = self.encode(before, "polling", "125")            # no --unknown-bytes
+        vendor = self.encode(before, "polling", "125", policy="vendor")
+        preserve = self.encode(before, "polling", "125", policy="preserve")
+        self.assertNotEqual(vendor, preserve, "the two arms produced identical "
+                            "bytes, so this test cannot distinguish them")
+        self.assertEqual(
+            got, vendor,
+            "the compiled-in default is no longer MatchVendor. If that was "
+            "deliberate, update ConfigRecord.h's comment and this test together "
+            "-- they are the two places the decision is written down.")
+        self.assertEqual(got[PAYLOAD_OFFSET + 1], 0x00)
+        self.assertEqual(after[PAYLOAD_OFFSET + 1], 0x00,
+                         "and the vendor's own frame carries 0x00 there")
+
+    def test_the_default_never_differs_from_the_vendor_outside_the_four_bytes(self):
+        """True under EITHER default, so it survives the decision being changed.
+
+        This is the assertion that used to be written as "differs only at record
+        0x01", which was a statement about one particular default rather than
+        about the code. Whichever arm is compiled in, the vendor's frame and
+        ours may disagree only inside 0x01..0x04 and nowhere else in 1024 bytes.
+        """
         for capture, i, field, value in CASES:
             before, after = before_after(capture, i)
             got = self.encode(before, field, value)
             n = min(len(got), len(after))
             d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
-            if i == 0:                       # started from the device's own read
-                seen_read_start += 1
-                # ...and only when the device actually reported 0x80 there. In
-                # 04-buttons it reported 0x00, because that section followed
-                # 03-sensor without the mouse being power-cycled in between --
-                # the one capture in the run that opened where its predecessor
-                # ended. With nothing to preserve we match the vendor exactly,
-                # which is the correct behaviour and worth asserting rather than
-                # papering over with a looser rule.
-                if before[PAYLOAD_OFFSET + 1] == 0x80:
-                    self.assertEqual(d, [0x01],
-                                     "%s write 0: expected to differ only at "
-                                     "record 0x01, differs at %s"
-                                     % (capture, [hex(x) for x in d]))
-                    self.assertEqual(got[PAYLOAD_OFFSET + 1], 0x80)
-                    self.assertEqual(after[PAYLOAD_OFFSET + 1], 0x00)
-                else:
-                    self.assertEqual(before[PAYLOAD_OFFSET + 1], 0x00)
-                    self.assertEqual(d, [], "%s write 0 started from a record "
-                                     "already carrying 0x00 at 0x01, so we "
-                                     "should match exactly; differs at %s"
-                                     % (capture, [hex(x) for x in d]))
-            else:                            # started from a previous vendor write
-                seen_write_start += 1
-                self.assertEqual(d, [], "%s write %d differs at %s"
-                                 % (capture, i, [hex(x) for x in d]))
-        self.assertGreaterEqual(seen_read_start, 3)
-        self.assertGreaterEqual(seen_write_start, 25)
+            self.assertTrue(set(d) <= {0x01, 0x02, 0x03, 0x04},
+                            "%s write %d (%s=%s): differs from the vendor at %s"
+                            % (capture, i, field, value, [hex(x) for x in d]))
 
     def test_the_excluded_case_really_does_move_two_bytes(self):
         """The exclusion above is a claim about the vendor. Check it, or it is
@@ -208,7 +203,7 @@ class Replay(unittest.TestCase):
                              "expected the vendor to move both the active stage "
                              "and the count; it moved %s" % [hex(m) for m in moved])
             # and ours moves only the one, which is exactly the divergence
-            got = self.encode(before, field, value)
+            got = self.encode(before, field, value, policy="preserve")
             ours = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(got)))
                     if before[k] != got[k]]
             self.assertEqual(ours, [0x0e])
@@ -296,11 +291,25 @@ class Replay(unittest.TestCase):
                                  "--unknown-bytes=%r still wrote a file" % bad)
 
     def test_read_modify_write_preserves_everything_else(self):
-        """§1.3: bytes we do not understand must come back unchanged."""
+        """§1.3: bytes we do not understand must come back unchanged.
+
+        Stated as "the field byte, plus at most the four bytes the policy is
+        allowed to touch, and NOTHING else in 1024" so that it holds under
+        either default. Under --unknown-bytes=preserve it is exactly [0x05],
+        which the arm-specific test below pins.
+        """
         before, _ = before_after("02-basic", 0)
         got = self.encode(before, "polling", "1000")
         moved = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(got)))
                  if before[k] != got[k]]
+        self.assertIn(0x05, moved)
+        self.assertTrue(set(moved) <= {0x05, 0x01, 0x02, 0x03, 0x04},
+                        "moved %s" % [hex(m) for m in moved])
+
+        # The pure read-modify-write arm moves the field byte and nothing else.
+        only = self.encode(before, "polling", "1000", policy="preserve")
+        moved = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(only)))
+                 if before[k] != only[k]]
         self.assertEqual(moved, [0x05])
 
 

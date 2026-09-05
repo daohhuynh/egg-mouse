@@ -23,11 +23,33 @@ namespace egg::cfg {
 // frames carry 00 00 00 00 there, while the device reports 80 00 00 00.
 //
 // [O] windows-run, all eleven captures: 73 A0 11 writes, EVERY ONE has 0x00 at
-//     record 0x01. Nine large reads: eight report 0x80, and the one that
-//     reports 0x00 is 04-buttons, the only section captured without replugging
-//     the mouse first -- i.e. the one still holding what the vendor had just
-//     written. So the device does not restore 0x80 after a write; it comes
-//     back when the record reloads from firmware defaults.
+//     record 0x01. Nine large reads: eight report 0x80, one reports 0x00.
+//
+//     AN EARLIER VERSION OF THIS COMMENT EXPLAINED THAT ONE READ BY SAYING
+//     04-buttons was "the only section captured without replugging the mouse
+//     first". That was wrong, and machine-checking it is what found the real
+//     pattern. The device's USB address is 4 in every capture from 00 through
+//     07 and only changes at the flash captures (5, 6, 7, 8) -- so NO section
+//     in that range was preceded by a replug, and replugging cannot be what
+//     distinguishes 04-buttons from the rest.
+//
+//     What actually distinguishes it, over all nine reads, with no exception:
+//
+//       record 0x01 == 0x80  <=>  the record equals firmware defaults
+//       record 0x01 == 0x00  <=>  the record holds what a host wrote
+//
+//     04-buttons is the ONLY read whose record still matched the previous
+//     session's last write (0 of 115 bytes differ), and it is also the shortest
+//     gap between sessions (124 s; the others are 231-5501 s). Every other read
+//     had reverted to 01-baseline exactly. 10-postflash reads 0x80 and differs
+//     from 01-baseline at record 0x71 alone, which is the byte whose DEFAULT
+//     appears to differ between firmware 1.07 and 1.10 -- so it is at defaults
+//     too, for its own firmware.
+//
+//     [G] why the settings reverted. Idle reload from non-volatile storage
+//     fits; so does something in the gaps, which are outside every capture. The
+//     correlation is n=9 with no counter-example and it is still a correlation.
+//     It is NOT a basis for a write (§1.3) and nothing here depends on it.
 //
 // THE TENSION, stated rather than resolved silently. §1.3 says "Never write a
 // byte whose meaning is [G]... Do not clean up, zero, or normalise unknown
@@ -52,10 +74,48 @@ const char* describe(UnknownBytes p);
 // leave the choice implicit by accident. Every executable and every test reads
 // its default from here.
 //
-// Currently Preserve. Both arms are implemented, both are tested, and
-// Tests/test_config_replay.py scores BOTH against the vendor's 33 captured
-// writes -- so this constant is a decision, not a dependency.
-inline constexpr UnknownBytes kDefaultUnknownBytes = UnknownBytes::Preserve;
+// DECIDED 2026-09-05: MatchVendor. the owner's own reading ("shouldn't we do what
+// they do? what if that's how the mouse recognizes the right thing"), and an
+// independent adversarial review reached the same answer from the evidence:
+//
+//   [D] NO vendor config tool can write record 0x01-0x04, in any version. The
+//       serializer was re-decoded in all four: cfg107 0x4042d0-0x4045dc,
+//       cfg104 and cfg101 0x4042c0-0x4045cc, cfg100 0x4057b0-0x405abd (a
+//       different code base, dest register %edx). 111 stores each, all
+//       distinct, max record 0x72, holes {0x01,0x02,0x03,0x04} in every one.
+//       The zeros are residue of the memset at 0x4041e7.
+//   [D] Nothing in cfg107 ever READS the byte either -- a whole-file 32-bit
+//       literal scan for the record base finds 2 hits for base+0 and ZERO for
+//       base+1..base+4. So no GUI control can show or set it, which closes
+//       §1.2a's "check the user-visible surface" test.
+//   [O] 73 of 73 host writes carry 0x00. Zero host frames, from any tool, any
+//       version, have ever carried 0x80.
+//
+// So both options write a byte whose meaning is [G] -- the frame is 1041 bytes
+// and this byte is inside it. §1.3 assumes echoing a read back is the null
+// action, and here that assumption is false. Given the choice between the value
+// every observed host sends and a value no host has ever sent, on a device with
+// no spare and an undo we have not confirmed works, we send what is observed.
+//
+// WHAT WE GIVE UP, said plainly: if record 0x01 is a persisted device-side bit,
+// we clear it on every write. The vendor does too, on every APPLY, and has
+// through a firmware flash and a factory reset -- but "the vendor does it" is
+// not a proof that it is harmless, and if the vendor's zeroing is WHY its
+// writes do not persist, we have copied that too.
+//
+// TO REVERSE IT: change this one line to UnknownBytes::Preserve. Both arms are
+// implemented and both are scored against the vendor's 33 captured writes by
+// Tests/test_config_replay.py, so nothing else needs to move. Under MatchVendor
+// we reproduce all 33 byte-for-byte across all 1024 payload bytes; under
+// Preserve we differ at record 0x01 alone.
+//
+// WHAT WOULD UPGRADE THIS FROM A DEFAULT TO A DERIVATION: FWFILE id 140 in
+// updater 1.10 is the firmware that is actually on the mouse, and it contains
+// the A0 11 handler. If that handler can be shown to load offset 0x01 of the
+// received record, this needs real analysis rather than a default; if it
+// provably never reads it, Preserve becomes free and §1.3 wins outright. That
+// work is static and available now -- see working-memory.md.
+inline constexpr UnknownBytes kDefaultUnknownBytes = UnknownBytes::MatchVendor;
 
 // "preserve" / "vendor". Returns false for anything else rather than falling
 // back to a default: a mistyped policy silently choosing one of two different

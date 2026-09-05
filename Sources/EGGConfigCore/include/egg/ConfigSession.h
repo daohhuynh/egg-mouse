@@ -19,6 +19,7 @@
 
 #include "egg/ConfigLink.h"
 #include "egg/ConfigRecord.h"
+#include "egg/RecordVault.h"
 
 #include <cstdint>
 #include <string>
@@ -82,6 +83,18 @@ public:
     ConfigSession(ConfigLink& link, UnknownBytes policy, Log* log = nullptr)
         : link_(link), policy_(policy), log_(log) {}
 
+    // §4.1: "Save a known-good blob to disk on first connect." Attaching it
+    // here rather than at a call site means EVERY path that reads -- read, set,
+    // restore, factory-reset -- preserves the first good record it sees. A
+    // caller cannot forget, which is the entire value: the run where nobody
+    // remembered to pass --save is the run where it mattered.
+    void setVault(RecordVault* v) { vault_ = v; }
+    RecordVault* vault() const { return vault_; }
+
+    // True if the last read() was the one that filled the vault. Lets a caller
+    // announce the save once instead of on every read.
+    bool justStored() const { return justStored_; }
+
     UnknownBytes policy() const { return policy_; }
 
     // A validated read. Returns false on either a transport failure or an
@@ -123,6 +136,8 @@ private:
     ConfigLink&  link_;
     UnknownBytes policy_;
     Log*         log_;
+    RecordVault* vault_{nullptr};
+    bool         justStored_{false};
 };
 
 }  // namespace egg::cfg
