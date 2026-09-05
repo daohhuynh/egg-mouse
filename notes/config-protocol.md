@@ -1893,7 +1893,8 @@ One byte outside the record also takes bit ops — `0x57f335`, at `0x4051e7`,
 `0x40524e`, `0x4052af`, `0x405310`, `0x40866f`, `0x408680`, `0x408689`, setting
 bits `0x1 0x2 0x4 0x8`. It is **not** a settings byte: the two mirrors are 0x90
 apart (§7) and `0x57f335` is `0x95` past the block-1 base, beyond the object.
-Recorded as an open gap rather than chased here.
+**Identified 2026-09-05 — it is the KEYBOARD KEY dialog's modifier byte, in
+standard USB HID encoding. §7.12.**
 
 cfg107 writes **only bits 0 and 4**. Bits 1,2,3,5,6,7 are never set or cleared
 by the config tool, so they are §1.3 read-modify-write territory: preserve them.
@@ -2225,3 +2226,63 @@ stage 4's Y value, sitting exactly where the flag-first grouping puts it. Under
 the old flag-last reading those two bytes would have been stage 4's X. Nothing
 was fitted to make that come out: the phase was fixed from the serializer before
 these bytes were looked at.
+
+## 7.12 The keyboard-key modifiers are a standard HID modifier byte  [D]
+
+`0x0057f335` was recorded in §7.8 as a byte outside the settings record that
+takes bit operations and was **unidentified** — four checkboxes reaching a global
+we could not name, which is the kind of loose end that should not survive into a
+config write path. It is the KEYBOARD KEY dialog's modifier set.
+
+`0x405180`–`0x405330` reads four checkboxes and, for each, appends a caption to
+a display string and ORs one bit:
+
+| member | caption pushed | bit ORed into `0x57f335` | at |
+| --- | --- | --- | --- |
+| `0x14c` | `'Shift+'` (`0x556a94`) | `0x02` | `4051e7` |
+| `0x1c0` | `'CTRL+'` (`0x556aa4`) | `0x01` | `40524e` |
+| `0x234` | `'Win+'` (`0x556ab0`) | `0x08` | `4052af` |
+| `0x2a8` | `'Alt+'` (`0x556abc`) | `0x04` | `405310` |
+
+Those are dialog 152's four controls — IDC 1075 SHIFT, 1076 CTRL, 1077 WIN,
+1078 ALT — and the owner confirmed on 2026-09-05 that those four are the only ticks on
+that dialog, with no "no modifier" control.
+
+**The encoding is the USB HID keyboard modifier byte, unchanged:**
+
+    bit 0  0x01  LeftCtrl        <- 'CTRL+'
+    bit 1  0x02  LeftShift       <- 'Shift+'
+    bit 2  0x04  LeftAlt         <- 'Alt+'
+    bit 3  0x08  LeftGUI         <- 'Win+'
+
+This is worth stating carefully because it is a **different kind of evidence**
+from the rest of these notes. Everything else here is derived from the vendor's
+bytes and corroborated only by the vendor's other bytes. This one matches an
+external, published standard exactly, in all four positions, with no
+rearrangement — which is far more than chance and is not something Endgame's
+code could have told us on its own. It also means the low nibble only: no
+right-hand modifiers are offered, so bits 4–7 are never set here.
+
+**Consequence for `05-buttonmapping`.** The button entry's bytes `+2`–`+5`
+(§7.7, §7.11) are the fields the mapping page writes and are the last `[G]` in
+the record. §7.7's evidence is that `obj[0x30 + 8k]` and `obj[0x32 + 8k]` — entry
+`+2` and `+4` — are both zeroed on that path, so a keyboard mapping has to put
+its keycode and its modifier byte there. From the baseline, mask `0x10` is
+FORWARD, which is entry 3, which is **records `0x4c`–`0x52`**.
+
+`log.txt` 05 lines 10–12 map Forward to keyboard A with no modifier, with CTRL,
+and with CTRL+SHIFT. Predicted modifier byte, somewhere in records `0x4e`–`0x51`:
+
+    line 10   no modifier      0x00
+    line 11   CTRL             0x01
+    line 12   CTRL + SHIFT     0x03
+
+and the keycode for `A` should be `0x04` if the keycode is also HID usage rather
+than a Windows virtual-key code (`VK_A` is `0x41`, so the two are easy to tell
+apart and the same three lines decide it).
+
+**REFUTED IF** those three lines move no byte in records `0x4c`–`0x52`, or the
+modifier values are not `0x00`/`0x01`/`0x03`, or CTRL+SHIFT is not the bitwise
+OR of the CTRL and SHIFT cases. A refutation of the last clause would mean the
+field is an enumerated combination rather than a bitfield, which would make
+every unobserved combination unwritable rather than merely underived.

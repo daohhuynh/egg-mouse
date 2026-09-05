@@ -194,6 +194,21 @@
     "5": 12
    },
    "refuted_if": "a LEFT multiclick line moves no byte at record 0x3d, or the value stored is not the number shown on the slider (which would mean an offset or scale we have not derived). NOTE the 0..25 range is the owner's observation, not derived: if minimum or maximum turn out to be other numbers, that refutes the RANGE, not the byte."
+  },
+  {
+   "id": "keyboard-modifier-is-hid",
+   "kind": "somewhere_in",
+   "record_first": 76,
+   "record_last": 82,
+   "cite": "config-protocol.md §7.12; cfg107 0x4051e7 Shift=0x02, 0x40524e CTRL=0x01, 0x4052af Win=0x08, 0x405310 Alt=0x04 into 0x57f335. FORWARD is mask 0x10 = button entry 3 = records 0x4c-0x52 (§7.11)",
+   "claim": "the keyboard-key modifier is a STANDARD USB HID modifier byte (Ctrl 0x01, Shift 0x02, Alt 0x04, GUI 0x08) and it lands somewhere in the FORWARD button's 7-byte entry, records 0x4c-0x52",
+   "expect_by_line": {
+    "10": 0,
+    "11": 1,
+    "12": 3
+   },
+   "match_log": "keyboard key",
+   "refuted_if": "no single offset in records 0x4c-0x52 takes 0x00 then 0x01 then 0x03 across lines 10, 11 and 12. In particular CTRL+SHIFT must be the bitwise OR of the CTRL and SHIFT cases -- if it is some other value the field is an enumerated combination rather than a bitfield, which would make every unobserved combination unwritable rather than merely underived."
   }
  ]
 }

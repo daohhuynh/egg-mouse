@@ -123,7 +123,65 @@ def score_masked(p, relevant, off):
     return ("REFUTED" if bad else "CONFIRMED" if ok else "UNTESTED"), rows
 
 
+def score_somewhere_in(doc, p):
+    """kind "somewhere_in": we know which RECORD RANGE a field lives in but not
+    which byte of it. The claim is that ONE offset in that range takes the
+    predicted value on every listed line -- the same offset each time.
+
+    That last clause is what makes this worth scoring. "Some byte somewhere took
+    0x01" is nearly unfalsifiable over a seven-byte range; "one fixed offset took
+    0x00 then 0x01 then 0x03, in that order, on those three lines" is not. On
+    success the offset is reported, which is the thing we actually wanted."""
+    lo, hi = p["record_first"], p["record_last"]
+    want = p["expect_by_line"]
+    # every observation on a line this prediction names, anywhere in the range
+    obs = []
+    for off in range(lo, hi + 1):
+        for fld, ob in observations_at(doc, off):
+            if p["match_log"].lower() in (ob.get("action") or "").lower():
+                obs.append((fld, ob))
+    seen = {}
+    for fld, ob in obs:
+        seen[str(ob.get("line"))] = (fld, ob)
+    lines = [l for l in want if l in seen]
+    if not lines:
+        return "UNTESTED", ["no observation in records 0x%02x-0x%02x on any line"
+                            " mentioning %r" % (lo, hi, p["match_log"])]
+    hits = []
+    for off in range(lo, hi + 1):
+        ok = True
+        for l in lines:
+            fld, ob = seen[l]
+            got = byte_at(ob.get("new"), off - fld["payload_offset"])
+            if got != want[l]:
+                ok = False
+                break
+        if ok:
+            hits.append(off)
+    rows = ["  lines used: %s   (of %d predicted)" % (", ".join(sorted(lines)), len(want))]
+    if len(lines) < len(want):
+        rows.append("  ?  only %d of %d lines are in this capture -- a partial test"
+                    % (len(lines), len(want)))
+    for l in sorted(lines):
+        fld, ob = seen[l]
+        run = " ".join("%02x" % byte_at(ob.get("new"), o - fld["payload_offset"])
+                       if byte_at(ob.get("new"), o - fld["payload_offset"]) is not None
+                       else "--" for o in range(lo, hi + 1))
+        rows.append("     line %-3s %-26s range reads %s, wanted %02x somewhere"
+                    % (l, ob.get("action"), run, want[l]))
+    if hits:
+        rows.insert(0, "  ok  a single offset satisfies every line: %s"
+                       % ", ".join("record 0x%02x" % h for h in hits))
+        return "CONFIRMED", rows
+    rows.insert(0, "  XX  NO single offset in 0x%02x-0x%02x takes the predicted"
+                   " value on every line" % (lo, hi))
+    return "REFUTED", rows
+
+
 def score_one(doc, p):
+    if p.get("kind") == "somewhere_in":
+        v, rows = score_somewhere_in(doc, p)
+        return v, rows, []
     off = p["record_offset"]
     hits = observations_at(doc, off)
     rows, verdict = [], None
@@ -139,6 +197,9 @@ def score_one(doc, p):
                  " the capture does not test this" % (off, p["match_log"])], [])
 
     kind = p.get("kind", "value")
+    if kind == "somewhere_in":
+        v, rows = score_somewhere_in(doc, p)
+        return v, rows, []
     if kind in ("bit", "toggle"):
         v, rows = score_bitwise(p, relevant, off)
         return v, rows, []
