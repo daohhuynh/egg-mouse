@@ -71,7 +71,12 @@ CMD_READ = 0x12
 # The session log numbers lines 1..N and never renumbers, because renumbering
 # mid-file is how a log stops matching the capture it describes. So a setting
 # that turns out not to exist still occupies a number and still has no frame
-# behind it. An earlier version of the procedure said to press APPLY anyway with
+# There is a second way to get one, and a re-run makes it common: if a setting
+# is ALREADY at the value the line asks for, the tool greys APPLY out for that
+# too. So a repeated capture attempt will hit this on whichever lines the
+# previous attempt already set, and those lines are not errors either.
+#
+# An earlier version of the procedure said to press APPLY anyway with
 # nothing changed, which would have kept the counts equal -- the owner established at
 # the machine on 2026-09-05 that THE VENDOR TOOL GREYS APPLY OUT UNTIL SOMETHING
 # CHANGES, so that is not available and the log will genuinely have more lines
@@ -82,7 +87,8 @@ CMD_READ = 0x12
 # explicit marker, every drop is printed, and the count check still runs
 # afterwards -- so a wrong drop turns into a refusal rather than a silent
 # relabelling.
-NO_APPLY = re.compile(r"\b(NOT PRESENT|NOT FOUND|NO APPLY|SKIPPED)\b", re.I)
+NO_APPLY = re.compile(r"\b(NOT PRESENT|NOT FOUND|NO APPLY|SKIPPED|ALREADY AT VALUE)\b",
+                      re.I)
 
 # Below this many diffs, "moved on every APPLY" is meaningless -- with two
 # APPLYs every byte that moved at all qualifies.
