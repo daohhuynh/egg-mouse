@@ -104,7 +104,8 @@ def parse_usbpcap(body, endian):
 
 def read(path):
     """Every USBPcap packet in the file, in order, with timestamps in seconds."""
-    buf = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        buf = fh.read()
     tsresol = {}          # interface index -> ticks per second
     iface = 0
     out = []
@@ -172,47 +173,45 @@ class Transfer:
 
 
 def control_transfers(packets):
-    """Reassemble control transfers. The SETUP stage carries the 8-byte request;
-    the payload turns up in a later stage of the SAME IRP, so they are grouped by
-    irpId rather than read one packet at a time."""
-    byirp = {}
-    order = []
+    """Reassemble control transfers.
+
+    Keyed on irpId, but NOT over the whole file. Windows reuses an IRP address
+    as soon as the previous request on it completes -- in 08-flash.pcapng a
+    single address carries 470 packets -- so grouping by irpId alone silently
+    merges hundreds of transfers into one and DROPS every payload but the
+    first. That is how 131 firmware-block writes once decoded as 14.
+
+    A SETUP stage therefore *closes* whatever was open on that irpId and starts
+    a new transfer. Later stages of the same irpId attach to whichever transfer
+    is currently open on it. Order is preserved by emitting on open, not on
+    close, so a transfer whose completion never arrives is still reported --
+    truncated, which is a finding, rather than absent, which is a lie.
+    """
+    open_on_irp = {}
+    out = []
     for p in packets:
         if p.transfer != XFER_CONTROL:
             continue
-        if p.irp not in byirp:
-            byirp[p.irp] = []
-            order.append(p.irp)
-        byirp[p.irp].append(p)
-
-    out = []
-    for irp in order:
-        pkts = byirp[irp]
-        setup = next((q for q in pkts
-                      if q.stage == STAGE_SETUP and len(q.data) >= 8), None)
-        if setup is None:
+        if p.stage == STAGE_SETUP and len(p.data) >= 8:
+            t = Transfer()
+            t.packets = [p]
+            t.ts = p.ts
+            t.device = p.device
+            (t.bmRequestType, t.bRequest, t.wValue, t.wIndex,
+             t.wLength) = struct.unpack_from("<BBHHH", p.data, 0)
+            # OUT (SET_REPORT): USBPcap puts the report in the SAME packet,
+            # right after the 8 setup bytes, so dataLength is 8 + wLength.
+            # IN (GET_REPORT): the report arrives in a later stage.
+            t.data = p.data[8:] if len(p.data) > 8 else b""
+            open_on_irp[p.irp] = t
+            out.append(t)
             continue
-        t = Transfer()
-        t.packets = pkts
-        t.ts = setup.ts
-        t.device = setup.device
-        (t.bmRequestType, t.bRequest, t.wValue, t.wIndex,
-         t.wLength) = struct.unpack_from("<BBHHH", setup.data, 0)
-        # Payload. Two shapes, and missing the first one silently loses every
-        # outbound command in the file:
-        #   OUT (SET_REPORT) -- USBPcap puts the report in the SAME packet as
-        #     the request, immediately after the 8 setup bytes. dataLength is
-        #     8 + wLength, not wLength.
-        #   IN  (GET_REPORT) -- the report arrives in a later stage of the IRP.
-        t.data = b""
-        if len(setup.data) > 8:
-            t.data = setup.data[8:]
-        else:
-            for q in pkts:
-                if q.stage != STAGE_SETUP and q.data:
-                    t.data = q.data
-                    break
-        out.append(t)
+        t = open_on_irp.get(p.irp)
+        if t is None:
+            continue
+        t.packets.append(p)
+        if not t.data and p.data:
+            t.data = p.data
     return out
 
 
