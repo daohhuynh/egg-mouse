@@ -63,13 +63,23 @@ runlimitedto() {
 WP=Sources/EGGFlashCore/src/WritePhase.cpp
 FC=Sources/EGGFlashCore/src/FlashCommands.cpp
 FW=Sources/EGGFlashCore/src/Firmware.cpp
+FWH=Sources/EGGFlashCore/include/egg/Firmware.h
+
+# ONE list. Backup and restore are both derived from it, because they used to be
+# two hardcoded lists and the second one drifted the moment a fourth file was
+# added: a mutant editing Firmware.h applied, restore() did not know that file
+# existed, and the mutation survived into every LATER mutant -- which then made
+# two correctly-labelled equivalent mutants look wrongly labelled. The harness
+# accused itself of a bug it did not have. Add a file here and nowhere else.
+MUTABLE=("$WP" "$FC" "$FW" "$FWH")
+
 BACKUP=$(mktemp -d)
-cp "$WP" "$FC" "$FW" "$BACKUP/"
+cp "${MUTABLE[@]}" "$BACKUP/"
+
 restore() {
-  cp "$BACKUP/WritePhase.cpp" "$WP"
-  cp "$BACKUP/FlashCommands.cpp" "$FC"
-  cp "$BACKUP/Firmware.cpp" "$FW"
-  touch "$WP" "$FC" "$FW"
+  local f
+  for f in "${MUTABLE[@]}"; do cp "$BACKUP/$(basename "$f")" "$f"; done
+  touch "${MUTABLE[@]}"
 }
 trap 'restore; cmake --build build --target test-flash >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT
 
@@ -216,6 +226,22 @@ mutate kill "whole-image checksum truncated to 16 bits" "$FW" \
     return sum;|||    std::uint16_t sum = 0;
     for (std::uint8_t b : image) sum = static_cast<std::uint16_t>(sum + b);
     return sum;  // MUTANT'
+
+# CLAUDE.md §4.3 lists four invariants to assert, and the fourth is "the
+# firmware resource identifier is never anything but the single hardcoded
+# constant". Nothing measured it until now. Updater 1.10 carries six FWFILE
+# resources, all 66,560 bytes, all 65 blocks; id 142 is the nastiest wrong
+# answer because it changes on exactly the releases 140 does, which is the
+# pattern that invites "the updater must use both". It does not -- one
+# `push $0x8c` at 0x0040320c names 140 and nothing else can name FWFILE at all
+# (notes/flash-wire-observed.md §5).
+#
+# Picking 142 yields a right-sized, right-shaped image that would produce valid
+# per-block checksums and read back exactly as written. §2: "nothing downstream
+# of us catches a wrong-but-well-formed image." So the SHA-256 pin is the ONLY
+# thing between this mutant and flashing another product's firmware.
+mutate kill "extracts FWFILE 142 instead of 140" "$FWH" \
+'inline constexpr std::uint16_t kResourceName = 140;|||inline constexpr std::uint16_t kResourceName = 142;  // MUTANT'
 
 # --- Equivalent mutants. These MUST survive. -------------------------------
 
