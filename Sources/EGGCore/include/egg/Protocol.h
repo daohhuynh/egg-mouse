@@ -115,16 +115,71 @@ struct BusyPolicy {
     std::uint8_t busyStatus;      // resp[1] meaning "ask again"
     unsigned     initialSleepMs;  // before the first re-read
     unsigned     stepMs;          // added per pass
-    unsigned     budgetMs;        // total, then give up
+    unsigned     maxPasses;       // how many re-reads, then give up
 };
 
-// [D] updater 1.10 FUN_00401330: cmpb $0x4 @0x40135d, cmpl $0x7d0 @0x40139d,
-//     no initial sleep. Confirmed in fw104 FUN_00401ed0.
-inline constexpr BusyPolicy kUpdaterBusy{0x04, 0, 100, 2000};
+// CORRECTED 2026-09-05 -- THE CONSTANT WAS RIGHT AND ITS MEANING WAS WRONG.
+// This field used to be `budgetMs`, holding 1000 for config and 2000 for the
+// updater, taken from the vendor's `cmpl $0x3e8` and `cmpl $0x7d0` and read as
+// a millisecond budget. It is not one. The vendor's counter is incremented by a
+// CONSTANT 0x64 once per pass and compared against those values, so they are
+// pass counts of 10 and 20, not elapsed time:
+//
+//   config 1.07  0x4039ce  8b 45 f8        movl  -0x8(%ebp),%eax
+//                0x4039d1  83 c0 64        addl  $0x64,%eax      <- constant
+//                0x4039d7  3d e8 03 00 00  cmpl  $0x3e8,%eax     <- 1000/100 = 10
+//   updater 1.10 0x40139a  83 c6 64        addl  $0x64,%esi
+//                0x40139d  81 fe d0 07 ..  cmpl  $0x7d0,%esi     <- 2000/100 = 20
+//
+// Read as milliseconds against our growing step, the config loop gave up after
+// 5 reads spanning 1100 ms where the vendor allows 10 spanning ~4.6 s, and the
+// updater after 7 spanning 2100 ms where the vendor allows 20. That direction
+// of error is the dangerous one: §4.2 says that after the erase, giving up IS
+// the bug, and this policy is what the flasher's post-erase loop will poll on.
+//
+// Recovered from raw bytes per §1.2b, not from a decompiled view.
+inline constexpr BusyPolicy kUpdaterBusy{0x04, 0, 100, 20};
+inline constexpr BusyPolicy kConfigBusy{0x03, 100, 100, 10};
 
-// [D] config 1.07 FUN_00403920: cmpl $0x3 @0x40396e, cmpl $0x3e8 @0x4039d7,
-//     fixed Sleep(0x64) before the first re-read.
-inline constexpr BusyPolicy kConfigBusy{0x03, 100, 100, 1000};
+// ---------------------------------------------------------------------------
+// Per-command delay before the first status read
+// ---------------------------------------------------------------------------
+// THE VENDOR TIMES EACH COMMAND SEPARATELY AND WE DID NOT. egg-config applied
+// one 100 ms delay to everything; the flasher already got this right and passes
+// a delay per command (WritePhase.cpp roundTrip). The two halves of the project
+// disagreed and the config half is the one about to touch the device.
+//
+// [D] config 1.07, each a `push imm` immediately before `call *0x52d22c`, which
+// rabin2 resolves to KERNEL32!Sleep. Verified from raw bytes 2026-09-05:
+//   A1 02  0x40467b  6a 32              Sleep(50)
+//   A1 12  0x403b96  6a 50              Sleep(80)
+//   A1 13  0x4047af  68 4c 04 00 00     Sleep(1100)
+//   A0 11  0x404248  0f b7 55 08        movzwl 0x8(%ebp) -- caller-supplied
+//
+// [O] and the wire agrees, across all ten windows-run captures, every gap being
+// the Sleep plus ~10-15 ms of transfer:
+//   a1 02  n=9   56.5 - 64.3 ms      a1 12  n=9   91.3 - 93.3 ms
+//   a1 13  n=3  911.3 - 1110.1 ms    a0 11  n=73 302.0 - 317.7 ms
+//
+// A1 13 is the one that mattered: we polled at 100 ms, eleven times sooner than
+// any vendor code path, and our whole poll window closed at 1100 ms -- exactly
+// where the config tool's FIRST read lands.
+inline constexpr unsigned kDelaySmallQuery   = 50;
+inline constexpr unsigned kDelayReadRequest  = 80;
+inline constexpr unsigned kDelayFactoryReset = 1100;
+inline constexpr unsigned kDelayWriteRecord  = 300;   // [O] 302.0-317.7 over 73
+
+// The delay for a config command, or the policy default when we have no cited
+// figure. A [G] delay is not a [G] byte -- it cannot corrupt a record -- but an
+// uncited one still must not masquerade as derived, so anything absent here
+// falls back rather than being invented.
+constexpr unsigned configDelayMs(std::uint8_t command) {
+    return command == 0x02 ? kDelaySmallQuery
+         : command == 0x12 ? kDelayReadRequest
+         : command == 0x13 ? kDelayFactoryReset
+         : command == 0x11 ? kDelayWriteRecord
+         : kConfigBusy.initialSleepMs;
+}
 
 // ---------------------------------------------------------------------------
 // Command spaces -- DISJOINT. Do not read across.

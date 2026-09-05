@@ -22,6 +22,8 @@
 #include "egg/Protocol.h"
 #include "egg/RecordVault.h"
 
+#include <fstream>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -539,6 +541,18 @@ static void testVault() {
         junk[0] = kReportLarge;
         ok("the vault refuses an implausible record offered directly",
            !v.offer(junk) && !v.holds(), v.lastError());
+
+        // AND IT MUST NOT HAVE WRITTEN IT. The comment above says a bad record
+        // "must never reach the vault"; until 2026-09-05 nothing checked that,
+        // and once alreadyGood() started screening for plausibility as well as
+        // length, the post-write check masked a missing pre-write one -- offer()
+        // could write junk, notice afterwards, and still return false. The
+        // return value looked identical and mutants.sh reported the hole.
+        // A rejected offer leaves NO file, not a file we then disown.
+        {
+            std::ifstream probe(p2, std::ios::binary);
+            ok("...and leaves no file behind at all", !probe.good());
+        }
 
         MockConfigDevice dev(ConfigFaults{.implausibleRate = 1.0});
         ConfigSession s(dev, kDefaultUnknownBytes);

@@ -13,8 +13,18 @@ void sleepMs(unsigned ms) {
     if (ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-// config 1.07 0x4038ed / updater 1.10: a failed SetFeature is retried, with
-// Sleep(0x32) = 50 ms before the second attempt, up to four attempts.
+// A failed SetFeature is retried, up to four attempts, with a fixed gap.
+//
+// THE GAP IS NOT THE SAME IN BOTH TOOLS, and this comment used to say it was:
+// it cited "config 1.07 0x4038ed / updater 1.10" for one Sleep(0x32) = 50 ms.
+// Verified from raw bytes 2026-09-05 -- cfg107 0x4038ed is `6a 32` (50 ms) but
+// fw110 0x401312 is `6a 0a` (10 ms). Transport is shared by both executables,
+// so a reader checking the flasher's retry timing against that citation was
+// checking it against a number updater 1.10 does not contain. A false [D] in
+// the file where the derivations live.
+//
+// We use the config figure, 50 ms, which is the slower of the two and so
+// cannot retry sooner than either vendor.
 //
 // The vendor retries only for GetLastError in {0x15, 0x17, 0x1D, 0x57, 0x65B}.
 // Those are Windows error codes and hidapi gives us nothing comparable, so we
@@ -89,7 +99,8 @@ Outcome Transport::send(const std::vector<std::uint8_t>& buf, const char* what) 
     return Outcome::TransportFail;
 }
 
-Reply Transport::receive(std::uint8_t reportId, const char* what) {
+Reply Transport::receive(std::uint8_t reportId, const char* what,
+                         unsigned firstReadDelayMs) {
     Reply r;
     const std::size_t want = wireLength(reportId);
     if (want == 0) {
@@ -99,10 +110,13 @@ Reply Transport::receive(std::uint8_t reportId, const char* what) {
         return r;
     }
 
-    sleepMs(busy_.initialSleepMs);
+    const unsigned firstDelay = (firstReadDelayMs == kUsePolicyDelay)
+                              ? busy_.initialSleepMs : firstReadDelayMs;
+    sleepMs(firstDelay);
 
-    unsigned waited = busy_.initialSleepMs;
-    unsigned step   = busy_.stepMs;
+    unsigned waited  = firstDelay;
+    unsigned step    = busy_.stepMs;
+    unsigned passes  = 0;
 
     for (;;) {
         r.buf.assign(want, 0);
@@ -167,10 +181,17 @@ Reply Transport::receive(std::uint8_t reportId, const char* what) {
             return r;
         }
 
-        if (waited >= busy_.budgetMs) {
-            char b[96];
-            std::snprintf(b, sizeof b, "still busy after %u ms (budget %u ms)",
-                          waited, busy_.budgetMs);
+        // PASSES, NOT MILLISECONDS. The vendor's counter advances by a
+        // constant 0x64 per pass and is compared against 0x3e8 / 0x7d0, so
+        // those are 10 and 20 re-reads -- see Protocol.h. Counting wall time
+        // instead made us give up after 5 reads spanning 1.1 s where the config
+        // tool allows 10 spanning ~4.6 s, and §4.2 makes giving up early the
+        // dangerous direction for the flasher's post-erase loop.
+        if (passes >= busy_.maxPasses) {
+            char b[128];
+            std::snprintf(b, sizeof b,
+                "still busy after %u re-reads spanning %u ms (limit %u re-reads)",
+                passes, waited, busy_.maxPasses);
             log_.warn(b);
             r.outcome = Outcome::BusyTimeout;
             return r;
@@ -178,18 +199,20 @@ Reply Transport::receive(std::uint8_t reportId, const char* what) {
         sleepMs(step);
         waited += step;
         step   += busy_.stepMs;   // +100 ms per pass, both tools
+        ++passes;
     }
 }
 
 Reply Transport::exchange(const std::vector<std::uint8_t>& out,
-                          std::uint8_t replyReportId, const char* what) {
+                          std::uint8_t replyReportId, const char* what,
+                          unsigned firstReadDelayMs) {
     Outcome o = send(out, what);
     if (o != Outcome::Ok) {
         Reply r;
         r.outcome = o;
         return r;
     }
-    return receive(replyReportId, what);
+    return receive(replyReportId, what, firstReadDelayMs);
 }
 
 }  // namespace egg

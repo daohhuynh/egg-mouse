@@ -53,22 +53,30 @@ public:
         // 0xA0 with 1041. The reply id is the OTHER report -- the id tracks the
         // transfer size, not the direction.
         return t_.exchange(Transport::frame(kReportSmall, cfg::kReadRequest),
-                           kReportLarge, "A1 12 read settings");
+                           kReportLarge, "A1 12 read settings",
+                           configDelayMs(cfg::kReadRequest));
     }
 
     Reply writeRecord(const std::vector<std::uint8_t>& frame) override {
         // The frame arrives complete. This function must not touch it: the
         // session self-checked those exact bytes, and anything altered here
         // would be bytes nothing checked.
-        return t_.exchange(frame, kReportSmall, "A0 11 write settings");
+        return t_.exchange(frame, kReportSmall, "A0 11 write settings",
+                           configDelayMs(cfg::kWriteSettings));
     }
 
     Reply factoryReset() override {
         // config-protocol.md §7.4: FUN_00404720 builds a 64-byte frame carrying
         // nothing but the report id and 0x13, and sends it. The device composes
         // its own defaults; no host-side defaults blob exists anywhere.
+        // AND THE 1100 ms. §7.4 gave us the frame; 0x4047af gives us the
+        // wait, and until 2026-09-05 we implemented only the first half. The
+        // vendor sleeps 1100 ms before its ONE status read. We were reading at
+        // 100 ms and had abandoned the device by 1100 -- our entire poll window
+        // closed exactly where the vendor's first read lands.
         return t_.exchange(Transport::frame(kReportSmall, cfg::kFactoryReset),
-                           kReportSmall, "A1 13 factory reset");
+                           kReportSmall, "A1 13 factory reset",
+                           configDelayMs(cfg::kFactoryReset));
     }
 
     void note(const std::string& line) override { log_.note(line.c_str()); }
@@ -282,19 +290,67 @@ bool loadRecord(const std::string& path, std::vector<std::uint8_t>& out) {
                     path.c_str(), out.size(), kLargeLen);
         return false;
     }
-    if (out[0] != kReportLarge) {
-        std::printf("%s does not begin with report id 0xA0. Refusing.\n", path.c_str());
+    // BYTE 0 IS NOT VALIDATED, AND MUST NOT BE -- the same rule ConfigRecord's
+    // plausible() states, for the same reason, and this is where it was missed.
+    //
+    // This used to require out[0] == kReportLarge (0xA0). No platform puts 0xA0
+    // there: the device never sends the report-id slot at all, so on Windows the
+    // vendor's own 0xA1 survives in it and on macOS hidapi leaves 0x00. Every
+    // file this tool writes therefore begins 00 01 on macOS -- including
+    // ~/.egg-mouse-known-good.bin, the §4.1 vault, and egg-before-reset.bin.
+    //
+    // So the check rejected the tool's OWN undo files. `factory-reset` would
+    // read, save the undo, wipe the settings, and then `restore` would refuse
+    // to load either file back. The undo existed, was written correctly, and
+    // could not be used. Found 2026-09-05 by an adversarial audit run before
+    // the first write reached the device; confirmed by running `egg-config diff`
+    // against the real vault, which refused it.
+    //
+    // plausible() is the right gate and is strictly stronger: it checks the
+    // length and that the payload is not uniform, which is what a truncated or
+    // zeroed save from a failed session actually looks like.
+    if (!plausible(out)) {
+        std::printf("%s is not a plausible settings record (1041 bytes, and a\n"
+                    "payload that is not all one byte). Refusing.\n", path.c_str());
         return false;
     }
     return true;
 }
 
+// Returns true only when the bytes are ON DISK at the size we asked for.
+//
+// It used to return `bool(f)` with no close() and no re-stat. 1041 bytes fit
+// inside libc++'s filebuf, so at the moment that boolean was computed NOTHING
+// had reached the filesystem -- measured: stat() reports size 0 there, and the
+// bytes appear only when the stream is destroyed after the return. Only an
+// open() failure was caught; ENOSPC, EDQUOT and EIO at flush time all returned
+// true.
+//
+// That mattered because cmdFactoryReset uses this value as the gate on the
+// destructive command -- "could not save the pre-reset record ... NOT
+// RESETTING" -- so the reset could proceed on a zero-byte undo. RecordVault
+// already did the right thing three files away, with the comment "Confirm from
+// the filesystem rather than from the stream's own opinion"; §4.1's rule about
+// never letting a reported success stand in for verified data applies to our
+// own disk writes too. Found by adversarial audit, 2026-09-05.
 bool saveRecord(const std::string& path, const std::vector<std::uint8_t>& r) {
-    std::ofstream f(path, std::ios::binary);
-    if (!f) { std::printf("could not write %s\n", path.c_str()); return false; }
-    f.write(reinterpret_cast<const char*>(r.data()),
-            static_cast<std::streamsize>(r.size()));
-    return static_cast<bool>(f);
+    {
+        std::ofstream f(path, std::ios::binary);
+        if (!f) { std::printf("could not write %s\n", path.c_str()); return false; }
+        f.write(reinterpret_cast<const char*>(r.data()),
+                static_cast<std::streamsize>(r.size()));
+        f.close();
+        if (!f) { std::printf("could not finish writing %s\n", path.c_str()); return false; }
+    }
+    std::ifstream back(path, std::ios::binary | std::ios::ate);
+    if (!back) { std::printf("wrote %s but cannot reopen it\n", path.c_str()); return false; }
+    const std::streamoff n = back.tellg();
+    if (n != static_cast<std::streamoff>(r.size())) {
+        std::printf("wrote %s but it came back %lld bytes, not %zu\n",
+                    path.c_str(), static_cast<long long>(n), r.size());
+        return false;
+    }
+    return true;
 }
 
 // §4.1: "Save a known-good blob to disk on first connect."
@@ -373,7 +429,8 @@ int cmdInfo(bool verbose) {
     // which the vendor unpacks several dwords. What those fields MEAN is [G]
     // and is not guessed here -- we print the bytes and stop.
     auto req = Transport::frame(kReportSmall, cfg::kSmallQuery);
-    Reply r = t.exchange(req, kReportSmall, "A1 02 small query");
+    Reply r = t.exchange(req, kReportSmall, "A1 02 small query",
+                         configDelayMs(cfg::kSmallQuery));
     if (!r.ok()) {
         std::printf("\nquery failed: %s (status byte 0x%02x)\n",
                     describe(r.outcome), r.status);
@@ -418,8 +475,13 @@ int cmdFrames() {
         const std::vector<std::uint8_t> f = Transport::frame(c.id, c.op);
         std::printf("%-22s ", c.what);
         for (std::uint8_t b : f) std::printf("%02x", b);
-        std::printf("\n");
+        // The delay before the first status read is as much a part of what
+        // goes on the wire as the bytes are, and it is the half we got wrong.
+        std::printf(" wait=%ums\n", configDelayMs(c.op));
     }
+    std::printf("%-22s %s wait=%ums\n", "A0 11 write settings",
+                "(payload depends on the record; see `dryrun`)",
+                configDelayMs(cfg::kWriteSettings));
     // A0 11 is deliberately absent: it carries a 1024-byte payload that depends
     // on what the device just returned, so it has no fixed form. `dryrun` emits
     // it, against a record, and that is what test_config_replay.py checks.
@@ -452,8 +514,23 @@ int cmdFactoryReset(bool verbose, bool yes, UnknownBytes policy,
     if (!s.read(before, r)) { explain(r); return rcFor(r); }
     reportVault(s, vault);
 
-    std::puts("read ok. saving the pre-reset record to egg-before-reset.bin");
-    if (!saveRecord("egg-before-reset.bin", before)) {
+    // NEVER OVERWRITE AN EARLIER PRE-RESET RECORD. This used to be a plain
+    // truncating write to a fixed name, so a second factory-reset -- the
+    // natural response to a failure message, or just wanting to be sure --
+    // replaced the real pre-reset record with the already-defaulted one, under
+    // a filename saying otherwise. The failure text then pointed the user
+    // straight at it. RecordVault has had the right guard all along; this path
+    // did not. Found by adversarial audit, 2026-09-05.
+    std::string undoPath = "egg-before-reset.bin";
+    for (int n = 2; n < 1000; ++n) {
+        std::ifstream probe(undoPath, std::ios::binary);
+        if (!probe) break;
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "egg-before-reset-%d.bin", n);
+        undoPath = buf;
+    }
+    std::printf("read ok. saving the pre-reset record to %s\n", undoPath.c_str());
+    if (!saveRecord(undoPath, before)) {
         std::puts("could not save the pre-reset record, so the reset would have no\n"
                   "undo. NOT RESETTING.");
         return 4;
@@ -468,10 +545,12 @@ int cmdFactoryReset(bool verbose, bool yes, UnknownBytes policy,
 
     std::vector<std::uint8_t> after;
     if (!s.read(after, r)) {
-        std::puts("the reset was acknowledged but the read-back failed, so what the\n"
-                  "device now holds is UNKNOWN. egg-before-reset.bin still has the\n"
-                  "old record; `egg-config restore egg-before-reset.bin --yes` puts\n"
-                  "it back once the device answers again.");
+        std::printf("the reset was acknowledged but the read-back failed, so what the\n"
+                    "device now holds is UNKNOWN. %s still has the old record;\n"
+                    "  egg-config restore %s --yes\n"
+                    "puts it back once the device answers again. The vault at %s\n"
+                    "is the older, never-overwritten copy if you need it instead.\n",
+                    undoPath.c_str(), undoPath.c_str(), vaultPath.c_str());
         return 5;
     }
     const int changed = printDiff(before, after, "before reset", "after reset");

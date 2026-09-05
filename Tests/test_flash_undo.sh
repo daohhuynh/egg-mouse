@@ -41,9 +41,24 @@ printf '%s' "$MISSING" | grep -q "egg-config read"; check "...and says how to cr
 # A file of the right length counts; a short one does not. An interrupted
 # earlier run leaves exactly the second shape, and treating it as an undo is
 # how someone flashes believing they are covered.
-head -c 1041 /dev/zero > "$TMP/good.bin"
+# CORRECTED 2026-09-05. This used to build the "good" blob with
+#   head -c 1041 /dev/zero
+# and require it to be announced as an undo. That is the defect, not the
+# contract: an all-zero file is not a settings record and `egg-config restore`
+# refuses it, so the tool was promising an undo that could not be loaded --
+# found by adversarial audit the same day, alongside the byte-0 defect that made
+# every genuinely-saved record unloadable too. The vault now answers "is this
+# loadable", not "is this 1041 bytes", so the blob here has to be a real record.
+# It is the vendor's own captured reply plus the trailing byte our transport
+# leaves zero, which is exactly the shape RecordVault writes.
+cat frames/01-baseline-003-in-01.bin > "$TMP/good.bin"
+printf '\0' >> "$TMP/good.bin"
 "$BIN" image "$EXE" --vault "$TMP/good.bin" 2>&1 >/dev/null | grep -q "undo present"
-check "a full-length blob is recognised as an undo" $?
+check "a real saved record is recognised as an undo" $?
+
+head -c 1041 /dev/zero > "$TMP/zeros.bin"
+"$BIN" image "$EXE" --vault "$TMP/zeros.bin" 2>&1 >/dev/null | grep -q "NO SETTINGS UNDO"
+check "a full-length but IMPLAUSIBLE blob is NOT accepted as an undo" $?
 
 head -c 40 /dev/zero > "$TMP/short.bin"
 "$BIN" image "$EXE" --vault "$TMP/short.bin" 2>&1 >/dev/null | grep -q "NO SETTINGS UNDO"

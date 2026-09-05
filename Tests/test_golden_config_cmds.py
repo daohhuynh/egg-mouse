@@ -18,6 +18,7 @@ nothing about what the device DOES with them -- see CLAUDE.md 1.2, the meaning
 of A1 13 is still [G] and only the frame is [O].
 """
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -68,9 +69,20 @@ def our_frames():
         raise RuntimeError("egg-config frames failed: %s" % r.stderr)
     out = {}
     for line in r.stdout.splitlines():
-        parts = line.split()
-        if parts and all(c in "0123456789abcdef" for c in parts[-1]):
-            out[parts[-1][:4]] = bytes.fromhex(parts[-1])
+        for tok in line.split():
+            if len(tok) >= 4 and all(c in "0123456789abcdef" for c in tok):
+                out[tok[:4]] = bytes.fromhex(tok)
+                break
+    return out
+
+
+def our_delays():
+    r = subprocess.run([BIN, "frames"], capture_output=True, text=True)
+    out = {}
+    for line in r.stdout.splitlines():
+        m = re.search(r"^(A[01] [0-9A-F]{2}).*wait=(\d+)ms", line)
+        if m:
+            out[m.group(1).lower().replace(" ", "")] = int(m.group(2))
     return out
 
 
@@ -119,6 +131,102 @@ class GoldenConfigCommands(unittest.TestCase):
                       if len(f) == 64 and f[1] == 0x13]
         self.assertEqual(len(from_flash), 1)
         self.assertEqual(self.ours["a113"], from_flash[0])
+
+
+class Delays(unittest.TestCase):
+    """The wait before the first status read is half the protocol, and it is the
+    half egg-config did not implement.
+
+    It applied one 100 ms delay to every command. The vendor times each command
+    separately -- Sleep(50) for A1 02, Sleep(80) for A1 12, Sleep(1100) for
+    A1 13, a caller-supplied word for A0 11 -- and the wire shows each gap is
+    that Sleep plus 10-15 ms of transfer. For A1 13 we read eleven times sooner
+    than any vendor code path, and our whole poll window shut at 1100 ms, which
+    is exactly where the config tool's FIRST read lands.
+
+    The reference here is measured from the captures, so this test fails if the
+    constants drift away from what Endgame's tools actually did.
+    """
+
+    def setUp(self):
+        if not os.path.exists(BIN):
+            self.skipTest("no egg-config")
+        self.delays = our_delays()
+
+    def observed(self, opcode):
+        """min SET->next-GET gap for this opcode over every capture."""
+        gaps = []
+        for name in sorted(os.listdir(os.path.join(ROOT, "windows-run"))):
+            if not name.endswith(".pcapng"):
+                continue
+            ev = timed_frames(os.path.join(ROOT, "windows-run", name))
+            for i, e in enumerate(ev):
+                if e[0] != "SET" or e[3] != opcode:
+                    continue
+                for j in range(i + 1, len(ev)):
+                    if ev[j][0] == "GET":
+                        gaps.append((ev[j][1] - e[1]) * 1000)
+                        break
+                    if ev[j][0] == "SET":
+                        break
+        return gaps
+
+    def test_every_delay_is_no_shorter_than_the_vendor_waited(self):
+        """The safe direction is slower. A delay shorter than the vendor's puts
+        a read on the device inside a window no capture covers."""
+        if not os.path.isdir(os.path.join(ROOT, "windows-run")):
+            self.skipTest("no captures")
+        for key, opcode in (("a102", 0x02), ("a112", 0x12), ("a113", 0x13),
+                            ("a011", 0x11)):
+            gaps = self.observed(opcode)
+            if not gaps:
+                continue
+            ours = self.delays[key]
+            # our delay + transfer overhead must not undercut the fastest gap
+            # the vendor was ever observed to allow, by more than that overhead
+            self.assertGreaterEqual(
+                ours + 20, min(gaps),
+                "%s: we wait %d ms, the vendor's shortest observed gap is "
+                "%.1f ms over %d samples" % (key, ours, min(gaps), len(gaps)))
+
+    def test_a1_13_specifically(self):
+        """Pinned on its own because it is the destructive one and because 100
+        ms -- the old value -- passes no reasonable version of the test above."""
+        self.assertEqual(self.delays["a113"], 1100)   # cfg107 0x4047af, push 0x44c
+
+    def test_the_delays_are_not_all_the_same(self):
+        """The defect was a single delay applied to everything. If these ever
+        collapse to one value again, that is the same bug returning."""
+        self.assertGreater(len(set(self.delays.values())), 1)
+
+
+def timed_frames(path):
+    """(dir, timestamp, reportId, opcode) for every feature-report transfer."""
+    with open(path, "rb") as fh:
+        buf = fh.read()
+    out, o, n = [], 0, len(buf)
+    while o + 12 <= n:
+        btype, blen = struct.unpack_from("<II", buf, o)
+        if blen < 12 or o + blen > n:
+            break
+        if btype == 6:
+            th, tl = struct.unpack_from("<II", buf, o + 12)
+            ts = ((th << 32) | tl) / 1e6
+            cap = struct.unpack_from("<I", buf, o + 20)[0]
+            body = buf[o + 28:o + 28 + cap]
+            if len(body) >= 28:
+                hl = struct.unpack_from("<H", body, 0)[0]
+                info, transfer = body[16], body[22]
+                dlen = struct.unpack_from("<I", body, 23)[0]
+                stage = body[27] if hl >= 28 else None
+                data = body[hl:hl + dlen]
+                if (transfer == 2 and stage == 0 and not (info & 1)
+                        and len(data) > 9 and data[0] == 0x21 and data[1] == 0x09):
+                    out.append(("SET", ts, data[8], data[9]))
+                elif transfer == 2 and (info & 1) and dlen in (63, 1040):
+                    out.append(("GET", ts, None, None))
+        o += blen
+    return out
 
 
 if __name__ == "__main__":

@@ -57,11 +57,19 @@ public:
 
     // Read a feature report of the given id, polling while the device reports
     // busy under this transport's policy.
-    Reply receive(std::uint8_t reportId, const char* what);
+    //
+    // firstReadDelayMs overrides how long to wait before the FIRST read. The
+    // vendor times this per command and we did not (Protocol.h,
+    // configDelayMs): A1 13 gets 1100 ms and we were reading at 100. Pass
+    // kUsePolicyDelay to keep the policy's own initialSleepMs.
+    static constexpr unsigned kUsePolicyDelay = ~0u;
+    Reply receive(std::uint8_t reportId, const char* what,
+                  unsigned firstReadDelayMs = kUsePolicyDelay);
 
     // send() then receive(), which is every exchange either tool performs.
     Reply exchange(const std::vector<std::uint8_t>& out,
-                   std::uint8_t replyReportId, const char* what);
+                   std::uint8_t replyReportId, const char* what,
+                   unsigned firstReadDelayMs = kUsePolicyDelay);
 
 private:
     Device&    dev_;
