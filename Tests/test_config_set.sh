@@ -39,7 +39,11 @@ echo
 # angle-snapping and motion-sync USED TO BE ON THIS LIST and were moved off on
 # 2026-09-05 when §7.8/§7.9 derived their bytes. That is the list working as
 # intended: it holds names whose byte is unknown, not names we dislike.
-for f in lod ripple-control dpi cpi debounce; do
+# lod CAME OFF this list on 2026-09-05 for the same reason: the capture showed
+# eleven writes moving record 0x09 through 0..10, so its byte is no longer
+# unknown. ripple-control stays -- the capture showed it moving NOTHING, which
+# is a finding about the control, not a licence to guess a byte for it.
+for f in ripple-control dpi cpi debounce; do
   want_rc 2 "is not a settable field" set "$f" 1
 done
 
@@ -47,10 +51,33 @@ done
 # These are the dangerous ones -- a plausible name with a real byte behind it --
 # so the test asserts both that they are refused AND that the refusal explains
 # itself rather than pretending the field does not exist.
-for f in disable-led-on-liftoff slamclick-filter cpi-downshift smoothing; do
+#
+# slamclick-filter, cpi-downshift and smoothing left this list on 2026-09-05.
+# All three were withheld for the SAME stated reason -- sub-byte fields need a
+# read-modify-write inside a byte carrying other settings -- and that reason
+# stopped applying when Settable grew mask/shift and the composition was tested
+# against the vendor's own writes. The remaining two are withheld for reasons
+# that have not gone away: one is a name that means the inverse of its byte, and
+# the others are fields whose byte is shared or whose block is not fully known.
+for f in disable-led-on-liftoff multiclick-filter button-mapping; do
   want_rc 2 "is not a settable field" set "$f" 1
 done
-want_rc 2 "BIT 0" set slamclick-filter 1
+# ...and the refusal must say WHY, not merely refuse.
+want_rc 2 "SHARES its byte" set multiclick-filter 1
+
+# The three that became settable must now actually work, and must say which
+# bits they touch -- a sub-byte field that reports itself like a whole-byte one
+# is how a neighbouring setting gets clobbered without anyone noticing.
+want_rc 2 "0x01 bits" set slamclick-filter 1
+want_rc 2 "0x0c bits" set cpi-downshift 2
+want_rc 2 "0x03 bits" set smoothing 2
+want_rc 2 "record 0x09" set lod 5
+want_rc 2 "record 0x0d" set cpi-stage 2
+# and must still reject values outside their range
+want_rc 2 "is not a legal" set cpi-downshift 5
+want_rc 2 "is not a legal" set smoothing 0
+want_rc 2 "is not a legal" set lod 11
+want_rc 2 "is not a legal" set cpi-stage 4
 
 # The vendor's caption must be refused, and the refusal must point at the field
 # named after the byte instead of just saying "no". Getting this wrong writes
@@ -120,7 +147,11 @@ done
 # and counting those as settable fields is how this check started lying.
 listing=$("$BIN" set 2>&1 | sed -n '1,/deliberately NOT settable/p')
 n_fields=$(printf '%s\n' "$listing" | grep -c "record 0x")
-n_cites=$(printf '%s\n' "$listing" | grep -c "config-protocol.md")
+# A citation is any pointer into the notes. Two of the newer fields cite
+# notes/config-wire-observed.md rather than config-protocol.md, because what
+# justifies them is the capture rather than the disassembly -- so matching only
+# the older filename would have counted a properly cited field as uncited.
+n_cites=$(printf '%s\n' "$listing" | grep -cE "config-protocol\.md|config-wire-observed\.md")
 if [ "$n_fields" -eq "$n_cites" ] && [ "$n_fields" -gt 0 ]; then
   echo "  PASS  every settable field carries a citation ($n_fields)"; PASS=$((PASS+1))
 else

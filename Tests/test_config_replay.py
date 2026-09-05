@@ -47,6 +47,23 @@ CASES = [
     ("03-sensor", 2, "sensor-angle", "20"),
     ("03-sensor", 3, "sensor-angle", "-45"),
     ("03-sensor", 4, "sensor-angle", "127"),
+    # promoted 2026-09-05 once the capture scored them
+    ("02-basic", 17, "lod", "0"),
+    ("02-basic", 18, "lod", "1"),
+    ("02-basic", 22, "lod", "5"),
+    ("02-basic", 27, "lod", "10"),
+    ("03-sensor", 5, "cpi-downshift", "1"),
+    ("03-sensor", 6, "cpi-downshift", "2"),
+    ("03-sensor", 7, "cpi-downshift", "3"),
+    ("03-sensor", 8, "cpi-downshift", "4"),
+    ("03-sensor", 9, "smoothing", "1"),
+    ("03-sensor", 10, "smoothing", "2"),
+    ("03-sensor", 11, "smoothing", "3"),
+    ("04-buttons", 0, "slamclick-filter", "0"),
+    ("06-cpi-stage", 0, "cpi-stage", "0"),
+    ("06-cpi-stage", 1, "cpi-stage", "1"),
+    ("06-cpi-stage", 2, "cpi-stage", "2"),
+    ("06-cpi-stage", 3, "cpi-stage", "3"),
 ]
 
 # Deliberately excluded, with the reason, so the exclusion is a claim and not a
@@ -143,17 +160,32 @@ class Replay(unittest.TestCase):
             d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
             if i == 0:                       # started from the device's own read
                 seen_read_start += 1
-                self.assertEqual(d, [0x01],
-                                 "%s write 0: expected to differ only at record "
-                                 "0x01, differs at %s" % (capture, [hex(x) for x in d]))
-                self.assertEqual(got[PAYLOAD_OFFSET + 1], 0x80)
-                self.assertEqual(after[PAYLOAD_OFFSET + 1], 0x00)
+                # ...and only when the device actually reported 0x80 there. In
+                # 04-buttons it reported 0x00, because that section followed
+                # 03-sensor without the mouse being power-cycled in between --
+                # the one capture in the run that opened where its predecessor
+                # ended. With nothing to preserve we match the vendor exactly,
+                # which is the correct behaviour and worth asserting rather than
+                # papering over with a looser rule.
+                if before[PAYLOAD_OFFSET + 1] == 0x80:
+                    self.assertEqual(d, [0x01],
+                                     "%s write 0: expected to differ only at "
+                                     "record 0x01, differs at %s"
+                                     % (capture, [hex(x) for x in d]))
+                    self.assertEqual(got[PAYLOAD_OFFSET + 1], 0x80)
+                    self.assertEqual(after[PAYLOAD_OFFSET + 1], 0x00)
+                else:
+                    self.assertEqual(before[PAYLOAD_OFFSET + 1], 0x00)
+                    self.assertEqual(d, [], "%s write 0 started from a record "
+                                     "already carrying 0x00 at 0x01, so we "
+                                     "should match exactly; differs at %s"
+                                     % (capture, [hex(x) for x in d]))
             else:                            # started from a previous vendor write
                 seen_write_start += 1
                 self.assertEqual(d, [], "%s write %d differs at %s"
                                  % (capture, i, [hex(x) for x in d]))
-        self.assertGreaterEqual(seen_read_start, 2)
-        self.assertGreaterEqual(seen_write_start, 10)
+        self.assertGreaterEqual(seen_read_start, 3)
+        self.assertGreaterEqual(seen_write_start, 25)
 
     def test_the_excluded_case_really_does_move_two_bytes(self):
         """The exclusion above is a claim about the vendor. Check it, or it is
