@@ -1354,3 +1354,190 @@ file is the factory-default record on the wire, so:
   those before the baseline).
 - **Matters:** it converts the whole default record from `[D]` to `[O]`, and it
   is the reference blob §4.1 wants saved before any write.
+
+## 7.3 The settings record is 115 bytes, and its whole byte map is derived  [D]+[O]
+
+`FUN_004042d0` (cfg107, `0x004042d0`–`0x004045dc`) is the **serializer**: it
+copies the settings object byte by byte into the outgoing record. Nothing else
+happens in it — it is 111 load/store pairs and a `retl`.
+
+Extracted mechanically, not by eye, by parsing the raw disassembly for the
+strict alternation `mov{zbl,b} disp(%ecx), %reg` / `movb %reg, disp(%eax)` and
+**stopping at the first instruction that is neither** (§1.2b — a parser that
+skips what it does not recognise silently drops fields and yields a map that
+looks complete). It stopped exactly on the `retl` at `0x4045dc`, and the load
+and store registers are checked to match on every pair.
+
+**Result: the record is `0x00`–`0x72`, 115 bytes.** Record bytes `0x01`–`0x04`
+are the only ones this function does not write; everything else has a traced
+origin. Since the payload sits at buffer `+0x10` (§7.2a) and the wire index is
+the buffer index (`wire-observed.md` §2.1), **record `r` is wire `0x10 + r`**,
+so the record ends at wire `0x82` — and the last non-zero byte in
+`01-baseline.pcapng` is at wire `0x81`. The 115 was arrived at from the binary
+and the 0x81 from the capture, independently.
+
+### The check that matters
+
+Pushing `0x413db0`'s inline factory defaults (§7.2b) through this map predicts
+91 of the 115 record bytes — the other 24 come from object bytes the default
+writer never sets. Against `01-baseline.pcapng`, which is **the owner's own settings
+and not defaults**:
+
+> **90 of 91 predicted bytes match the observed device record.**
+
+The single disagreement is record `0x71` (wire `0x81`): predicted `0x00`,
+observed `0x01`. It is the last non-zero byte in the whole record, it comes from
+object `0x2d`, and the honest reading is that **the owner had changed exactly one
+setting from factory default** — which `01b-reset.pcapng` will confirm or refute
+outright, since after a reset that byte must read `0x00`.
+
+Two things this is *not*. It is not a fit: the map was extracted before the
+comparison and no parameter was tuned. And it is not proof the *meanings* are
+right — it shows the layout and the values, and says nothing about which control
+sets which byte.
+
+### Structure visible in the record  [O]
+
+| record | wire | what | confidence |
+| --- | --- | --- | --- |
+| `0x0f`–`0x22` | `0x1f`–`0x32` | **four 5-byte RGB records**: `ff ff 00 01 01`, `00 00 ff 01 02`, `ff 00 00 01 03`, `00 ff 00 01 04` — yellow/blue/red/green, each followed by `0x01` and a **stage index 1..4** | structure `[O]`, meaning `[G]` |
+| `0x24`–`0x37` | `0x34`–`0x47` | **four 5-byte CPI records**, two 16-bit LE each: 400/400, 800/800, 1600/1600, 3200/3200, then a 5th byte `0x00` | `[O]`, values also `[D]` |
+| `0x37`–`0x6f` | `0x47`–`0x7f` | **eight 7-byte button records**. Masks `01 02 04 10 08 f1 01 ff` at stride 7 from record `0x38`; a `0x08` five bytes after each mask | structure `[O]`, field roles `[G]` |
+| `0x70`–`0x72` | `0x80`–`0x82` | three trailing bytes, one of which (`0x71`) is the byte the owner changed | `[G]` |
+
+**The RGB block resolves `wire-observed.md` §5.1**, which recorded four records
+"reading as RGB" but with a stride that would not close. The stride is 5 and the
+block runs record `0x0f`–`0x22`, contiguous from object `0x6e`–`0x81`; the
+trailing `01 02 03 04` are stage indices, which is what makes the grouping
+unambiguous. Four colours indexed by CPI stage is a CPI-stage indicator.
+
+**This does not reopen the LED question and must not be read as doing so.** The
+LED *page* is unreachable in all four config tools (`gui-surface.md` §3), so
+these bytes remain unreachable from the UI and therefore permanently `[G]` as to
+meaning — no capture can attribute them, because no control moves them. They are
+read-modify-write territory under §1.3, exactly as before. What changed is that
+we now know their *shape*, which is why they must be preserved intact rather
+than treated as slack.
+
+### The map
+
+`rec` is the record offset, `wire` the offset in a captured reply, `obj` the
+settings-object offset it is copied from, `at` the instruction.
+
+| `0x00` | `0x010` | `0x00` | `4042d0` |
+| `0x05` | `0x015` | `0x06` | `4042d5` |
+| `0x06` | `0x016` | `0x07` | `4042dc` |
+| `0x07` | `0x017` | `0x0c` | `4042e3` |
+| `0x08` | `0x018` | `0x26` | `4042ea` |
+| `0x09` | `0x019` | `0x27` | `4042f1` |
+| `0x0a` | `0x01a` | `0x28` | `4042f8` |
+| `0x0b` | `0x01b` | `0x29` | `4042ff` |
+| `0x0c` | `0x01c` | `0x2a` | `404306` |
+| `0x0d` | `0x01d` | `0x0a` | `40430d` |
+| `0x0e` | `0x01e` | `0x0b` | `404314` |
+| `0x0f` | `0x01f` | `0x6e` | `40431b` |
+| `0x10` | `0x020` | `0x6f` | `404322` |
+| `0x11` | `0x021` | `0x70` | `404329` |
+| `0x12` | `0x022` | `0x71` | `404330` |
+| `0x13` | `0x023` | `0x72` | `404337` |
+| `0x14` | `0x024` | `0x73` | `40433e` |
+| `0x15` | `0x025` | `0x74` | `404345` |
+| `0x16` | `0x026` | `0x75` | `40434c` |
+| `0x17` | `0x027` | `0x76` | `404353` |
+| `0x18` | `0x028` | `0x77` | `40435a` |
+| `0x19` | `0x029` | `0x78` | `404361` |
+| `0x1a` | `0x02a` | `0x79` | `404368` |
+| `0x1b` | `0x02b` | `0x7a` | `40436f` |
+| `0x1c` | `0x02c` | `0x7b` | `404376` |
+| `0x1d` | `0x02d` | `0x7c` | `40437d` |
+| `0x1e` | `0x02e` | `0x7d` | `404384` |
+| `0x1f` | `0x02f` | `0x7e` | `40438b` |
+| `0x20` | `0x030` | `0x7f` | `404392` |
+| `0x21` | `0x031` | `0x80` | `404399` |
+| `0x22` | `0x032` | `0x81` | `4043a3` |
+| `0x23` | `0x033` | `0x0e` | `4043ad` |
+| `0x24` | `0x034` | `0x10` | `4043b4` |
+| `0x25` | `0x035` | `0x11` | `4043bb` |
+| `0x26` | `0x036` | `0x12` | `4043c2` |
+| `0x27` | `0x037` | `0x13` | `4043c9` |
+| `0x28` | `0x038` | `0x14` | `4043d0` |
+| `0x29` | `0x039` | `0x16` | `4043d7` |
+| `0x2a` | `0x03a` | `0x17` | `4043de` |
+| `0x2b` | `0x03b` | `0x18` | `4043e5` |
+| `0x2c` | `0x03c` | `0x19` | `4043ec` |
+| `0x2d` | `0x03d` | `0x1a` | `4043f3` |
+| `0x2e` | `0x03e` | `0x1c` | `4043fa` |
+| `0x2f` | `0x03f` | `0x1d` | `404401` |
+| `0x30` | `0x040` | `0x1e` | `404408` |
+| `0x31` | `0x041` | `0x1f` | `40440f` |
+| `0x32` | `0x042` | `0x20` | `404416` |
+| `0x33` | `0x043` | `0x22` | `40441d` |
+| `0x34` | `0x044` | `0x23` | `404424` |
+| `0x35` | `0x045` | `0x24` | `40442b` |
+| `0x36` | `0x046` | `0x25` | `404432` |
+| `0x37` | `0x047` | `0x2e` | `404439` |
+| `0x38` | `0x048` | `0x2f` | `404440` |
+| `0x39` | `0x049` | `0x30` | `404447` |
+| `0x3a` | `0x04a` | `0x31` | `40444e` |
+| `0x3b` | `0x04b` | `0x32` | `404455` |
+| `0x3c` | `0x04c` | `0x33` | `40445c` |
+| `0x3d` | `0x04d` | `0x34` | `404463` |
+| `0x3e` | `0x04e` | `0x36` | `40446a` |
+| `0x3f` | `0x04f` | `0x37` | `404471` |
+| `0x40` | `0x050` | `0x38` | `404478` |
+| `0x41` | `0x051` | `0x39` | `40447f` |
+| `0x42` | `0x052` | `0x3a` | `404486` |
+| `0x43` | `0x053` | `0x3b` | `40448d` |
+| `0x44` | `0x054` | `0x3c` | `404494` |
+| `0x45` | `0x055` | `0x3e` | `40449b` |
+| `0x46` | `0x056` | `0x3f` | `4044a2` |
+| `0x47` | `0x057` | `0x40` | `4044a9` |
+| `0x48` | `0x058` | `0x41` | `4044b0` |
+| `0x49` | `0x059` | `0x42` | `4044b7` |
+| `0x4a` | `0x05a` | `0x43` | `4044be` |
+| `0x4b` | `0x05b` | `0x44` | `4044c5` |
+| `0x4c` | `0x05c` | `0x46` | `4044cc` |
+| `0x4d` | `0x05d` | `0x47` | `4044d3` |
+| `0x4e` | `0x05e` | `0x48` | `4044da` |
+| `0x4f` | `0x05f` | `0x49` | `4044e1` |
+| `0x50` | `0x060` | `0x4a` | `4044e8` |
+| `0x51` | `0x061` | `0x4b` | `4044ef` |
+| `0x52` | `0x062` | `0x4c` | `4044f6` |
+| `0x53` | `0x063` | `0x4e` | `4044fd` |
+| `0x54` | `0x064` | `0x4f` | `404504` |
+| `0x55` | `0x065` | `0x50` | `40450b` |
+| `0x56` | `0x066` | `0x51` | `404512` |
+| `0x57` | `0x067` | `0x52` | `404519` |
+| `0x58` | `0x068` | `0x53` | `404520` |
+| `0x59` | `0x069` | `0x54` | `404527` |
+| `0x5a` | `0x06a` | `0x56` | `40452e` |
+| `0x5b` | `0x06b` | `0x57` | `404535` |
+| `0x5c` | `0x06c` | `0x58` | `40453c` |
+| `0x5d` | `0x06d` | `0x59` | `404543` |
+| `0x5e` | `0x06e` | `0x5a` | `40454a` |
+| `0x5f` | `0x06f` | `0x5b` | `404551` |
+| `0x60` | `0x070` | `0x5c` | `404558` |
+| `0x61` | `0x071` | `0x5e` | `40455f` |
+| `0x62` | `0x072` | `0x5f` | `404566` |
+| `0x63` | `0x073` | `0x60` | `40456d` |
+| `0x64` | `0x074` | `0x61` | `404574` |
+| `0x65` | `0x075` | `0x62` | `40457b` |
+| `0x66` | `0x076` | `0x63` | `404582` |
+| `0x67` | `0x077` | `0x64` | `404589` |
+| `0x68` | `0x078` | `0x66` | `404590` |
+| `0x69` | `0x079` | `0x67` | `404597` |
+| `0x6a` | `0x07a` | `0x68` | `40459e` |
+| `0x6b` | `0x07b` | `0x69` | `4045a5` |
+| `0x6c` | `0x07c` | `0x6a` | `4045ac` |
+| `0x6d` | `0x07d` | `0x6b` | `4045b3` |
+| `0x6e` | `0x07e` | `0x6c` | `4045ba` |
+| `0x6f` | `0x07f` | `0x2b` | `4045c1` |
+| `0x70` | `0x080` | `0x2c` | `4045c8` |
+| `0x71` | `0x081` | `0x2d` | `4045cf` |
+| `0x72` | `0x082` | `0x08` | `4045d6` |
+**Record `0x01`–`0x04` are written by something else.** They are not in this
+function, and in the baseline they read `80 00 00 00` (wire `0x11`–`0x14`).
+`0x80` also appears as object `0x02`–`0x03` = `0x0080` in the default writer,
+which the serializer never copies — suggestive, not established. **Open, and
+listed in `working-memory.md`.** Do not write those four bytes on any inference
+from this paragraph; §1.3 applies and read-modify-write preserves them for free.
