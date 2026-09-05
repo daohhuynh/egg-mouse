@@ -112,13 +112,22 @@ class Replay(unittest.TestCase):
         if not os.path.exists(os.path.join(ROOT, "windows-run")):
             self.skipTest("no captures")
 
-    def encode(self, before, field, value):
+    def encode(self, before, field, value, policy=None):
+        """Run egg-config's OWN write-path composition over a saved record.
+
+        `policy` is None for the compiled-in default (ConfigRecord.h
+        kDefaultUnknownBytes) or "preserve"/"vendor" to pin one arm. Both arms
+        are scored below, so flipping the default cannot silently lose coverage
+        of the other -- that is the whole reason this parameter exists.
+        """
         with tempfile.TemporaryDirectory() as d:
             a, b = os.path.join(d, "in.bin"), os.path.join(d, "out.bin")
             with open(a, "wb") as f:
                 f.write(before)
-            r = subprocess.run([BIN, "encode", field, value, a, b],
-                               capture_output=True, text=True)
+            cmd = [BIN, "encode", field, value, a, b]
+            if policy is not None:
+                cmd.insert(1, "--unknown-bytes=%s" % policy)
+            r = subprocess.run(cmd, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0,
                              "egg-config encode failed: %s%s" % (r.stdout, r.stderr))
             with open(b, "rb") as f:
@@ -203,6 +212,88 @@ class Replay(unittest.TestCase):
             ours = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(got)))
                     if before[k] != got[k]]
             self.assertEqual(ours, [0x0e])
+
+    def test_matchvendor_reproduces_every_vendor_write_byte_for_byte(self):
+        """--unknown-bytes=vendor must match the vendor at all 1024 bytes.
+
+        This is the arm the OTHER test cannot check, and it is the stronger
+        claim: not "we differ only where we said we would" but "we differ
+        nowhere at all". If it passes, the vendor's 33 captured settings writes
+        are reproducible from our code with zero divergence, and record
+        0x01..0x04 is the only thing that ever stood between us and that.
+
+        It is scored explicitly rather than left to the default so that the
+        default in ConfigRecord.h is a decision with evidence on both sides,
+        not a dependency of the test suite.
+        """
+        for capture, i, field, value in CASES:
+            with self.subTest(capture=capture, write=i, field=field, value=value):
+                before, after = before_after(capture, i)
+                got = self.encode(before, field, value, policy="vendor")
+                n = min(len(got), len(after))
+                d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
+                self.assertEqual(
+                    d, [],
+                    "%s write %d (%s=%s): differs from the vendor at record %s"
+                    % (capture, i, field, value, [hex(x) for x in d]))
+
+    def test_preserve_differs_from_the_vendor_only_at_record_0x01(self):
+        """The other arm, pinned explicitly for the same reason.
+
+        Identical in substance to the default-policy test above; what it adds is
+        independence from which policy is compiled in as the default. Together
+        the two make the default a one-line change with coverage either way.
+        """
+        divergent = 0
+        for capture, i, field, value in CASES:
+            before, after = before_after(capture, i)
+            got = self.encode(before, field, value, policy="preserve")
+            n = min(len(got), len(after))
+            d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
+            if before[PAYLOAD_OFFSET + 1] == 0x80:
+                self.assertEqual(d, [0x01], "%s write %d differs at %s"
+                                 % (capture, i, [hex(x) for x in d]))
+                divergent += 1
+            else:
+                self.assertEqual(d, [], "%s write %d differs at %s"
+                                 % (capture, i, [hex(x) for x in d]))
+        # If this ever reaches zero the test above has stopped testing anything,
+        # because both arms would be producing identical bytes.
+        self.assertGreaterEqual(divergent, 3)
+
+    def test_the_two_policies_differ_at_nothing_but_the_four_unknown_bytes(self):
+        """Whichever default is chosen, the blast radius is those four bytes.
+
+        A policy that reached any further would be a second, undeclared change
+        to the record riding along with the first -- exactly what §1.3 forbids.
+        Checked over every case rather than argued from the source.
+        """
+        for capture, i, field, value in CASES:
+            before, _ = before_after(capture, i)
+            a = self.encode(before, field, value, policy="preserve")
+            b = self.encode(before, field, value, policy="vendor")
+            d = [k - PAYLOAD_OFFSET for k in range(min(len(a), len(b)))
+                 if a[k] != b[k]]
+            self.assertTrue(set(d) <= {0x01, 0x02, 0x03, 0x04},
+                            "%s write %d: the two policies differ at %s"
+                            % (capture, i, [hex(x) for x in d]))
+
+    def test_a_mistyped_policy_is_refused_rather_than_defaulted(self):
+        """A typo must not silently choose one of two different byte streams."""
+        before, _ = before_after("02-basic", 0)
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, "in.bin"), os.path.join(d, "out.bin")
+            with open(a, "wb") as f:
+                f.write(before)
+            for bad in ("Vendor", "preserv", "", "1", "match-vendor"):
+                r = subprocess.run(
+                    [BIN, "--unknown-bytes=%s" % bad, "encode",
+                     "polling", "1000", a, b],
+                    capture_output=True, text=True)
+                self.assertEqual(r.returncode, 2,
+                                 "--unknown-bytes=%r was accepted" % bad)
+                self.assertFalse(os.path.exists(b),
+                                 "--unknown-bytes=%r still wrote a file" % bad)
 
     def test_read_modify_write_preserves_everything_else(self):
         """§1.3: bytes we do not understand must come back unchanged."""
