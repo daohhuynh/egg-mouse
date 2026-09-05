@@ -29,11 +29,24 @@ all-or-nothing.
    the vendor UI, and every movement of the OP1 floods the capture with input
    reports. Do not touch the OP1 once recording starts.
 3. Plug the OP1 into a **direct USB port** — no hub, no dock.
-4. Open Wireshark. In the interface list you will see `USBPcap1`, `USBPcap2`, …
-   one per root hub. To find the right one: start a capture on one, wiggle the
-   OP1, and see if packets appear. Note which one works. If unsure, capture on
-   all of them — extra data costs us nothing.
-5. Make a folder `windows-run` on the desktop. Everything goes in it.
+4. **Keep the OP1 UNPLUGGED for all of the above.** You do not need it yet, and
+   plugging it in later is worth more than plugging it in now — see the next step.
+5. Open Wireshark. The interface list shows `USBPcap1`, `USBPcap2`, … one per
+   root hub. Find the right one **and capture the enumeration at the same time**:
+   - start a capture on `USBPcap1`
+   - **now plug the OP1 in**
+   - packets appear? right hub. Nothing? stop, unplug, try `USBPcap2`, repeat
+   Plugging in while recording captures the **full enumeration** — device
+   descriptor, configuration descriptor and the HID report descriptor as Windows
+   asks for them. That independently corroborates the `[O]` descriptor data we
+   read on macOS, from a different OS, for free. Save it as `00-enumerate.pcapng`.
+6. **The mouse now stays plugged in for the whole session.** Stopping and
+   starting Wireshark between experiments is enough; do not unplug it. It will
+   re-enumerate by itself during the flash when it enters the bootloader — that
+   is expected, and USBPcap follows it because it is the same root hub.
+7. Make a folder `windows-run` on the desktop. Everything goes in it.
+8. Launch the config tool once and confirm it **sees the mouse** and reports
+   firmware **1.07** before capturing anything for real.
 
 **Do not run the config tool and the firmware updater at the same time.** We
 have never established that the device tolerates two hosts, and this is not the
