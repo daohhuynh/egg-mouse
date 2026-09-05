@@ -497,6 +497,57 @@ bytes in, 1024 bytes of payload)**, and the write is `A0 11` with 1024 bytes at
 `+0x10` (§4). Read and write are exact mirrors, which is what read-modify-write
 needs.
 
+### 7.2a The `A0 11` write frame's header is ALL ZEROS  [D]
+
+Derived 2026-09-05 from raw disassembly of `FUN_00404180` @ `0x00404180`, the
+APPLY handler. This had been recorded as an open gap blocking the config write
+path — "we have the command byte and the 1024-byte payload at `+0x10` and
+**nothing** about the fifteen header bytes of a write" — on the reasoning that
+the read gives a *response* frame and those bytes need not mean the same thing
+outbound. That reasoning was right; the conclusion that only a capture could
+answer it was not. The builder is in the binary.
+
+Buffer base is `-0x46c(%ebp)`:
+
+```
+4041f9  pushl $0x411 ; leal -0x46c(%ebp),%ecx ; pushl $0 ; pushl %ecx
+404206  calll 0x508df0              ; memset(buf, 0, 0x411)   -- all 1041 bytes
+40420b  movw  %bx,  -0x468(%ebp)    ; buf[4..5] = 0   (bx is 0; xorl at 0x4041cf)
+404212  movb  %bl,  -0x466(%ebp)    ; buf[6]    = 0
+404218  movl  $0x11a0, -0x46c(%ebp) ; buf[0..3] = a0 11 00 00
+404222  movl  $0x100, %ecx          ; 0x100 dwords = 1024 bytes
+404227  leal  -0x86c(%ebp), %esi    ; source: the composed settings blob
+40422d  leal  -0x45c(%ebp), %edi    ; dest:   base + 0x10 = buf[16]
+404233  rep   movsl
+404238  movl  $0x411, %esi          ; length 1041
+404243  calll 0x403850              ; send
+```
+
+So the frame is:
+
+```
+[0]        = 0xA0
+[1]        = 0x11
+[2..15]    = 0          -- from the memset; nothing writes them
+[16..1039] = the 1024 settings bytes
+```
+
+**Every byte from `[2]` to `[15]` is zero**, and the frame is a mirror of the
+read response's layout, which is what read-modify-write needs.
+
+Two details worth keeping. First, `[4..5]` and `[6]` are explicitly re-zeroed
+*after* a `memset` that already zeroed them. That is dead code here; whether it
+means those fields carry something in a sibling builder is **[G]** and does not
+matter, because in this builder they are zero. Second, the payload source at
+`-0x86c(%ebp)` is itself `memset` to `0x400` bytes of zero at `0x4041d1` and
+then filled by `FUN_004042d0` — so the tool composes the blob from its own UI
+state rather than modifying what it read. **We do not copy that.** §4.1 requires
+read-modify-write; composing from scratch is exactly what it forbids.
+
+The Windows capture still corroborates this, and `records.py` prints every write
+header and shouts if it varies between frames. But the write path is no longer
+gated on it.
+
 ### 7.3 `A1 02` is a small query, not a blob read  [D]
 
 `FUN_004045e0`:
