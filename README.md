@@ -161,11 +161,23 @@ reproduce the vendor's after-record. Under `--unknown-bytes=vendor` it matches
 all 33 byte for byte across all 1024 payload bytes.
 
 `mutants.sh` exists because `test-flash` passed 47/47 on its first run, and a
-suite that has never failed has not been shown to work. It plants known bugs —
-several of them the vendor's own — and requires the suite to notice. It
-currently kills **13 of 13** real defects and correctly lets 2
-provably-equivalent mutants survive. **If that number drops, a test stopped
-working.**
+suite that has never failed has not been shown to work. `test-config` then
+passed on *its* first run too, for the same reason. So the harness plants known
+bugs in both — several of them the vendor's own — and requires the relevant
+suite to notice. It currently kills **25 of 25** real defects and correctly lets
+**5** provably-equivalent mutants survive. **If that number drops, a test
+stopped working.**
+
+It earns its keep. On the config side's first run it found **three real holes**:
+nothing reached the "wrote, and cannot say what the device holds" branch; a
+policy that zeroed one byte too many was invisible because record `0x00` is
+`0x00` in all nine captured reads and all 73 captured writes; and a redundant
+`set` would have put a frame on the wire just to normalise four bytes. Two are
+now tested. The third — the pre-send self-check — is labelled *equivalent*
+rather than fixed, because no reachable input can make the frame differ from
+what was intended, so a test that "caught" it would be asserting something
+untrue. It guards against a future bug in the frame builder, and the four
+frame-builder mutants are what show such bugs exist to be caught.
 
 ## Staged bring-up
 

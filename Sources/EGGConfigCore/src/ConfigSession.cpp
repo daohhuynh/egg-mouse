@@ -114,7 +114,16 @@ SetOutcome ConfigSession::set(const Settable& f, std::uint8_t encodedValue) {
 
     // 4. Nothing to do? Then send nothing. Checked AFTER the self-check so a
     //    no-op still proves the frame we would have sent was well formed.
-    if (o.weChanged.empty()) { o.result = Result::AlreadySet; return o; }
+    //
+    //    THE TEST IS ON THE FIELD, not on the frame, and the difference matters
+    //    once the policy is MatchVendor. Under it our frame legitimately differs
+    //    from the read at record 0x01..0x04, so `weChanged` is non-empty even
+    //    when the setting is already what the user asked for -- and writing on
+    //    that basis would mean every redundant `set` puts a frame on the wire
+    //    purely to normalise four bytes whose meaning we do not know. The policy
+    //    shapes frames we were already sending; it is not a reason to send one.
+    if (o.before[at] == want) { o.result = Result::AlreadySet; return o; }
+    if (o.weChanged.empty())  { o.result = Result::AlreadySet; return o; }
 
     // 5. Write.
     o.sent = frame;

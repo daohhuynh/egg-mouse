@@ -38,6 +38,20 @@ static void ok(const char* what, bool cond, const std::string& detail = "") {
     if (!cond) ++failures;
 }
 
+// A plausible record in which EVERY payload byte is non-zero. The device's own
+// records are full of zeros -- record 0x00 in particular is 0x00 in all nine
+// captured reads and all 73 captured writes -- so a policy that zeroed one byte
+// too many would be invisible against real data. It was: the mutation harness
+// planted exactly that off-by-one and the suite did not notice.
+static std::vector<std::uint8_t> variedRecord() {
+    std::vector<std::uint8_t> r(kLargeLen, 0);
+    r[0] = kReportLarge;
+    r[kStatusOffset] = kStatusReady;
+    for (std::size_t i = 0; i < kPayloadLen; ++i)
+        r[kPayloadOffset + i] = static_cast<std::uint8_t>((i * 7 + 1) | 0x01);
+    return r;
+}
+
 static const Settable& field(const char* n) {
     const Settable* f = findSettable(n);
     if (!f) { std::printf("  FAIL  no such field %s\n", n); ++failures; std::abort(); }
@@ -305,7 +319,38 @@ static void testAdversarial() {
         MockConfigDevice dev;
         ConfigSession s(dev, UnknownBytes::MatchVendor);
         SetOutcome o = s.set(field("lod"), 6);
-        ok("a cooperative device succeeds -- so the failures above are real",
+        // A redundant `set` must put NOTHING on the wire, under either policy.
+    // Under MatchVendor our frame differs from the read at record 0x01..0x04
+    // even when the field is already correct, so a naive "did the frame change?"
+    // test would write every time someone re-applied a setting they already had.
+    for (UnknownBytes pol : {UnknownBytes::Preserve, UnknownBytes::MatchVendor}) {
+        MockConfigDevice dev;
+        ConfigSession s(dev, pol);
+        // record 0x05 is 0x01 in the mock, i.e. 8000 Hz.
+        SetOutcome o = s.set(field("polling"), 1);
+        ok((std::string("a redundant set sends nothing (") + describe(pol) + ")").c_str(),
+           o.result == Result::AlreadySet && !o.wrote &&
+           dev.sentFrames().empty() && dev.writes() == 0,
+           describe(o.result));
+    }
+
+    // ACKNOWLEDGED, THEN UNREADABLE. The only outcome in the enum that means
+    // "we wrote and cannot say what the device holds", and until the mutation
+    // harness planted a mutant that turned it into Ok, nothing reached it.
+    {
+        MockConfigDevice dev(ConfigFaults{.readFailsAfterWrite = true});
+        ConfigSession s(dev, kDefaultUnknownBytes);
+        SetOutcome o = s.set(field("polling"), 2);
+        ok("acks the write then will not answer the read, and we say STATE UNKNOWN",
+           o.result == Result::VerifyReadFailed && o.wrote && o.after.empty(),
+           describe(o.result));
+        ok("...and it is NOT reported as success",
+           o.result != Result::Ok && o.result != Result::AlreadySet);
+        ok("...and the frame really did go out, so this is the unknown-state case,\n            not a refusal before the write",
+           dev.sentFrames().size() == 1 && dev.acceptedWrites() == 1);
+    }
+
+    ok("a cooperative device succeeds -- so the failures above are real",
            o.result == Result::Ok && dev.storedRecord(0x09) == 6, describe(o.result));
     }
 }
@@ -360,6 +405,33 @@ static void testUnknownBytePolicy() {
            oa.result == Result::Ok && ob.result == Result::Ok &&
            a.stored() == b.stored());
     }
+
+    // THE BLAST RADIUS, asserted exactly rather than by exclusion. Every payload
+    // byte here is non-zero, so a policy that reaches one byte too far in either
+    // direction changes a byte that was not zero already and the difference is
+    // visible. Against a real record it would not be.
+    ok("the policy changes EXACTLY record 0x01-0x04 and nothing else", [] {
+        std::vector<std::uint8_t> rec = variedRecord();
+        if (!plausible(rec)) return false;
+        auto v = ConfigSession::buildFrame(rec, field("polling"), 2,
+                                           UnknownBytes::MatchVendor);
+        auto p = ConfigSession::buildFrame(rec, field("polling"), 2,
+                                           UnknownBytes::Preserve);
+        if (v.size() != kLargeLen || p.size() != kLargeLen) return false;
+        std::vector<std::size_t> moved;
+        for (std::size_t r = 0; r < kPayloadLen; ++r)
+            if (v[kPayloadOffset + r] != p[kPayloadOffset + r]) moved.push_back(r);
+        const std::vector<std::size_t> want{kRecordUnknownFirst,
+                                            kRecordUnknownFirst + 1,
+                                            kRecordUnknownFirst + 2,
+                                            kRecordUnknownLast};
+        if (moved != want) return false;
+        // ...and the Preserve arm really did carry the originals through, or
+        // the comparison above would be between two identical wrong answers.
+        for (std::size_t r = kRecordUnknownFirst; r <= kRecordUnknownLast; ++r)
+            if (p[kPayloadOffset + r] != rec[kPayloadOffset + r]) return false;
+        return true;
+    }());
 
     // Whatever the policy, it may never touch a byte outside 0x01..0x04.
     ok("neither policy changes any byte outside the field and 0x01-0x04", [] {

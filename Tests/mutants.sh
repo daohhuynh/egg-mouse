@@ -1,5 +1,5 @@
 #!/bin/bash
-# mutants.sh -- does test-flash actually catch anything?
+# mutants.sh -- do test-flash and test-config actually catch anything?
 #
 # CLAUDE.md §6.2: "A harness that cannot produce a bad result is not evidence.
 # If the planted positives never fail and no verdict is ever rejected, the
@@ -7,10 +7,16 @@
 # flag, not a pass."
 #
 # test-flash passed 47/47 on its first run, which is exactly the shape §6.2 says
-# to distrust. So this plants known bugs in the flasher, rebuilds, and requires
-# the suite to notice. Each mutant is a bug someone could plausibly write --
-# several are the vendor's own (updater-protocol.md §5.6) -- not a character
-# swap.
+# to distrust. test-config then passed 52/52 on ITS first run, for the same
+# reason and with the same lack of evidence behind it. So this plants known bugs
+# in both, rebuilds, and requires the relevant suite to notice. Each mutant is a
+# bug someone could plausibly write -- several are the vendor's own
+# (updater-protocol.md §5.6) -- not a character swap.
+#
+# The target is derived from the file being mutated: anything under
+# EGGConfigCore is graded by test-config, everything else by test-flash. One
+# harness, because the three bugs this script has had were all in the harness
+# and having two copies of it would mean finding each of them twice.
 #
 # TWO CATEGORIES, and the distinction is the honest part:
 #
@@ -64,6 +70,9 @@ WP=Sources/EGGFlashCore/src/WritePhase.cpp
 FC=Sources/EGGFlashCore/src/FlashCommands.cpp
 FW=Sources/EGGFlashCore/src/Firmware.cpp
 FWH=Sources/EGGFlashCore/include/egg/Firmware.h
+CS=Sources/EGGConfigCore/src/ConfigSession.cpp
+CR=Sources/EGGConfigCore/src/ConfigRecord.cpp
+CV=Sources/EGGConfigCore/src/RecordVault.cpp
 
 # ONE list. Backup and restore are both derived from it, because they used to be
 # two hardcoded lists and the second one drifted the moment a fourth file was
@@ -71,7 +80,7 @@ FWH=Sources/EGGFlashCore/include/egg/Firmware.h
 # existed, and the mutation survived into every LATER mutant -- which then made
 # two correctly-labelled equivalent mutants look wrongly labelled. The harness
 # accused itself of a bug it did not have. Add a file here and nowhere else.
-MUTABLE=("$WP" "$FC" "$FW" "$FWH")
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -81,17 +90,35 @@ restore() {
   for f in "${MUTABLE[@]}"; do cp "$BACKUP/$(basename "$f")" "$f"; done
   touch "${MUTABLE[@]}"
 }
-trap 'restore; cmake --build build --target test-flash >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT
+trap 'restore; cmake --build build >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT
+
+# Which suite grades a mutation, and which object files must die for the
+# rebuild to be real. Derived from the path so that adding a mutant never means
+# remembering to say which target it belongs to -- the drift that already cost
+# this script one false result when MUTABLE was two hardcoded lists.
+target_for() {
+  case "$1" in
+    Sources/EGGConfigCore/*) echo "test-config" ;;
+    *)                       echo "test-flash" ;;
+  esac
+}
+objdir_for() {
+  case "$1" in
+    Sources/EGGConfigCore/*) echo "EGGConfigCore" ;;
+    *)                       echo "EGGFlashCore" ;;
+  esac
+}
 
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
 # The clean binary's hash. Any mutant build equal to this did not take effect.
 restore
-cmake --build build --target test-flash >/dev/null 2>&1 || {
+cmake --build build >/dev/null 2>&1 || {
   echo "the CLEAN tree does not build -- nothing below would mean anything"; exit 2; }
-CLEAN_HASH=$(shasum -a 256 ./build/test-flash | cut -d' ' -f1)
-./build/test-flash >/dev/null 2>&1 || {
-  echo "the CLEAN tree does not PASS its own tests -- fix that first"; exit 2; }
+for t in test-flash test-config; do
+  ./build/$t >/dev/null 2>&1 || {
+    echo "the CLEAN tree does not PASS $t -- fix that first"; exit 2; }
+done
 
 mutate() {  # <kill|equiv> <name> <file> <old|||new>
   local kind="$1" name="$2" file="$3" expr="$4"
@@ -131,16 +158,18 @@ PY
   #
   # The same bug bit Tests/test_config_set.sh's self-check within the hour, so
   # it is a property of this repo's build, not of one script.
-  rm -f ./build/test-flash
-  find build -name '*.o' -path '*EGGFlashCore*' -delete 2>/dev/null
+  local target; target=$(target_for "$file")
+  local objdir; objdir=$(objdir_for "$file")
+  rm -f "./build/$target"
+  find build -name '*.o' -path "*$objdir*" -delete 2>/dev/null
   touch "$file"
-  if ! cmake --build build --target test-flash >/dev/null 2>&1 \
-     || [ ! -x ./build/test-flash ]; then
+  if ! cmake --build build --target "$target" >/dev/null 2>&1 \
+     || [ ! -x "./build/$target" ]; then
     echo "  ????      $name -- did not compile"; BROKEN=$((BROKEN+1)); return
   fi
   local rc=0
   local log; log=$(mktemp)
-  runlimitedto "$log" 90 ./build/test-flash || rc=$?
+  runlimitedto "$log" 90 "./build/$target" || rc=$?
   # Grade on the SUITE'S OWN VERDICT as well as the exit code, and shout when
   # they disagree. The exit code alone made this script unreadable: it cannot
   # tell "the suite passed" from "the suite never ran".
@@ -276,6 +305,139 @@ mutate equiv "removes the per-block checksum comparison" "$WP" \
 # could tell the difference.
 mutate equiv "write index loses its high byte" "$FC" \
 '    f[3] = static_cast<std::uint8_t>((deviceIndex >> 8) & 0xFF);|||    // MUTANT (equivalent): high byte dropped'
+
+echo
+echo "Mutation testing EGGConfigCore"
+echo
+
+# --- Real defects. All of these must be killed. ----------------------------
+
+# THE ONE THAT MATTERS MOST. §4.1: "Never let a reported success stand in for
+# verifying the data itself." Trust the device's acknowledgement and skip the
+# read-back entirely. A device that acks a write it never performed then looks
+# identical to one that worked, which is exactly the failure MockConfigDevice's
+# falseSuccessRate exists to produce.
+mutate kill "trusts the write ack instead of reading back" "$CS" \
+'    if (!read(o.after, rr)) { o.result = Result::VerifyReadFailed; return o; }|||    if (!read(o.after, rr)) { o.result = Result::Ok; return o; }  // MUTANT'
+
+# Read back, then compare against the wrong thing. The read happens, the diff is
+# computed, everything looks diligent, and the comparison is vacuous.
+mutate kill "verifies the read-back against itself" "$CS" \
+'    if (o.after[at] != want) { o.result = Result::VerifyMismatch; return o; }|||    if (o.after[at] != o.after[at]) { o.result = Result::VerifyMismatch; return o; }  // MUTANT'
+
+# §4.1: "Never write after a failed read." Carry on with whatever `before`
+# happens to contain.
+mutate kill "writes even after the read failed" "$CS" \
+'    if (!read(o.before, o.result)) return o;
+
+    const std::size_t at = kPayloadOffset + f.recordOffset;|||    read(o.before, o.result);  // MUTANT
+    if (o.before.size() != kLargeLen) o.before.assign(kLargeLen, 0);
+
+    const std::size_t at = kPayloadOffset + f.recordOffset;'
+
+# §4.1: "Read-modify-write always. Never construct a settings blob from
+# scratch." Send a zeroed payload with one byte set, which is a factory reset
+# performed by accident on every single write.
+mutate kill "builds the payload from scratch instead of the read" "$CS" \
+'    std::memcpy(frame.data() + kPayloadOffset,
+                before.data() + kPayloadOffset, kPayloadLen);
+
+    const std::size_t at = kPayloadOffset + f.recordOffset;|||    // MUTANT: no copy; the payload stays zeroed
+    const std::size_t at = kPayloadOffset + f.recordOffset;'
+
+# The 16-byte-early bug. A record offset is not a frame offset, and writing the
+# field at f.recordOffset lands in the header instead of the payload. This is a
+# real bug this project already made once; test_config_replay.py caught it.
+mutate kill "writes the field at the record offset, not the payload offset" "$CS" \
+'    const std::size_t at = kPayloadOffset + f.recordOffset;
+    frame[at] = composeByte(before[at], f, encodedValue);|||    const std::size_t at = f.recordOffset;  // MUTANT
+    frame[at] = composeByte(before[at], f, encodedValue);'
+
+# A redundant `set` must send nothing. Under MatchVendor the frame legitimately
+# differs from the read at record 0x01..0x04, so testing the FRAME rather than
+# the FIELD writes on every re-apply of a setting the user already has.
+mutate kill "a redundant set still writes, to normalise the policy bytes" "$CS" \
+'    if (o.before[at] == want) { o.result = Result::AlreadySet; return o; }|||    // MUTANT: field-level no-op check removed'
+
+# The unknown-byte policy must not fire under Preserve. Removing the early
+# return makes Preserve behave as MatchVendor, i.e. silently ignores the flag.
+mutate kill "the Preserve policy secretly zeroes the unknown bytes anyway" "$CS" \
+'    if (policy != UnknownBytes::MatchVendor) return;|||    // MUTANT: policy ignored'
+
+# Act on any record the device returns. §4.1: "Validate a read is structurally
+# plausible before acting on it."
+mutate kill "skips the plausibility check on a read" "$CS" \
+'    if (!(log_ ? plausible(r.buf, *log_) : plausible(r.buf))) {
+        result = Result::ReadImplausible; return false;
+    }|||    // MUTANT: plausibility not checked'
+
+# The policy zeroes one byte too many, clobbering record 0x00 -- which the
+# vendor DOES write and which is inside the settings proper.
+mutate kill "the unknown-byte policy zeroes one byte too many" "$CS" \
+'    for (std::size_t r = kRecordUnknownFirst; r <= kRecordUnknownLast; ++r)
+        frame[kPayloadOffset + r] = 0x00;|||    for (std::size_t r = kRecordUnknownFirst - 1; r <= kRecordUnknownLast; ++r)  // MUTANT
+        frame[kPayloadOffset + r] = 0x00;'
+
+# Sub-byte fields clobber their neighbours. Record 0x0b carries CPI downshift
+# AND smoothing AND a high nibble the vendor never writes; §1.3 applies inside a
+# byte exactly as it does between bytes.
+mutate kill "sub-byte writes clobber the rest of the byte" "$CR" \
+'    return static_cast<std::uint8_t>((old & ~f.mask) |
+                                     ((value << f.shift) & f.mask));|||    return static_cast<std::uint8_t>((value << f.shift) & f.mask);  // MUTANT'
+
+# The known-good blob stops being known-good: every read overwrites it, so the
+# undo becomes a mirror of whatever state the device is in now.
+mutate kill "the vault overwrites the first record it saved" "$CV" \
+'    if (holds_) return false;                      // never overwrite|||    // MUTANT: overwrite freely'
+
+# The vault accepts a record that failed validation, which is worse than having
+# no vault: it looks like an undo and is not.
+mutate kill "the vault accepts an implausible record" "$CV" \
+'    if (!plausible(record)) {
+        err_ = "the record offered was not structurally plausible";
+        return false;
+    }|||    // MUTANT: anything offered is saved'
+
+# --- Equivalent. The suite must NOT fail on these. -------------------------
+
+# THE PRE-SEND SELF-CHECK, and this label is a finding rather than a
+# convenience. It compares the frame we built against the record we read and
+# requires the difference to be exactly what we meant. It cannot fire, because
+# buildFrame is the only thing that produces the frame and it is deterministic:
+# frame[at] is composeByte(before[at], f, v) and `want` is the SAME call, so
+# sawField is always true; every other byte is either copied verbatim or set by
+# applyUnknownPolicy, which policyPermits accepts. No reachable input separates
+# the two branches.
+#
+# That does NOT make the check pointless, and calling this "a hole" would be the
+# wrong reading. Its job is to catch a FUTURE bug in buildFrame, and the four
+# buildFrame mutants above are what demonstrate such bugs exist to be caught.
+# What it means is that today the check is REDUNDANT against everything the
+# suite can produce -- exactly the situation §6.2 says to report rather than
+# paper over with a test that asserts something untrue.
+mutate equiv "removes the pre-send self-check (redundant, not useless)" "$CS" \
+'    if (!selfOk || !sawField) { o.result = Result::RefusedSelfCheck; return o; }|||    if (false) { o.result = Result::RefusedSelfCheck; return o; }  // MUTANT (equivalent)'
+
+# applyUnknownPolicy is the only writer of those four bytes and it writes 0x00
+# unconditionally, so by the time policyPermits sees a ByteChange for one of
+# them, c.after is 0x00 already. The clause is defence against a change in
+# applyUnknownPolicy, not a live condition -- so no reachable input can tell the
+# difference, and a test that "caught" this would be asserting something untrue.
+mutate equiv "drops a redundant clause from the policy self-check" "$CS" \
+'           c.recordOffset <= kRecordUnknownLast &&
+           c.after == 0x00;|||           c.recordOffset <= kRecordUnknownLast;  // MUTANT (equivalent)'
+
+# Transport::frame(kReportLarge, ...) returns exactly wireLength(0xA0) = 1041 by
+# construction, so this guard is unreachable. We keep it because Transport is
+# the layer we would least like to be wrong about, not because it fires.
+mutate equiv "removes an unreachable length guard in buildFrame" "$CS" \
+'    std::vector<std::uint8_t> frame = Transport::frame(kReportLarge, kWriteSettings);
+    if (frame.size() != kLargeLen) return {};
+
+    // Read-modify-write|||    std::vector<std::uint8_t> frame = Transport::frame(kReportLarge, kWriteSettings);
+    // MUTANT (equivalent): guard removed
+
+    // Read-modify-write'
 
 echo
 echo "killed $KILLED of $((KILLED+HOLES)) real defects; $EQUIV_OK of $((EQUIV_OK+EQUIV_BAD)) equivalent mutants behaved as predicted"

@@ -51,6 +51,7 @@ bool MockConfigDevice::roll(double p) {
 
 Reply MockConfigDevice::readRecord() {
     ++reads_;
+    if (f_.readFailsAfterWrite && writes_ > 0) return fail(Outcome::TransportFail);
     if (roll(f_.transportFailRate)) return fail(Outcome::TransportFail);
     if (roll(f_.rejectReadRate)) {
         Reply r;

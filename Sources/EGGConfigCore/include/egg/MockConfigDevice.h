@@ -50,6 +50,14 @@ struct ConfigFaults {
     // be reported, not treated as our own bug.
     double extraByteRate = 0.0;
 
+    // THE SECOND DANGEROUS ONE, and the mutation harness is what found it
+    // missing. Acknowledge the write, then refuse the read that verifies it.
+    // The session cannot then say what the device holds -- Result is
+    // VerifyReadFailed, which is the only outcome in the whole enum meaning
+    // "state UNKNOWN". Without this fault nothing could reach that branch, so a
+    // mutant that turned it into Result::Ok survived the entire suite.
+    bool readFailsAfterWrite = false;
+
     // Model the hypothesis that record 0x01 belongs to the DEVICE: whatever the
     // host writes there, the device puts 0x80 back. If that were true, a
     // session that preserves 0x80 and one that zeroes it would both converge,
