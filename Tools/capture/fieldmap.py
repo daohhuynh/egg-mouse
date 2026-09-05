@@ -66,6 +66,24 @@ from records import frames
 CMD_WRITE = 0x11
 CMD_READ = 0x12
 
+# Lines that produced NO APPLY, and so no WRITE frame and no diff.
+#
+# The session log numbers lines 1..N and never renumbers, because renumbering
+# mid-file is how a log stops matching the capture it describes. So a setting
+# that turns out not to exist still occupies a number and still has no frame
+# behind it. An earlier version of the procedure said to press APPLY anyway with
+# nothing changed, which would have kept the counts equal -- the owner established at
+# the machine on 2026-09-05 that THE VENDOR TOOL GREYS APPLY OUT UNTIL SOMETHING
+# CHANGES, so that is not available and the log will genuinely have more lines
+# than the capture has frames.
+#
+# Handling it here rather than in the procedure is deliberate: the log records
+# what happened, and the tool adapts to it. A line is dropped ONLY for an
+# explicit marker, every drop is printed, and the count check still runs
+# afterwards -- so a wrong drop turns into a refusal rather than a silent
+# relabelling.
+NO_APPLY = re.compile(r"\b(NOT PRESENT|NOT FOUND|NO APPLY|SKIPPED)\b", re.I)
+
 # Below this many diffs, "moved on every APPLY" is meaningless -- with two
 # APPLYs every byte that moved at all qualifies.
 MIN_FOR_ALWAYS = 4
@@ -246,6 +264,17 @@ def main():
             entries, problems = parse_log(logp, cap)
             for p in problems:
                 print("\n  *** %s" % p)
+            dropped = [e for e in entries if NO_APPLY.search(e[1])]
+            if dropped:
+                entries = [e for e in entries if not NO_APPLY.search(e[1])]
+                print("\n  NO APPLY BEHIND THESE LOG LINES, so they are not "
+                      "attributed anything:")
+                for n, t in dropped:
+                    print("    %3d  %s" % (n, t))
+                print("  Read that list. Every one of them must really have had"
+                      " no APPLY --\n  if one of them did, the count below can "
+                      "still come out equal and every\n  label after it will be"
+                      " wrong while looking correct.")
             if len(entries) != len(diffs):
                 print("\n  *** COUNT MISMATCH: %d WRITE frames but %d numbered "
                       "log lines." % (len(diffs), len(entries)))

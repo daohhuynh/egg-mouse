@@ -72,9 +72,11 @@ def base():
 
 
 FAILS = []
+RAN = []
 
 
 def check(name, cond, out=""):
+    RAN.append(name)
     print(("  PASS  " if cond else "  FAIL  ") + name)
     if not cond:
         FAILS.append(name)
@@ -99,6 +101,27 @@ check("happy path attributes three observations to 0x0020",
 out = run([bytes(s0), bytes(s1), bytes(s2), bytes(s3)],
           "--- 02-basic.pcapng ---\n 1  polling 125\n 2  polling 250\n")
 check("count mismatch refuses the whole field map",
+      "COUNT MISMATCH" in out and "FIELD MAP" not in out, out)
+
+# 2b. A NOT PRESENT line has no APPLY behind it. It must be dropped from the
+# attribution and the REST must still line up -- because the vendor tool greys
+# APPLY out until something changes, so this log shape is the normal one, not
+# an error. Getting this wrong shifts every later label by one.
+out = run([bytes(s0), bytes(s1), bytes(s2), bytes(s3)],
+          "--- 02-basic.pcapng ---\n 1  polling 125\n 2  polling 250\n"
+          " 3  ripple control -- NOT PRESENT on the page\n 4  polling 500\n")
+check("a NOT PRESENT line is dropped and the rest still attribute correctly",
+      "NO APPLY BEHIND THESE LOG LINES" in out
+      and "ripple control" in out
+      and "COUNT MISMATCH" not in out
+      and "polling 500" in out and "FIELD MAP" in out, out)
+
+# 2c. And the drop must not become a way to make any log fit. Drop one line and
+# the counts STILL disagree -> refuse, exactly as before.
+out = run([bytes(s0), bytes(s1), bytes(s2), bytes(s3)],
+          "--- 02-basic.pcapng ---\n 1  polling 125\n"
+          " 2  ripple control -- NOT PRESENT\n")
+check("dropping a line does not rescue a log that still miscounts",
       "COUNT MISMATCH" in out and "FIELD MAP" not in out, out)
 
 # 3. A setting that moves two separate runs is reported as two, never reduced.
@@ -204,5 +227,7 @@ check("a miscounted capture yields no fields but IS listed as unattributed",
       and doc["unattributed"][0]["write_frames"] == 3, json.dumps(doc)[:400])
 os.unlink(out); os.unlink(logp)
 
-print("\n%d/%d passed" % (12 - len(FAILS), 12))
+# Counted, not hardcoded. A literal total silently stops tracking the moment a
+# check is added, and reports a number that is no longer about this file.
+print("\n%d/%d passed" % (len(RAN) - len(FAILS), len(RAN)))
 sys.exit(1 if FAILS else 0)
