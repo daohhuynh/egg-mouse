@@ -294,6 +294,28 @@ int cmdRestore(const std::string& path, bool verbose, bool yes) {
     // FUN_00404180, not guessed, and not from a capture.
     auto out = Transport::frame(kReportLarge, cfg::kWriteSettings);
     std::memcpy(out.data() + kPayloadOffset, want.data() + kPayloadOffset, kPayloadLen);
+
+    // §7.4. The ONE place we knowingly put different bytes on the wire than the
+    // vendor does. Its serializer never writes record 0x01..0x04, so it sends
+    // zeros; the device reports 0x80 there. §1.3 says preserve what we do not
+    // understand, so we send it back -- and say so, because a divergence from
+    // the only writer observed to work must never be silent. the owner has not ruled
+    // on this yet; when he does, this block is the single place to change.
+    {
+        bool differs = false;
+        for (std::size_t k = kRecordUnknownFirst; k <= kRecordUnknownLast; ++k)
+            if (out[kPayloadOffset + k] != 0) differs = true;
+        if (differs) {
+            std::printf(
+                "\nNOTE: record bytes 0x%02zx..0x%02zx are being PRESERVED as",
+                kRecordUnknownFirst, kRecordUnknownLast);
+            for (std::size_t k = kRecordUnknownFirst; k <= kRecordUnknownLast; ++k)
+                std::printf(" %02x", out[kPayloadOffset + k]);
+            std::puts("\n      The vendor tool sends zeros there (config-protocol.md"
+                      " §7.4).\n      This is a deliberate, unresolved difference,"
+                      " not a defect.");
+        }
+    }
     Reply w = t.exchange(out, kReportSmall, "A0 11 write settings");
     if (!w.ok()) {
         std::printf("write was not acknowledged: %s (status 0x%02x)\n",

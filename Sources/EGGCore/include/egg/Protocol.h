@@ -69,6 +69,25 @@ inline constexpr std::size_t kStatusOffset  = 1;
 inline constexpr std::size_t kPayloadOffset = 0x10;
 inline constexpr std::size_t kPayloadLen    = 1024;
 
+// [D] The settings record occupies only the first 115 bytes of the 1024-byte
+// payload -- config-protocol.md §7.3, derived from the serializer FUN_004042d0
+// at cfg107 0x004042d0..0x004045dc, which writes record offsets 0x00..0x72 and
+// nothing beyond. Record offset r is payload offset r, so it is wire 0x10 + r.
+// Corroborated: the last non-zero byte of 01-baseline.pcapng is wire 0x81 [O].
+inline constexpr std::size_t kRecordLen = 0x73;   // 115
+
+// [D] The four record bytes the vendor's serializer never writes, so its frames
+// carry zeros there while the device reports 0x80 00 00 00. §7.4 -- the single
+// place where §4.1 read-modify-write and vendor-mimicry disagree on a wire byte.
+// UNRESOLVED, the owner's call. Named here so there is exactly one place to change.
+inline constexpr std::size_t kRecordUnknownFirst = 0x01;
+inline constexpr std::size_t kRecordUnknownLast  = 0x04;
+
+static_assert(kRecordLen <= kPayloadLen,
+              "the record cannot be larger than the payload that carries it");
+static_assert(kRecordUnknownLast < kRecordLen,
+              "the unknown bytes must lie inside the record");
+
 static_assert(kPayloadOffset + kPayloadLen + 1 == kLargeLen,
               "1041 = 1 report id + 15 header + 1024 payload + 1 trailing");
 
