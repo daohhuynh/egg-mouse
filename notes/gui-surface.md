@@ -228,8 +228,19 @@ The owner, 2026-09-05: *"changing to gx safe mode locks the multiclick filter at
 greys it out so you cant change it"*, and it is per-button — *"if i do the first
 SPDT it does that to the left button filter"*.
 
+**Both** non-Off modes lock it — the owner, same session: *"gx speed mode also locks
+the value. going back to off ungreys it, but it still stays 8 all the way"*.
+
 So the SPDT mode combo (`Off` / `GX Speed` / `GX Safe`) and the multiclick
-filter are **coupled**: selecting GX Safe writes the filter as well as the mode.
+filter are **coupled**: entering either GX mode writes the filter as well as the
+mode, and returning to `Off` re-enables the control **without restoring the
+previous value**.
+
+The lock is therefore **one-way and idempotent**, which has a convenient
+consequence for the capture: only the *first* transition out of `Off` moves two
+bytes. Every later mode change on that button moves one, because the filter is
+already 8. `Off -> GX Safe` is a double; `GX Safe -> GX Speed -> Off` are
+singles.
 
 **Consequence for the capture,** and it is why this had to be written down the
 moment it appeared rather than discovered in the diff: a GX Safe line changes
