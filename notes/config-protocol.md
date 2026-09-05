@@ -1593,3 +1593,72 @@ not mine to settle and nothing is changed until the owner rules.
 default) and must say so when it runs, so the divergence is never silent. The
 same four bytes are also the reason a future frame-by-frame diff of our output
 against a vendor capture will show a difference that is **expected, not a bug**.
+
+## 7.5 Record byte `0x05` is the polling rate, encoded as a divisor  [D]
+
+The first record byte whose **meaning and encoding** are derived rather than
+guessed, and it is testable by `02-basic` lines 1–7.
+
+`0x00413a79` dispatches on the stored byte and `0x00413a94`–`0x00413b8f` is a
+seven-way switch. Every arm does exactly two things: `CB_SETCURSEL` (`0x14E`) on
+the combo at dialog `+0x13b8`, and a write of one constant to **both** mirrors,
+`0x0057f2a6` and `0x0057f216`:
+
+| arm | combo index | byte written |
+| --- | --- | --- |
+| `0x413a94` | 0 | `0x40` = 64 |
+| `0x413abb` | 1 | `0x20` = 32 |
+| `0x413ae2` | 2 | `0x10` = 16 |
+| `0x413b09` | 3 | `0x08` = 8 |
+| `0x413b2d` | 4 | `0x04` = 4 |
+| `0x413b53` | 5 | `0x02` = 2 |
+| `0x413b79` | 6 | `0x01` = 1 |
+
+`0x0057f2a6` is the settings-object mirror at object offset `0x06`
+(`0x0057f2a0 + 0x06`, §9's `FUN_00404830`), and the serializer maps object
+`0x06` to **record `0x05`** (§7.3, instruction `0x4042d5`). `0x0057f216` is the
+same offset in the second parallel block at `0x0057f210`.
+
+**Both directions were checked, which is what makes this more than a pattern.**
+The read path at `0x413a79` does `movzbl (%ebx),%eax; decl %eax; cmpl $0x3f; ja
+default`, then indexes a 64-entry byte table at `0x00413c04` to pick a case from
+the address table at `0x00413be4`. Decoding both tables from raw bytes:
+
+```
+value  1 -> case 0 -> 0x413b79 -> writes 0x01, selects index 6
+value  2 -> case 1 -> 0x413b53 -> writes 0x02, selects index 5
+value  4 -> case 2 -> 0x413b2d -> writes 0x04, selects index 4
+value  8 -> case 3 -> 0x413b09 -> writes 0x08, selects index 3
+value 16 -> case 4 -> 0x413ae2 -> writes 0x10, selects index 2
+value 32 -> case 5 -> 0x413abb -> writes 0x20, selects index 1
+value 64 -> case 6 -> 0x413a94 -> writes 0x40, selects index 0
+everything else (1..64) -> case 7 -> 0x413bab, which does nothing
+```
+
+Every value writes itself back and selects the arm that produced it, so the byte
+round-trips. Only the seven powers of two from 1 to 64 are accepted; the other
+57 values in 1..64 fall to a no-op, and 0 and >64 never reach the table at all.
+
+### The prediction, registered before any polling capture was read
+
+`02-basic` lines 1–7 step polling 125 → 250 → 500 → 1000 → 2000 → 4000 → 8000,
+one APPLY each. **I have not seen that file.**
+
+- **Expect:** record `0x05` (wire `0x15`) is the only byte those seven APPLYs
+  move as a settings change, taking the values `40 20 10 08 04 02 01` in that
+  order — and in general **`polling_rate × record[0x05] == 8000`**.
+- **REFUTED IF:** record `0x05` does not change across those lines; or it takes
+  a value outside {1,2,4,8,16,32,64}; or the product is not 8000 for any line.
+- **Weaker on order, deliberately.** That the combo lists 125 first is `[G]` —
+  the switch fixes index↔value but nothing here says which *rate* an index
+  displays. If the list is descending the sequence reverses and the product law
+  still holds, so **the product is the real claim** and the byte order is a
+  secondary one that a refutation should not be allowed to hide behind.
+- **Matters:** it is the first record byte with a derived meaning, it gives
+  `egg-config set polling` a value mapping that needs no capture, and the
+  round-trip means a wrong value cannot be silently accepted — the vendor's own
+  reader drops anything that is not a power of two to a no-op.
+
+**Correction to a lead in `working-memory.md`:** it recorded dialog `+0x13b8` as
+"a 7-tab control". It is a **combo box** — every access here is `CB_SETCURSEL`,
+which a tab control does not take (`TCM_SETCURSEL` is `0x130C`).
