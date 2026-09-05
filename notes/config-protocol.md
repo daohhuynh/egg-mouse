@@ -2286,3 +2286,60 @@ modifier values are not `0x00`/`0x01`/`0x03`, or CTRL+SHIFT is not the bitwise
 OR of the CTRL and SHIFT cases. A refutation of the last clause would mean the
 field is an enumerated combination rather than a bitfield, which would make
 every unobserved combination unwritable rather than merely underived.
+
+## 7.13 The button-action menu, recovered from the string table  [D]
+
+The action vocabulary is one contiguous UTF-16 run at file offset `0x155cde`–
+`0x155e78` in cfg107, and its order is informative: **submenu items appear
+first, then the name of the group they belong to.** Reading it in file order and
+applying that rule gives the whole menu:
+
+| group | items, in file order |
+| --- | --- |
+| **MOUSE** | LEFT CLICK, RIGHT CLICK, MIDDLE CLICK, FORWARD, BACK, SCROLL UP, SCROLL DOWN |
+| **KEYBOARD KEY** | leaf — opens dialog 152 (§7.12) |
+| **CPI** | CPI LOOP, FIXED CPI |
+| **MEDIA** | PLAY/PAUSE, NEXT, PREVIOUS, MUTE, VOLUME UP, VOLUME DOWN, BROWSER, EXPLORER |
+| **DISABLE** | leaf |
+
+**Committed prediction: the top-level groups are, in order, `MOUSE`,
+`KEYBOARD KEY`, `CPI`, `MEDIA`, `DISABLE` — five of them.**
+
+`log.txt`'s ANSWERS block asks the owner for exactly this list and **is deliberately
+not being told the answer** (§6.2: never state the expected answer in the
+prompt). He also already screenshotted the dropdown and every submenu, so this
+is checkable against material that exists, by someone who was not primed.
+
+**REFUTED IF** the menu shows a group not in this list, omits one that is, or
+orders them differently. Note the group *order* is the weakest part of the claim
+— the string table's order is the order the items were declared, which is
+usually but not necessarily the order they are added to the menu. If only the
+order is wrong, that is a partial refutation and the membership claim survives.
+
+This also fixes the guesses in `log.txt` section 05, which named the groups
+`MOUSE`, `MEDIA`, `CPI` and `KEYBOARD` from a rough strings pass. Four of those
+five are right; the fifth is `KEYBOARD KEY`, not `KEYBOARD`.
+
+### The LED page names THREE zones, and the record block has FOUR entries
+`0x1925e0`–`0x192788` holds the unreachable LED page's controls: `LED effect`,
+**`Scroll led`**, **`Logo led`**, **`DPI led`**, `Red:`, `Green:`, `Blue:`,
+`Apply led settings`.
+
+This is a fact worth recording precisely because it does **not** resolve §7.3,
+and it would be easy to pretend it does. Three named zones against four 5-byte
+colour records is a mismatch, not a match. It rules nothing in:
+
+- it does not restore "the tail is a CPI stage index", which the owner refuted by
+  direct observation and which stays refuted;
+- it does not establish "the tail is a zone id", because that needs four zones
+  and the vendor's own UI names three;
+- it does confirm that this product family has RGB lighting the OP1 8k v2 does
+  not expose, which is consistent with the block being inherited rather than
+  used — but "consistent with" is not evidence for.
+
+It also says the vendor's own name for the underside indicator is **`DPI led`**,
+which is at least a shared vocabulary with the owner's observation.
+
+Meaning stays `[G]`. §1.3 preserves the bytes. The point of writing this down is
+that the next person to look at §7.3 will find the three-zone fact already
+weighed rather than arriving at it fresh and reading it as a solution.

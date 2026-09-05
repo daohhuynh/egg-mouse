@@ -127,6 +127,16 @@ keeping.
 
 ## Not yet scored, and what it will take
 
+- **`button-menu-groups`** (`config-protocol.md` §7.13). Committed 2026-09-05:
+  the button dropdown's top-level groups are `MOUSE`, `KEYBOARD KEY`, `CPI`,
+  `MEDIA`, `DISABLE`, in that order, and no others. Recovered from the string
+  table's declaration order, where submenu items precede their group name.
+  **Deliberately withheld from `log.txt`**, which still asks the owner the open
+  question — he has already screenshotted the dropdown and every submenu, so
+  this is checkable against existing material by an observer who was not primed.
+  The membership claim is much stronger than the order claim; score them
+  separately.
+
 - **#19 `cfg-basic-page-invisible-buttons`** (`Apply CPI settings` id 1059,
   `Surface Calibration` id 1061). Two questions already sit in `log.txt`'s
   ANSWERS block. This one has real weight: `Surface Calibration` would be a
