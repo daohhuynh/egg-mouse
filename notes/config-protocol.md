@@ -1340,9 +1340,11 @@ read. So `0x413db0`'s offsets are host-side C++ member offsets and **must not be
 used as wire offsets**. They are still worth having: the *values* are the
 factory defaults, and a factory-reset capture makes them directly checkable.
 
-**This is now a pre-registered prediction.** the owner is capturing a factory reset
-(`01b-reset.pcapng`) before re-running `02-basic`. The baseline read in that
-file is the factory-default record on the wire, so:
+**This is now a pre-registered prediction.** It is tested by
+`07-factory-reset.pcapng`, which resets and then **relaunches the config tool
+inside the same capture** — so that file carries the factory-default record as a
+fresh baseline read. (A separate `01b-reset` was planned and dropped on
+2026-09-05: 07 does the same job and the relaunch makes it strictly better.)
 
 - **Expect:** its CPI table at wire `0x34` reads 400/400, 800/800, 1600/1600,
   3200/3200, and its button table at wire `0x48` reads codes
