@@ -186,84 +186,141 @@ four. Whichever you see settles which list is dead.
 
 That is the whole job. Roughly one short line per change.
 
-### How many values to capture, and why it differs by control type
+### RULES. Read these once; they remove every judgement call below.
 
-**We can only ship a setting value we have actually seen on the wire.** Guessing
-an encoding means writing a byte whose meaning is `[G]`, which `CLAUDE.md` §1.3
-forbids. That gives one rule per control type:
+1. **One change, then APPLY once, then wait two seconds.** Never batch two
+   changes into a single APPLY. Never click APPLY twice for one change.
+2. **Every numbered line below is exactly one APPLY.** Line 7 in the table is
+   the 7th record in that capture. That correspondence is the entire labelling
+   system, so it must not break.
+3. **If a value is refused, clamped, greyed out, or the control will not accept
+   it: write `REFUSED` in log.txt with what actually happened, and go to the next
+   line.** Do **not** substitute a different value. A silent substitution makes
+   that diff and every diff after it unattributable. A refusal is *data* — the
+   vendor enforcing a rule is itself a finding.
+4. **If you cannot do a line at all, write `SKIPPED` and keep the numbering.**
+   Never renumber and never fill the gap with something else.
+5. **Dropdown items are named by POSITION — 1st, 2nd, 3rd from the top** — because
+   we have never seen most of these lists and their names are unknown to me.
+   Write down what each position is actually called.
+6. **If a number gets clamped to something else, write the value it actually
+   became.** `set 400 -> became 800` is useful; `400` when it became 800 is
+   poison.
+7. **If APPLY does nothing, or the app hangs or crashes,** note it, restart the
+   app, start a fresh capture file with a `b` suffix (`02-basic-b.pcapng`), and
+   note where you resumed.
 
-| control | capture | why |
-|---|---|---|
-| **checkbox** | one toggle | two states, and one toggle shows you both |
-| **dropdown** | **every single option** | there is no formula. Nothing says index 3 means `0x08` rather than `0x03`. An option you skip is an option the app cannot offer |
-| **number / slider** | **three values** | there IS a formula. Two points establish it, the third proves it. Three covers a slider with 26,000 positions |
+### How many values, and why it differs by control type
 
-Dropdowns are the ones people cut short, and they are exactly the ones where
-cutting short costs you a feature. Each extra option is about eight seconds:
-pick it, click APPLY.
+**We can only ship a value we have observed.** Offering an unobserved one means
+writing a byte whose meaning is `[G]`, which `CLAUDE.md` §1.3 forbids. So:
+checkbox → one click (both states seen); **dropdown → every option** (no formula
+exists, a skipped option is a feature we cannot ship); number → **three values**
+(a formula exists; two set it, the third proves it).
 
-**The six button-assignment dropdowns are the exception.** Their lists are long
-and we have not traced them, so do not try to exhaust them — see `04-buttons`.
+---
 
 ### `02-basic.pcapng` — Basic page
-| # | change | to |
-|---|---|---|
-| 1 | Polling Rate | **every option, one at a time, APPLY between each** — 125, 250, 500, 1000, 2000, 4000, 8000. Do this first: it also quiets the capture. **Note how many options the list has** |
-| 2 | Angle Snapping | toggle |
-| 3 | Ripple Control | toggle |
-| 4 | Disable LED on Lift-Off | toggle |
-| 5 | CPI Levels | **every option** — 1, 2, 3, 4 |
-| 6 | CPI level 1 | **three values: 400, then 800, then 3200** |
-| 7 | CPI level 2 | **1600** (proves level 2 is a different byte from level 1) |
-| 8 | LOD | **every option** — 0.7 through 1.7 and 2.0. **Note how many there are** |
-| 9 | X/Y: set X to a different value from Y | note both numbers |
-| 10 | the four unlabelled radio buttons | **click each of the four in turn** — note which position is which |
+
+| # | do exactly this |
+|---|---|
+| 1 | Polling Rate → **125** |
+| 2 | Polling Rate → **250** |
+| 3 | Polling Rate → **500** |
+| 4 | Polling Rate → **1000** |
+| 5 | Polling Rate → **2000** |
+| 6 | Polling Rate → **4000** |
+| 7 | Polling Rate → **8000** |
+| 8 | click **Angle Snapping** once |
+| 9 | click **Ripple Control** once |
+| 10 | click **Disable LED on Lift-Off** once |
+| 11 | CPI Levels → **1** |
+| 12 | CPI Levels → **2** |
+| 13 | CPI Levels → **3** |
+| 14 | CPI Levels → **4** |
+| 15 | CPI level 1 → **400** |
+| 16 | CPI level 1 → **800** |
+| 17 | CPI level 1 → **3200** |
+| 18 | CPI level 2 → **1600** |
+| 19–30 | LOD → **every option in the list, top to bottom, one APPLY each.** Number them 19, 20, 21 … and write down how many there actually were |
+| 31 | CPI level 1 **X** value → **1000** (if X and Y are locked together, write `LOCKED` and skip to 33) |
+| 32 | CPI level 1 **Y** value → **2000** |
+| 33 | radio buttons → click the **1st** from the top |
+| 34 | radio buttons → click the **2nd** |
+| 35 | radio buttons → click the **3rd** |
+| 36 | radio buttons → click the **4th** |
 
 ### `03-sensor.pcapng` — Advanced Sensor page
-| # | change | to |
-|---|---|---|
-| 1 | Motion Sync | toggle |
-| 2 | Motion Jitter Filter | toggle |
-| 3 | Force max Sensor fps | toggle |
-| 4 | Sensor Glass Mode | toggle |
-| 5 | Sensor Angle Tuning | **three values** — try `0`, `20`, then the maximum. Note all three |
-| 6 | CPI Downshift Tuning | **every option**. **Note each name and how many there are** — three vs four settles a prediction |
-| 7 | Smoothing Tuning | **every option**. Note each name |
+
+| # | do exactly this |
+|---|---|
+| 1 | click **Motion Sync** once |
+| 2 | click **Motion Jitter Filter** once |
+| 3 | click **Force max Sensor fps** once |
+| 4 | click **Sensor Glass Mode** once |
+| 5 | Sensor Angle Tuning → **0** |
+| 6 | Sensor Angle Tuning → **20** |
+| 7 | Sensor Angle Tuning → **its maximum** (write the number) |
+| 8+ | CPI Downshift Tuning → **every option, top to bottom, one APPLY each.** Number them 8, 9, 10 … and write each name down |
+| next | Smoothing Tuning → **every option, top to bottom, one APPLY each.** Continue the numbering, write each name |
 
 ### `04-buttons.pcapng` — Buttons page
-| # | change | to |
-|---|---|---|
-| 1 | Left-handed Mode | toggle |
-| 2 | **Screenshot one button dropdown fully open**, and scroll it if it is long. We have never seen this list | |
-| 3 | pick ONE button (say FORWARD) and set it to **four different options**, APPLY between each | note each one |
-| 4 | set a **different** button to one of those same options | this proves whether each button has its own byte |
 
-Do not exhaust these lists. Four values from one button plus one from another
-tells us the byte layout and the encoding shape; the rest follows and is
-checkable later.
+| # | do exactly this |
+|---|---|
+| 1 | click **Left-handed Mode** once |
+| — | **Screenshot the FORWARD button's dropdown fully open.** Scroll it if it is long. No APPLY, no number — this is a screenshot only |
+| 2 | FORWARD button → **1st item in the list** |
+| 3 | FORWARD button → **2nd item** |
+| 4 | FORWARD button → **3rd item** |
+| 5 | FORWARD button → **4th item** |
+| 6 | BACK button → **2nd item** — the *same* item FORWARD holds from line 3 |
+| 7 | BACK button → **5th item** |
+
+**Line 6 is the one that may be refused**, if the app will not let two buttons
+share a function. **That refusal is a real finding — write `REFUSED` and exactly
+what it said, then do line 7 anyway.** Line 7 uses an item nothing else holds, so
+it works either way and still answers the question line 6 was asking: whether
+each button owns its own byte.
+
+Do not try to exhaust these lists — four items from one button plus one from
+another is enough.
 
 ### `05-buttonmapping.pcapng` — Button Mapping page
-| # | change | to |
-|---|---|---|
-| 1 | Slamclick Filter | toggle |
-| 2 | Left Button Multiclick Filter | **three values** — minimum, middle, maximum. Note all three |
-| 3 | Right Button Multiclick Filter | one distinctive value, note it |
-| 4 | first `SPDT:` combo | **every option** — OFF, GX Speed Mode, GX Safe Mode |
-| 5 | second `SPDT:` combo | **every option** |
-| 6 | the acknowledgement checkbox (1064) | toggle — it may or may not be stored at all, which is itself worth knowing |
+
+| # | do exactly this |
+|---|---|
+| 1 | click **Slamclick Filter** once |
+| 2 | Left Button Multiclick Filter → **its minimum** (write the number) |
+| 3 | Left Button Multiclick Filter → **its maximum** (write the number) |
+| 4 | Left Button Multiclick Filter → **roughly halfway** (write the number) |
+| 5 | Right Button Multiclick Filter → **its maximum** |
+| 6 | first `SPDT:` combo → **1st item** |
+| 7 | first `SPDT:` combo → **2nd item** |
+| 8 | first `SPDT:` combo → **3rd item** |
+| 9 | second `SPDT:` combo → **1st item** |
+| 10 | second `SPDT:` combo → **2nd item** |
+| 11 | second `SPDT:` combo → **3rd item** |
+| 12 | click the **"I understand…"** checkbox once |
+
+If either SPDT list has more than three items, keep going and renumber the rest.
 
 ### `06-led.pcapng` — LED window
-| # | change | to |
-|---|---|---|
-| 1 | R / G / B | **R=170, G=187, B=204** (`AA BB CC` — will leap out of the dump) |
-| 2 | R / G / B | **R=1, G=2, B=3** (proves the order and that they are three separate bytes) |
-| 3 | LED effect | **every option**. The resource holds only one item — **note how many the app actually shows**, since more than one means the list is built in code |
-| 4 | LED On / Off | toggle |
-| 5 | Scroll led | toggle |
-| 6 | Logo led | toggle |
-| 7 | DPI led | toggle |
 
-Note which apply button you used — this window has its own.
+| # | do exactly this |
+|---|---|
+| 1 | R=**170**, G=**187**, B=**204** — all three, then apply once (`AA BB CC`, will leap out of the dump) |
+| 2 | R=**1**, G=**2**, B=**3** — all three, then apply once (proves channel order and that they are separate bytes) |
+| 3+ | LED effect → **every option, top to bottom, one apply each.** Number them 3, 4, 5 … and write each name. If there is only one item, write `ONLY ONE` and go to the next line |
+| next | click **LED On / Off** once |
+| next | click **Scroll led** once |
+| next | click **Logo led** once |
+| next | click **DPI led** once |
+
+Line 1 is the only place two controls change before one apply, and it is
+deliberate: R, G and B are one logical setting and we want all three bytes to
+move together so the triple is unmistakable. **Note which apply button this
+window uses** — it has its own.
 
 ### `07-factory-reset.pcapng`
 Start capture, press **Factory Reset**, let it settle, stop. Then **read the
