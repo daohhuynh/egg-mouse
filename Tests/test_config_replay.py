@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""egg-config's write path, replayed against the vendor's own settings writes.
+
+The captures give 73 pairs of (record before, record after) where exactly one
+setting changed and we know which. That is a much better test than any record we
+could compose: for each pair, hand egg-config the BEFORE record and the same
+field change the vendor made, and the result must equal the vendor's AFTER
+record byte for byte.
+
+A pass means our encoding is right AND our read-modify-write preserved every
+byte we do not understand -- both halves of §4.1 and §1.3 in one assertion.
+
+A failure is a finding, not an embarrassment: it means either the encoding is
+wrong or the vendor moved more than one byte, and the second is worth knowing
+about before we write to hardware.
+"""
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, os.path.join(ROOT, "Tools", "capture"))
+BIN = os.path.join(ROOT, "build", "egg-config")
+
+# (capture, write index, field, value). The write index is into the ordered
+# settings writes of that capture; the map files in Tools/capture/maps say which
+# log line each one is. Only fields egg-config can actually set are listed.
+CASES = [
+    ("02-basic",  0, "polling", "125"),
+    ("02-basic",  1, "polling", "250"),
+    ("02-basic",  2, "polling", "500"),
+    ("02-basic",  3, "polling", "1000"),
+    ("02-basic",  4, "polling", "2000"),
+    ("02-basic",  5, "polling", "4000"),
+    ("02-basic",  6, "polling", "8000"),
+    ("02-basic",  7, "angle-snapping", "1"),
+    # the vendor's checkbox is "Disable LED on Lift-Off"; ticking it stores 0,
+    # and our field is named after the byte rather than the caption.
+    ("02-basic",  8, "led-on-liftoff", "0"),
+    ("02-basic",  9, "cpi-levels", "1"),
+    ("02-basic", 11, "cpi-levels", "3"),
+    ("02-basic", 12, "cpi-levels", "4"),
+    ("03-sensor", 0, "motion-sync", "1"),
+    ("03-sensor", 1, "force-max-fps", "0"),
+    ("03-sensor", 2, "sensor-angle", "20"),
+    ("03-sensor", 3, "sensor-angle", "-45"),
+    ("03-sensor", 4, "sensor-angle", "127"),
+]
+
+# Deliberately excluded, with the reason, so the exclusion is a claim and not a
+# silent gap. See test_the_excluded_case_really_does_move_two_bytes.
+EXCLUDED = [
+    ("02-basic", 10, "cpi-levels", "2",
+     "the vendor ALSO moved record 0x0d, the active CPI stage, because stage 4 "
+     "was selected and reducing the count to 2 forced it down"),
+]
+
+
+def records(capture):
+    import ingest
+    p = os.path.join(ROOT, "windows-run", "%s.pcapng" % capture)
+    rd = [r for _, r in ingest.settings_reads(p)]
+    wr = [r for _, r in ingest.settings_writes(p)]
+    return rd, wr
+
+
+# The on-disk format egg-config reads and writes: 1041 bytes, report id at [0],
+# fifteen header bytes, then the 1024-byte record at kPayloadOffset = 0x10.
+# ingest's record already starts at that boundary, so it drops straight in.
+PAYLOAD_OFFSET = 0x10
+FRAME_LEN = 0x411
+
+
+def as_saved(record):
+    buf = bytearray(FRAME_LEN)
+    buf[0] = 0xA0
+    n = min(len(record), FRAME_LEN - PAYLOAD_OFFSET)
+    buf[PAYLOAD_OFFSET:PAYLOAD_OFFSET + n] = record[:n]
+    return bytes(buf)
+
+
+def before_after(capture, i):
+    """The record the vendor started that write from, and the one it sent."""
+    rd, wr = records(capture)
+    before = wr[i - 1] if i > 0 else rd[0]
+    return as_saved(bytes(before)), as_saved(bytes(wr[i]))
+
+
+class Replay(unittest.TestCase):
+    def setUp(self):
+        if not os.path.exists(BIN):
+            self.skipTest("build/egg-config not built")
+        if not os.path.exists(os.path.join(ROOT, "windows-run")):
+            self.skipTest("no captures")
+
+    def encode(self, before, field, value):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, "in.bin"), os.path.join(d, "out.bin")
+            with open(a, "wb") as f:
+                f.write(before)
+            r = subprocess.run([BIN, "encode", field, value, a, b],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0,
+                             "egg-config encode failed: %s%s" % (r.stdout, r.stderr))
+            with open(b, "rb") as f:
+                return f.read()
+
+    def test_every_settable_field_reproduces_the_vendor_write(self):
+        """Ours must equal the vendor's, except at record 0x01 -- see below."""
+        for capture, i, field, value in CASES:
+            with self.subTest(capture=capture, write=i, field=field, value=value):
+                before, after = before_after(capture, i)
+                got = self.encode(before, field, value)
+                n = min(len(got), len(after))
+                d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
+                self.assertEqual(
+                    [x for x in d if x != 0x01], [],
+                    "%s write %d (%s=%s): differs from the vendor at record %s"
+                    % (capture, i, field, value, [hex(x) for x in d]))
+
+    def test_the_only_divergence_from_the_vendor_is_record_0x01(self):
+        """The one byte where we deliberately do not match, stated as a claim.
+
+        The device REPORTS 0x80 at record 0x01. On its first write after a read
+        the vendor sends 0x00 there -- it does not preserve what it was given.
+        We do preserve it, because §1.3 says read-modify-write keeps bytes whose
+        meaning is unknown, and 0x01's meaning is unknown.
+
+        So this is not a bug to fix quietly; it is an open decision for the owner,
+        recorded in working-memory.md. What the test pins down is the shape of
+        the divergence: it happens ONLY where the starting record came from a
+        device read, only at record 0x01, and nowhere else in 1024 bytes. If it
+        ever spreads to another byte, or shows up between two vendor writes,
+        that is new behaviour and this test fails.
+        """
+        seen_read_start, seen_write_start = 0, 0
+        for capture, i, field, value in CASES:
+            before, after = before_after(capture, i)
+            got = self.encode(before, field, value)
+            n = min(len(got), len(after))
+            d = [k - PAYLOAD_OFFSET for k in range(n) if got[k] != after[k]]
+            if i == 0:                       # started from the device's own read
+                seen_read_start += 1
+                self.assertEqual(d, [0x01],
+                                 "%s write 0: expected to differ only at record "
+                                 "0x01, differs at %s" % (capture, [hex(x) for x in d]))
+                self.assertEqual(got[PAYLOAD_OFFSET + 1], 0x80)
+                self.assertEqual(after[PAYLOAD_OFFSET + 1], 0x00)
+            else:                            # started from a previous vendor write
+                seen_write_start += 1
+                self.assertEqual(d, [], "%s write %d differs at %s"
+                                 % (capture, i, [hex(x) for x in d]))
+        self.assertGreaterEqual(seen_read_start, 2)
+        self.assertGreaterEqual(seen_write_start, 10)
+
+    def test_the_excluded_case_really_does_move_two_bytes(self):
+        """The exclusion above is a claim about the vendor. Check it, or it is
+        just a convenient way to make a failing case disappear."""
+        for capture, i, field, value, _why in EXCLUDED:
+            before, after = before_after(capture, i)
+            moved = [k for k in range(min(len(before), len(after)))
+                     if before[k] != after[k]]
+            moved = [m - PAYLOAD_OFFSET for m in moved]
+            self.assertEqual(moved, [0x0d, 0x0e],
+                             "expected the vendor to move both the active stage "
+                             "and the count; it moved %s" % [hex(m) for m in moved])
+            # and ours moves only the one, which is exactly the divergence
+            got = self.encode(before, field, value)
+            ours = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(got)))
+                    if before[k] != got[k]]
+            self.assertEqual(ours, [0x0e])
+
+    def test_read_modify_write_preserves_everything_else(self):
+        """§1.3: bytes we do not understand must come back unchanged."""
+        before, _ = before_after("02-basic", 0)
+        got = self.encode(before, "polling", "1000")
+        moved = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(got)))
+                 if before[k] != got[k]]
+        self.assertEqual(moved, [0x05])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

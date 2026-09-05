@@ -42,6 +42,9 @@ void usage() {
       "                                    then read it back and verify\n"
       "  egg-config set FIELD VALUE --yes  change ONE derived field\n"
       "  egg-config set                    list the settable fields\n"
+      "  egg-config encode F V IN OUT      offline: apply one field to a saved\n"
+      "                                    record and write the result. Sends\n"
+      "                                    nothing and needs no device.\n"
       "\n"
       "  -v   hex-dump every frame\n"
       "\n"
@@ -395,6 +398,81 @@ void listSettable() {
               "which sends back bytes the device itself produced.");
 }
 
+// Observed 2026-09-05 in windows-run/02-basic.pcapng: when the vendor changed
+// the CPI stage COUNT at record 0x0e it sometimes also moved record 0x0d, the
+// ACTIVE stage. Going from 1 stage to 2 it reset the active stage from 1 to 0.
+// It did not always do so -- setting the count to 1 while stage index 1 was
+// active left an active stage outside the range, so the vendor is not applying
+// a clamp we could simply copy.
+//
+// We move exactly one byte, by design, so we cannot mirror it even if we wanted
+// to. What we can do is not let it happen silently. This warns; it does not
+// refuse, because refusing would be inventing a rule the vendor itself breaks.
+void warnIfActiveStageWouldBeOutOfRange(const std::vector<std::uint8_t>& rec,
+                                        const Settable* f, long v) {
+    if (std::string(f->name) != "cpi-levels") return;
+    const unsigned active = rec[kPayloadOffset + 0x0d];
+    if (static_cast<long>(active) < v) return;
+    std::printf(
+        "  NOTE: record 0x0d (the ACTIVE CPI stage) is %u, which is not below\n"
+        "        the new count of %ld. The vendor's tool sometimes moves that\n"
+        "        byte too; we move exactly one byte and will leave it at %u.\n"
+        "        Set the active stage separately if the mouse behaves oddly.\n",
+        active, v, active);
+}
+
+// Offline: apply one field to a record file and write the result out. No
+// device, no transport, nothing sent. This exists so the write path can be
+// replayed against the vendor's own writes -- the captures give us 73 pairs of
+// (record before, record after) with a known field change between them, which
+// is a far better test than any record we could invent.
+int cmdEncode(const std::string& field, const std::string& value,
+              const std::string& inPath, const std::string& outPath) {
+    const Settable* f = nullptr;
+    for (const Settable& c : kSettable)
+        if (field == c.name) { f = &c; break; }
+    if (!f) { std::printf("`%s` is not a settable field.\n", field.c_str()); return 2; }
+
+    char* end = nullptr;
+    const long v = std::strtol(value.c_str(), &end, 10);
+    if (end == value.c_str() || (end && *end)) {
+        std::printf("`%s` is not a number.\n", value.c_str());
+        return 2;
+    }
+    std::uint8_t want = 0;
+    if (!f->encode(v, want)) {
+        std::printf("%ld is not a legal %s. Accepts: %s\n", v, f->name, f->accepts);
+        return 2;
+    }
+    std::vector<std::uint8_t> before;
+    if (!loadRecord(inPath, before)) return 1;
+
+    // The SAME arithmetic and the SAME invariant as cmdSet. A field offset is
+    // relative to the record; the byte lives at kPayloadOffset past the start
+    // of the frame. Writing it at f->recordOffset instead lands 16 bytes early,
+    // in the header -- which is what this code did on its first draft, and what
+    // Tests/test_config_replay.py caught immediately.
+    warnIfActiveStageWouldBeOutOfRange(before, f, v);
+    const std::size_t at = kPayloadOffset + f->recordOffset;
+    std::vector<std::uint8_t> rec = before;
+    rec[at] = want;
+
+    std::size_t moved = 0, movedAt = 0;
+    for (std::size_t i = kPayloadOffset; i < kLargeLen; ++i)
+        if (rec[i] != before[i]) { ++moved; movedAt = i; }
+    if (moved > 1 || (moved == 1 && movedAt != at)) {
+        std::printf("internal error: %zu payload bytes would change"
+                    " (expected at most 1, at 0x%03zx). NOT WRITING.\n",
+                    moved, at);
+        return 1;
+    }
+    FILE* out = std::fopen(outPath.c_str(), "wb");
+    if (!out) { std::printf("cannot write %s\n", outPath.c_str()); return 1; }
+    std::fwrite(rec.data(), 1, rec.size(), out);
+    std::fclose(out);
+    return 0;
+}
+
 int cmdSet(const std::string& field, const std::string& value,
            bool verbose, bool yes) {
     const Settable* f = nullptr;
@@ -436,6 +514,7 @@ int cmdSet(const std::string& field, const std::string& value,
     std::vector<std::uint8_t> before;
     if (!readCurrent(t, log, before)) return 3;
 
+    warnIfActiveStageWouldBeOutOfRange(before, f, v);
     const std::size_t at = kPayloadOffset + f->recordOffset;
     if (before[at] == want) {
         std::printf("%s is already 0x%02x. Nothing to write.\n", f->name, want);
@@ -581,6 +660,8 @@ int main(int argc, char** argv) {
     if (cmd == "diff" && args.size() > 2)    return cmdDiff(args[1], args[2]);
     if (cmd == "set" && args.size() > 2)
         return cmdSet(args[1], args[2], verbose, yes);
+    if (cmd == "encode" && args.size() == 5)
+        return cmdEncode(args[1], args[2], args[3], args[4]);
     if (cmd == "set") { listSettable(); return 2; }
     usage();
     return 1;
