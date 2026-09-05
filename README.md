@@ -47,6 +47,7 @@ egg-config info                    small query (A1 02)
 egg-config diff A B                compare two saved records, offline
 egg-config set                     list the settable fields and their citations
 egg-config set FIELD VALUE --yes   change ONE derived field
+egg-config dryrun REC [F V]        offline: print the exact 1041-byte frame
 egg-config encode F V IN OUT       offline: apply one field to a saved record
 egg-config factory-reset --yes     device-side reset (A1 13)
 egg-config restore FILE --yes      write a saved record back, then verify
@@ -157,8 +158,14 @@ exhaustively over all 256×256 byte pairs.
 reference is not something we produced: the captures give 33 pairs of (record
 before, record after) where exactly one setting changed and we know which. Our
 own composition code is handed the before-record and the same change, and must
-reproduce the vendor's after-record. Under `--unknown-bytes=vendor` it matches
-all 33 byte for byte across all 1024 payload bytes.
+reproduce the vendor's after-record.
+
+Under `--unknown-bytes=vendor` it matches all 33 **whole frames** — all 1041
+bytes, header included, byte for byte against what Endgame's tool actually put
+on the wire. That last part is new and it checks something nothing else could:
+the 16-byte header was *derived* from `FUN_00404180` and had never been compared
+against a capture, because `encode` writes a record and a record is only the
+payload. `egg-config dryrun` emits the real frame, so now it can be.
 
 `mutants.sh` exists because `test-flash` passed 47/47 on its first run, and a
 suite that has never failed has not been shown to work. `test-config` then

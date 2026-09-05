@@ -98,6 +98,21 @@ def as_saved(record):
     return bytes(buf)
 
 
+def vendor_frames(capture):
+    """The FULL 1041-byte SET frames, header included.
+
+    ingest.settings_writes() slices from RECORD_BASE because everything else
+    wants the record. The header is what this file could never check, and the
+    header is where the report id and the command live.
+    """
+    import usbpcap
+    p = os.path.join(ROOT, "windows-run", "%s.pcapng" % capture)
+    xf = [t for t in usbpcap.control_transfers(usbpcap.read(p)) if t.is_feature]
+    return [bytes(t.data) for t in xf
+            if not (t.bmRequestType & 0x80)
+            and len(t.data) == FRAME_LEN and t.data[1] == 0x11]
+
+
 def before_after(capture, i):
     """The record the vendor started that write from, and the one it sent."""
     rd, wr = records(capture)
@@ -132,6 +147,35 @@ class Replay(unittest.TestCase):
                              "egg-config encode failed: %s%s" % (r.stdout, r.stderr))
             with open(b, "rb") as f:
                 return f.read()
+
+    def dryrun_frame(self, before, field, value, policy):
+        """The exact 1041 bytes `set` would put on the wire, from a record file.
+
+        Parsed out of `egg-config dryrun`'s hex dump rather than a side channel,
+        so this tests the output a person would actually read.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            a = os.path.join(d, "in.bin")
+            with open(a, "wb") as f:
+                f.write(before)
+            cmd = [BIN, "--unknown-bytes=%s" % policy, "dryrun", a]
+            if field:
+                cmd += [field, value]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = bytearray()
+        started = False
+        for line in r.stdout.splitlines():
+            if "as they would go on the wire" in line:
+                started = True
+                continue
+            if not started:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                break
+            out += bytes.fromhex(parts[1])
+        return bytes(out)
 
     def test_every_settable_field_reproduces_the_vendor_write(self):
         """Ours must equal the vendor's, except at record 0x01 -- see below."""
@@ -190,6 +234,42 @@ class Replay(unittest.TestCase):
             self.assertTrue(set(d) <= {0x01, 0x02, 0x03, 0x04},
                             "%s write %d (%s=%s): differs from the vendor at %s"
                             % (capture, i, field, value, [hex(x) for x in d]))
+
+    def test_the_whole_1041_byte_frame_matches_the_vendor_header_included(self):
+        """The strongest assertion in this file, and the newest.
+
+        Every other test here compares the 1024-byte PAYLOAD, because that is
+        what `encode` writes. But a frame is 1041 bytes and the other 17 are
+        where the report id and the command live -- config-protocol.md §7.2a
+        derived `a0 11 00 00` plus a memset covering [2..15] from FUN_00404180,
+        and until now nothing had ever compared that derivation against a
+        capture. `egg-config dryrun` emits the real frame, so it can be.
+
+        Under --unknown-bytes=vendor this must be byte-identical to what
+        Endgame's own tool put on the wire. All 1041 bytes, no exclusions.
+        """
+        for capture, i, field, value in CASES:
+            with self.subTest(capture=capture, write=i, field=field, value=value):
+                frames = vendor_frames(capture)
+                self.assertGreater(len(frames), i, "capture has too few frames")
+                before, _ = before_after(capture, i)
+                got = self.dryrun_frame(before, field, value, "vendor")
+                self.assertEqual(len(got), FRAME_LEN)
+                d = [k for k in range(FRAME_LEN) if got[k] != frames[i][k]]
+                self.assertEqual(
+                    d, [], "%s write %d (%s=%s): our frame differs from the "
+                    "vendor's at wire offsets %s"
+                    % (capture, i, field, value, [hex(x) for x in d]))
+
+    def test_the_frame_header_is_what_the_derivation_says(self):
+        """a0 11 then fourteen zeros, stated as a claim and checked as one."""
+        before, _ = before_after("02-basic", 0)
+        got = self.dryrun_frame(before, "polling", "1000", "vendor")
+        self.assertEqual(got[0], 0xA0)
+        self.assertEqual(got[1], 0x11)
+        self.assertEqual(got[2:PAYLOAD_OFFSET], b"\x00" * (PAYLOAD_OFFSET - 2))
+        self.assertEqual(got[FRAME_LEN - 1], 0x00,
+                         "the 1041st byte is past the 1024-byte payload")
 
     def test_the_excluded_case_really_does_move_two_bytes(self):
         """The exclusion above is a claim about the vendor. Check it, or it is

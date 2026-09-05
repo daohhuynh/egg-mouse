@@ -99,6 +99,10 @@ void usage() {
       "  egg-config encode F V IN OUT      offline: apply one field to a saved\n"
       "                                    record and write the result. Sends\n"
       "                                    nothing and needs no device.\n"
+      "  egg-config dryrun REC [F V]       offline: print the EXACT 1041-byte\n"
+      "                                    frame that `set F V` -- or `restore`,\n"
+      "                                    with no field -- would put on the\n"
+      "                                    wire, and the diff against REC.\n"
       "\n"
       "  -v                        hex-dump every frame\n"
       "  --vault F                 where the known-good record is kept.\n"
@@ -529,6 +533,76 @@ int cmdEncode(const std::string& field, const std::string& value,
     return 0;
 }
 
+// §4.3: "Dry-run mode emitting the exact byte stream that would be sent."
+// egg-flash has had this from the start; egg-config had only `encode`, which
+// writes a RECORD file -- the payload, not the frame. The header is where the
+// report id and the command live, and a tool that can show you 1024 of the 1041
+// bytes it would send is showing you the wrong 1024 if the header is wrong.
+//
+// Sends nothing, opens no device, and takes the record from a file so it is
+// reproducible and diffable.
+int cmdDryRun(const std::string& recordPath, const std::string& field,
+              const std::string& value, UnknownBytes policy) {
+    std::vector<std::uint8_t> before;
+    if (!loadRecord(recordPath, before)) return 1;
+    if (!plausible(before)) {
+        std::printf("%s is not a structurally plausible record. Refusing, for the\n"
+                    "same reason the device path would: a frame built from a bad\n"
+                    "read is exactly what §4.1 forbids.\n", recordPath.c_str());
+        return 1;
+    }
+
+    std::vector<std::uint8_t> frame;
+    const Settable* f = nullptr;
+    if (field.empty()) {
+        frame = ConfigSession::buildRestoreFrame(before, policy);
+        std::printf("restore %s\n", recordPath.c_str());
+    } else {
+        long v = 0;
+        std::uint8_t encoded = 0;
+        f = resolve(field, value, v, encoded, false);
+        if (!f) return 2;
+        warnIfActiveStageWouldBeOutOfRange(before, *f, v);
+        frame = ConfigSession::buildFrame(before, *f, encoded, policy);
+        std::printf("set %s = %s   (record 0x%02zx", f->name, value.c_str(),
+                    f->recordOffset);
+        if (f->mask != 0xFF) std::printf(" & 0x%02x", f->mask);
+        std::printf(")\n  derived: %s\n", f->cite);
+    }
+    if (frame.size() != kLargeLen) {
+        std::puts("no frame was produced. Nothing would be sent.");
+        return 1;
+    }
+
+    std::printf("policy   %s\n", describe(policy));
+    std::printf("frame    report 0x%02x, command 0x%02x, %zu bytes\n",
+                frame[0], frame[kCmdOffset], frame.size());
+
+    // Every byte our frame differs from the record we started from. This is the
+    // whole point: not "here is a frame" but "here is exactly what we changed
+    // and nothing else moved".
+    const std::vector<ByteChange> d = diff(before, frame);
+    printDiff(d, recordPath.c_str(), "the frame we would send");
+    if (f) {
+        bool sane = false;
+        for (const ByteChange& c : d)
+            if (c.recordOffset == f->recordOffset) sane = true;
+        if (!sane && !d.empty())
+            std::puts("  NOTE: the field's own byte is not in that list, which means\n"
+                      "        it already holds the value asked for.");
+    }
+
+    std::puts("\nthe exact bytes, as they would go on the wire:");
+    for (std::size_t i = 0; i < frame.size(); i += 32) {
+        std::printf("  %04zx  ", i);
+        for (std::size_t k = i; k < i + 32 && k < frame.size(); ++k)
+            std::printf("%02x", frame[k]);
+        std::printf("\n");
+    }
+    std::puts("\nNothing was sent. No device was opened.");
+    return 0;
+}
+
 int cmdSet(const std::string& field, const std::string& value,
            bool verbose, bool yes, UnknownBytes policy,
            const std::string& vaultPath) {
@@ -695,6 +769,10 @@ int main(int argc, char** argv) {
     if (cmd == "diff" && args.size() > 2)    return cmdDiff(args[1], args[2]);
     if (cmd == "set" && args.size() > 2)
         return cmdSet(args[1], args[2], verbose, yes, policy, vaultPath);
+    if (cmd == "dryrun" && args.size() == 4)
+        return cmdDryRun(args[1], args[2], args[3], policy);
+    if (cmd == "dryrun" && args.size() == 2)
+        return cmdDryRun(args[1], "", "", policy);
     if (cmd == "encode" && args.size() == 5)
         return cmdEncode(args[1], args[2], args[3], args[4], policy);
     if (cmd == "set") { listSettable(); return 2; }
