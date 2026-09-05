@@ -167,7 +167,16 @@ def main():
             q = json.load(fh)
         ks = set(q.keys())
         d = len(ks & readhash)
-        reps = [tuple(q[h][0])[:3] for h in ks - readhash if q[h]]
+        # TWO SHAPES. readqueue_fw110.json maps hash -> [[tag,entry,size], ...];
+        # openqueue.json maps hash -> [tag,entry,size], flat. Slicing the flat
+        # one as if it were nested yields ('f','w','1') and every body then
+        # looks unread. Normalise instead of assuming.
+        reps = []
+        for h in ks - readhash:
+            v = q[h]
+            if not v:
+                continue
+            reps.append(tuple(v[:3]) if isinstance(v[0], str) else tuple(v[0])[:3])
         print("  %-26s %6d bodies, %6d harvested  %s"
               % (name, len(ks), d, status(reps, None)))
     for tag in UNIQUE:

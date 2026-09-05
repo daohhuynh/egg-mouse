@@ -2779,17 +2779,29 @@ Regenerated 2026-09-04 after harvesting every workflow journal
 strict sense: **not** covered by a read body hash, **not** settled by
 `microread.py` in that binary, **not** in `handread.json`.
 
+**Regenerated 2026-09-05** (the figures below had gone stale as later read waves
+landed; regenerate, never quote — §6). A function counts as read if its address
+is in `read_<tag>.json` or `handread.json`, or `microread_<tag>.json` settled it
+in that binary, or its normalised body was read in any binary.
+
 | binary | sized functions | unread | unread bytes | **unread AND device-facing** |
 |---|---|---|---|---|
-| fw110 | 9,076 | **0** (was 27 / 6,753 B — read 2026-09-05, §6.2.12) | 0 | **0** |
-| fw107 | 9,076 | **0** (same `.text`) | 0 | **0** |
-| fw106 | 9,076 | **0** (same `.text`) | 0 | **0** |
-| fw104 | 10,763 | 22 | 4,933 | **0** |
-| cfg107 | 9,528 | 377 | 123,143 | **0** |
-| cfg104 | 9,495 | 404 | 144,187 | **0** |
-| cfg101 | 9,516 | 334 | 115,594 | **0** |
-| cfg100 | 11,071 | 829 | 73,080 | **0** |
-| xm1r | 23,001 | 6,381 | 1,285,978 | 23 |
+| fw110 | 9,076 | **0** | 0 | **0** |
+| fw107 | 9,076 | **0** | 0 | **0** |
+| fw106 | 9,076 | **0** | 0 | **0** |
+| fw104 | 10,763 | **0** | 0 | **0** |
+| cfg107 | 9,528 | **0** | 0 | **0** |
+| cfg104 | 9,495 | **0** | 0 | **0** |
+| cfg101 | 9,516 | **0** | 0 | **0** |
+| cfg100 | 11,071 | **0** | 0 | **0** |
+| xm1r | 23,001 | 5,511 | 1,210,973 | **0** |
+
+**Every Endgame binary is now fully read**, fw110 included, which is the §6.1
+standard for the one whose bytes reach the mouse. The last of it was cleared on
+2026-09-05: fw110's 27 (§6.2.12), fw104's 22 and cfg104's 1 (§6.2.13). xm1r is a
+different product and a different code base, analogy-only (`notes/xm1r-flasher.md`
+§1); its device-facing functions are all read by hand and its residue is now
+zero in the column that matters.
 
 ### 6.2.12 The last 27 of fw110, read 2026-09-05 — and one of them was not a function
 
@@ -2837,6 +2849,36 @@ match is a *hypothesis* — "a body appearing in an unrelated product is library
 function that byte-matches elsewhere would invalidate the inference everywhere.
 Twenty-five matched bodies were read and none is vendor code. The premise
 survives this test; it is not proven by it.
+
+### 6.2.13 fw104's last 22 and cfg104's last 1, read 2026-09-05 [D]
+
+5,638 bytes. Every one is MFC window-layout and painting, and every one is
+**outside fw104's vendor band** `[0x401bc0,0x405200)` — the lowest is
+`0x00411d16`. None is in `closure.py`'s device seed or closure.
+
+The imports they reach, which is the whole of their contact with the system:
+`BeginDeferWindowPos`/`EndDeferWindowPos` (MFC's docking layout pass),
+`GetWindowRect`, `GetParent`, `SetParent`, `SetWindowRgn`, `CreatePen`,
+`LoadCursorW`, `CreateAcceleratorTableW`/`DestroyAcceleratorTable`,
+`GetWindowTextW`/`GetWindowTextLengthW`/`GetWindowLongW`, `SendMessageW`,
+`InvalidateRect`, `UpdateWindow`, `IsWindow`, `GetCursorPos`, `ScreenToClient`,
+`MapWindowPoints`, `PtInRect`, `ReleaseCapture`, `MessageBeep`,
+`GetViewportOrgEx`, `InflateRect`/`OffsetRect`/`IsRectEmpty`/`SetRectEmpty`,
+`BitBlt`, `CreateCompatibleDC`/`CreateCompatibleBitmap`, `SelectObject`,
+`DeleteObject`, `EqualRect`, `UnionRect`. **No HID, no SetupAPI, no file I/O.**
+
+`fw104 0x00497aa4` (766 B) is the same double-buffered paint helper as fw110's
+`0x00492c71`, recompiled.
+
+**One thing worth naming, because it looks like an import and is not.** These
+functions share an indirect call `call *0x56e990`, 41 sites. `0x56e990` is
+**one slot past the end of fw104's IAT** (directory RVA `0x16e000`, size 2,448,
+so the IAT ends at exactly `0x56e990`), it is in read-only `.rdata`, no
+instruction anywhere stores to it, and the pointer it holds is `0x00401bb0` —
+which is `ret 0` followed by `int3` padding up to the vendor band at
+`0x00401bc0`. A const pointer to a do-nothing stub. Any tool that resolves
+indirect calls by "nearest IAT entry below" will label these `CoTaskMemAlloc`,
+which is the entry immediately before.
 
 The last column is `readpartition.py`'s unread set intersected with
 `closure.py`'s device closure **and** seed for that binary — the mechanical
