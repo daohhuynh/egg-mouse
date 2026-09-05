@@ -2636,3 +2636,102 @@ over-reports rather than under-reports; that is the safe direction and it is why
 address computed at runtime, and a string reached only through a resource id.
 Both are covered from the other side — resource ids by §11.1, and runtime
 computation by the fact that §11.1 finds no resource for one to reach.
+
+### 6.2.10 The reader harness failed for the first time, and the number is 17%  [D]
+
+`CLAUDE.md` §6.2: *"A harness that cannot produce a bad result is not evidence.
+If the planted positives never fail and no verdict is ever rejected, the harness
+is measuring nothing. Report its failure rate; a rate of zero is a red flag, not
+a pass."*
+
+The residue read (4,497 bodies, 112 batches) carried **six planted positives**,
+unlabelled, appended to batches 000/020/040/060/080/100 — four from fw104 and
+two from cfg107, every one of them device-facing *visibly in its own
+disassembly*, so the question was answerable from the input given. Scored by
+`verify_read.py --plants`:
+
+| plant | binary | verdict | reader's category | reader's confidence |
+|---|---|---|---|---|
+| `0x00402a90` | fw104 | HIT | `device-io` | high |
+| `0x00402c00` | fw104 | HIT | `device-io` | high |
+| `0x00404760` | fw104 | HIT | `device-io` | high |
+| `0x00404980` | fw104 | HIT | `device-io` | high |
+| `0x00403850` | cfg107 | HIT | `device-io` | high |
+| **`0x00403920`** | cfg107 | **MISS** | `string-or-container` | **high** |
+
+**5 of 6. A measured false-negative rate of 17%, on a question the input could
+answer, reported with high confidence.**
+
+What `0x00403920` actually is, from its own bytes: a device read with a busy
+poll. `0x403955` is `calll *0x52d1d8`, one of the eleven dynamically-resolved
+HID slots (§9.3); `0x403961` tests the result against `1`; `0x40396a` reads
+`resp[1]` and compares it to `3`; `0x403980` pushes `0x64` into
+`calll *0x52d22c` — `Sleep(100)`. That is the config tool's busy convention,
+already documented as `0x03` with a 1,000 ms budget (`build-design.md` §0). The
+function is in cfg107's mechanically-computed device **seed** — it is one of the
+seventeen functions that reference a device slot directly. A reader called it
+`string-or-container`.
+
+**This is the single most useful result the reading programme has produced**,
+and it is worth more than any of the verdicts it was collected alongside:
+
+1. **The design was right and is now measured, not assumed.** §6.2's rule that
+   the device question is settled by `closure.py` and never by a reader is not
+   caution, it is calibration: the readers miss roughly one device-facing
+   function in six, *while saying they are sure*. Every device claim in these
+   notes is mechanical, and this is why.
+2. **The confidence field carries no information about correctness.** All six
+   plants came back `high`. Do not weight by it, here or anywhere.
+3. **The machine-checkable fields are a different animal entirely.** In the same
+   run: **0 invented function ids** in 3,063 reported; **10 wrong call targets
+   in 7,905** (0.13%), all of them omissions, none invented; **1 wrong import
+   slot in 1,720** (0.06%), also an omission. So readers transcribe reliably and
+   *judge* unreliably — which is exactly the split §6.2 assumed and had never
+   put a number to.
+4. **A 0% rate would have been the bad outcome.** The previous plant attempt
+   scored 0/1 for a reason that invalidated it (fw110 `0x004012a0`, where the
+   HID call is an unlabelled IAT slot and the input genuinely could not answer
+   the question). This set was built so the input *could* answer it, and it
+   still produced a failure. The harness works.
+
+### 6.2.11 Final read partition — and the column that matters is zero  [D]
+
+Regenerated 2026-09-04 after harvesting every workflow journal
+(`harvest_reads.py --write`, then `readpartition.py`). "Unread" here is the
+strict sense: **not** covered by a read body hash, **not** settled by
+`microread.py` in that binary, **not** in `handread.json`.
+
+| binary | sized functions | unread | unread bytes | **unread AND device-facing** |
+|---|---|---|---|---|
+| fw110 | 9,076 | 27 | 6,753 | **0** |
+| fw107 | 9,076 | 27 | 6,753 | **0** |
+| fw106 | 9,076 | 27 | 6,753 | **0** |
+| fw104 | 10,763 | 22 | 4,933 | **0** |
+| cfg107 | 9,528 | 377 | 123,143 | **0** |
+| cfg104 | 9,495 | 404 | 144,187 | **0** |
+| cfg101 | 9,516 | 334 | 115,594 | **0** |
+| cfg100 | 11,071 | 829 | 73,080 | **0** |
+| xm1r | 23,001 | 6,381 | 1,285,978 | 23 |
+
+The last column is `readpartition.py`'s unread set intersected with
+`closure.py`'s device closure **and** seed for that binary — the mechanical
+filter, not a reader's opinion. **For every Endgame binary it is zero.** The
+xm1r's 23 are its own flash path, written up in `notes/xm1r-flasher.md` §3–§5
+by hand from the disassembly; they are unread by an *agent batch*, which is a
+bookkeeping fact, not a knowledge gap. xm1r is analogy-only either way (§1 of
+that file).
+
+**The four fw110 vendor-band functions that were still unread are now read**, by
+hand, and none is protocol:
+
+| address | size | what it is |
+|---|---|---|
+| `0x00402170` | 58 | formatting call at `0x4f75e8` followed by a 0x51-arm `switch` (jump table `0x4021ac`, index byte table `0x4021bc`) mapping the result to an error path — the ATL string-format error dispatch |
+| `0x00402970` | 112 | ATL `CStringT` assign-with-refcount: `lock xadd` on `[esi+0xc]`, virtual `Free` at refcount 0, otherwise the `(PCWSTR,int)` assign at `0x4016e0` |
+| `0x004029e0` | 70 | `CStringT::ReleaseBufferSetLength`: bounds-checks the index, writes the NUL at `(ecx + eax*2)`, else `AtlThrow(0x80070057)` |
+| `0x00403030` | 34 | MSVC scalar deleting destructor — `call dtor; test byte [ebp+8],1; call operator delete` |
+
+With those, **all 95 functions of 1.10's vendor band `[0x401000,0x4040ad)` are
+read**, and the two that carry the flasher — `0x00403200` (the `FWFILE` load,
+§8.3) and `0x00403960` (the flash sequence, §5.4) — are the most heavily
+re-derived functions in this file.

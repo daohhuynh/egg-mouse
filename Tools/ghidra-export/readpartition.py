@@ -36,6 +36,15 @@ keeps re-offering functions already read in a commit is a queue nobody trusts.
 
 --queue PATH writes the union of open normalised bodies, each with one
 representative (tag, entry, size), as a reading queue.
+
+QUEUES COUNTED. `readqueue_fw110.json`, the five `unique_<tag>.json` sets, and
+-- added 2026-09-04 -- `openqueue.json`, which is this tool's OWN output from
+the run that discovered the remainder. That last one is deliberately circular
+and it is safe only because the queue was actually read: it names the 4,497
+bodies that belonged to no other queue, and counting them before their read
+lands would turn a real hole into a clean row. Delete the file, or the read,
+and the hole reappears in the next run. `readqueue_xm1r.json` is a list of
+ENTRY ADDRESSES rather than hashes and is mapped through xm1r's own records.
 """
 import hashlib, json, os, sys
 
@@ -63,6 +72,17 @@ def records(tag):
 
 def main():
     read = set(json.load(open(os.path.join(AN, "readqueue_fw110.json"))).keys())
+    op = os.path.join(AN, "openqueue.json")
+    if os.path.exists(op):
+        read |= set(json.load(open(op)).keys())
+    xq = os.path.join(AN, "readqueue_xm1r.json")
+    if os.path.exists(xq):
+        want = {e.lower() for e in json.load(open(xq))}
+        for r in records("xm1r"):
+            if r["entry"].lower() in want:
+                h = bodyhash(r)
+                if h:
+                    read.add(h)
     hp = os.path.join(AN, "handread.json")
     hand = ({t: {e.lower() for e in v} for t, v in json.load(open(hp)).items()}
             if os.path.exists(hp) else {})
@@ -76,8 +96,54 @@ def main():
                 h = bodyhash(r)
                 if h:
                     read.add(h)
-    print("reading-queue hashes (fw110's queue + the five unique_<tag> sets): %d"
+    print("reading-queue hashes (fw110 + five unique_<tag> + openqueue + xm1r): %d"
           % len(read))
+
+    # IN-QUEUE MEANS QUEUED, NOT READ. Counting a queue whose read has not
+    # landed turns a real hole into a clean row, so say so out loud: for every
+    # queue file, how much of it is actually present in read_<tag>.json.
+    readhash = set()
+    for t in TAGS:
+        rp = os.path.join(AN, f"read_{t}.json")
+        if not os.path.exists(rp):
+            continue
+        done = {e.lower() for e in json.load(open(rp))}
+        for r in records(t):
+            if r["entry"].lower() in done:
+                h = bodyhash(r)
+                if h:
+                    readhash.add(h)
+    print("\nQUEUE STATUS -- 'in-queue' above means QUEUED; harvested means a "
+          "reader\nactually returned it (harvest_reads.py --write):")
+    qf = [("readqueue_fw110.json", "hashes"), ("openqueue.json", "hashes")]
+    for name, kind in qf:
+        fp = os.path.join(AN, name)
+        if not os.path.exists(fp):
+            continue
+        ks = set(json.load(open(fp)).keys())
+        d = len(ks & readhash)
+        print("  %-26s %6d bodies, %6d harvested  %s"
+              % (name, len(ks), d, "OK" if d == len(ks) else "*** INCOMPLETE"))
+    for tag in UNIQUE:
+        fp = os.path.join(AN, f"unique_{tag}.json")
+        if not os.path.exists(fp):
+            continue
+        u = {x.lower() for x in json.load(open(fp))}
+        hs = {bodyhash(r) for r in records(tag) if r["entry"].lower() in u}
+        hs.discard(None)
+        d = len(hs & readhash)
+        print("  %-26s %6d bodies, %6d harvested  %s"
+              % (f"unique_{tag}.json", len(hs), d,
+                 "OK" if d == len(hs) else "*** INCOMPLETE"))
+    fp = os.path.join(AN, "readqueue_xm1r.json")
+    if os.path.exists(fp):
+        u = {x.lower() for x in json.load(open(fp))}
+        hs = {bodyhash(r) for r in records("xm1r") if r["entry"].lower() in u}
+        hs.discard(None)
+        d = len(hs & readhash)
+        print("  %-26s %6d bodies, %6d harvested  %s"
+              % ("readqueue_xm1r.json", len(hs), d,
+                 "OK" if d == len(hs) else "*** INCOMPLETE"))
     print()
     print("%-8s %7s %8s %8s %6s %7s %11s" %
           ("binary", "sized", "in-queue", "micrord", "hand", "OPEN", "open bytes"))
