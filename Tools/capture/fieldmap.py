@@ -94,6 +94,20 @@ NO_APPLY = re.compile(r"\b(NOT PRESENT|NOT FOUND|NO APPLY|SKIPPED|ALREADY AT VAL
 # APPLYs every byte that moved at all qualifies.
 MIN_FOR_ALWAYS = 4
 
+# The settings record's extent inside the 1024-byte payload, derived from the
+# vendor's serializer FUN_004042d0 -- config-protocol.md §7.3. It writes record
+# offsets 0x00..0x72 and nothing beyond, so a diff outside that range is not an
+# ordinary setting: it is a sequence/checksum byte, a field the vendor never
+# touches, or a misparse.
+#
+# ANNOTATED, NEVER FILTERED. The same rule as MOVED BY EVERY APPLY, and for the
+# same reason: "the vendor never writes there" is a claim about the vendor, not
+# about the device, and §1.2a is explicit that absence needs more evidence than
+# presence. A byte moving outside this range would be a real finding and
+# dropping it would destroy exactly the observation worth having.
+RECORD_FIRST, RECORD_LAST = 0x00, 0x72
+PAYLOAD_AT = 0x10
+
 
 def runs(a, b):
     """Byte offsets where a and b differ, grouped into contiguous runs.
@@ -173,7 +187,9 @@ def emit(path, byrun, always, captures, unattributed):
         w = e - s
         fields.append({
             "wire_offset": s,
-            "payload_offset": s - 0x10,
+            "payload_offset": s - PAYLOAD_AT,
+            "in_vendor_record": (RECORD_FIRST <= s - PAYLOAD_AT
+                                 and e - 1 - PAYLOAD_AT <= RECORD_LAST),
             "width": w,
             "encoding": encoding_guess(w, obs),
             "name": None,                     # a human names it, not this tool
@@ -306,6 +322,21 @@ def main():
                   "one setting\n  you changed repeatedly. The bytes cannot tell"
                   " those apart, so this is\n  a note, not a filter: they stay "
                   "in the diffs and in the map below.")
+
+        outside = sorted({(a, b) for d in diffs for (a, b) in d
+                          if not (PAYLOAD_AT + RECORD_FIRST <= a
+                                  and b - 1 <= PAYLOAD_AT + RECORD_LAST)})
+        if outside:
+            print("\n  OUTSIDE THE VENDOR RECORD (wire 0x%03x..0x%03x):"
+                  % (PAYLOAD_AT + RECORD_FIRST, PAYLOAD_AT + RECORD_LAST))
+            for a, b in outside:
+                print("    0x%04x..0x%04x" % (a, b - 1))
+            print("  The vendor's serializer writes only record 0x00-0x72"
+                  " (config-protocol.md\n  §7.3), so these moved somewhere it"
+                  " never writes. Sequence or checksum\n  bytes, a field only"
+                  " the device sets, or a misparse -- worth reading before\n"
+                  "  anything else in this report. Kept in the diffs and in the"
+                  " map regardless.")
 
         print("\n  PER-APPLY DIFFS")
         amb = 0

@@ -124,6 +124,18 @@ out = run([bytes(s0), bytes(s1), bytes(s2), bytes(s3)],
 check("dropping a line does not rescue a log that still miscounts",
       "COUNT MISMATCH" in out and "FIELD MAP" not in out, out)
 
+# 2d. A byte moving OUTSIDE the vendor's 115-byte record must be announced --
+# and must still appear in the map, because "the vendor never writes there" is a
+# claim about the vendor, not the device (§1.2a).
+o0 = base()
+o1 = base(); o1[0x10 + 0x72] = 7      # last byte of the record: inside
+o2 = base(); o2[0x10 + 0x72] = 7; o2[0x10 + 0x73] = 9   # one past it: outside
+out = run([bytes(o0), bytes(o1), bytes(o2)],
+          "--- 02-basic.pcapng ---\n 1  inside the record\n 2  one byte past it\n")
+check("a diff past the vendor record is announced but still mapped",
+      "OUTSIDE THE VENDOR RECORD" in out and "0x0083..0x0083" in out
+      and "FIELD MAP" in out and "one byte past it" in out, out)
+
 # 3. A setting that moves two separate runs is reported as two, never reduced.
 t1 = base(); t1[0x20] = 1; t1[0x40] = 9
 out = run([bytes(s0), bytes(t1)],
