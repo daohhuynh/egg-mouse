@@ -41,6 +41,19 @@ def observations_at(doc, offset):
     return out
 
 
+def byte_at(hexstr, idx):
+    """One byte out of fieldmap's space-separated hex run, or None."""
+    if not isinstance(hexstr, str):
+        return None
+    parts = hexstr.split()
+    if not (0 <= idx < len(parts)):
+        return None
+    try:
+        return int(parts[idx], 16)
+    except ValueError:
+        return None
+
+
 def number_in(text):
     m = re.search(r"(-?\d+)", text or "")
     return m.group(1) if m else None
@@ -65,10 +78,10 @@ def score_one(doc, p):
     for fld, ob in relevant:
         key = number_in(ob.get("action"))
         want = p["expect_values"].get(key)
-        got = ob.get("new")
-        if isinstance(got, list):
-            idx = off - fld["payload_offset"]
-            got = got[idx] if 0 <= idx < len(got) else None
+        # fieldmap emits a run's value as a hex string ("08", or "90 01" for a
+        # two-byte run), so pick the byte this prediction is actually about
+        # rather than assuming the run is one byte wide.
+        got = byte_at(ob.get("new"), off - fld["payload_offset"])
         if want is None:
             rows.append("  ?  line %s %-28s -> %s   (no prediction for %r)"
                         % (ob.get("line"), ob.get("action"), got, key))
