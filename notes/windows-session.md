@@ -100,6 +100,37 @@ values recoverable without writing them down.
 
 ## 3. The settings experiments (about 40 min)
 
+### How to run each section — read this once, it applies to all of them
+
+**One capture file per section, and relaunch the config tool inside each one.**
+
+    1. CLOSE the config tool
+    2. start the capture (the blue sharkfin)
+    3. OPEN the config tool
+    4. do that section's numbered lines, one APPLY each, about 2 s apart
+    5. stop the capture, save it under the section's name
+    6. next section: back to step 1
+
+**Only the OPENING has to be inside the recording**, which is why the close
+comes first (the owner's suggestion, 2026-09-05, and it is the better order — an
+earlier version of this file had the close inside the capture for no reason).
+
+The reason the opening matters: the differ compares each APPLY's frame against
+the one before it, so the *first* APPLY needs something to compare against. That
+baseline is the settings read the config tool performs at start-up. If the app
+was already running when you hit record, the read is not in the file, line 1 has
+nothing to diff against, and `fieldmap.py` refuses to attribute anything at all
+rather than guess.
+
+**Do not run one continuous recording across all the sections.** The correlator
+checks, per file, that the number of APPLYs equals the number of numbered lines;
+that check is the thing that catches a miscount. In one big file a single slip
+shifts every mapping after it. Separate files keep a mistake inside one section.
+
+Switching tabs does not matter — capture it or not. Only the numbered APPLYs
+count.
+
+
 One capture file per page. Inside each file: change one setting, **click APPLY**,
 change the next, **click APPLY**, and so on, in the order the table gives.
 
@@ -274,34 +305,53 @@ exists, a skipped option is a feature we cannot ship); number → **three values
 
 ### `04-buttons.pcapng` — the **Buttons** tab
 
-*(This is the tab with the Multiclick Filter sliders. Corrected 2026-09-05: an
-earlier version of this file had 04 and 05 the wrong way round.)*
+*(This is the tab with the Multiclick Filter sliders. Corrected 2026-09-05
+twice: 04 and 05 were the wrong way round, and the acknowledgement checkbox has
+to be ticked before the sliders will move.)*
+
+**Order matters on this page.** the owner found that the *"I understand that the
+Multiclick Filter is not a traditional debounce slider…"* checkbox must be
+ticked before any Multiclick slider will change — Slamclick Filter being the one
+exception. So it is line 2 here, not the last line, and it gets a numbered line
+of its own because we do not know whether ticking it writes a byte to the
+device or is purely a UI gate. If it writes, its diff has to be attributable;
+if it does not, line 2 shows no change and that is the answer.
+
+Line 1 is Slamclick Filter *before* the tick, deliberately: it is the control
+The owner says is not gated, and doing it first proves that independently.
 
 | # | do exactly this |
 |---|---|
-| 1 | click **Slamclick Filter** once |
-| 2 | Left Button Multiclick Filter → **its minimum** (write the number) |
-| 3 | Left Button Multiclick Filter → **its maximum** (write the number) |
-| 4 | Left Button Multiclick Filter → **roughly halfway** (write the number) |
-| 5 | Right Button Multiclick Filter → **its maximum** |
-| 6 | Middle Button Multiclick Filter → **its maximum** |
-| 7 | Forward Button Multiclick Filter → **its maximum** |
-| 8 | Back Button Multiclick Filter → **its maximum** |
-| 9 | the **first** `SPDT:` combo (next to *Left* Button) → **1st item** |
-| 10 | first `SPDT:` combo → **2nd item** |
-| 11 | first `SPDT:` combo → **3rd item** |
-| 12 | the **second** `SPDT:` combo (next to *Right* Button) → **1st item** |
-| 13 | second `SPDT:` combo → **2nd item** |
-| 14 | second `SPDT:` combo → **3rd item** |
-| 15 | click the **"I understand…"** checkbox once |
+| 1 | click **Slamclick Filter** once — *before* ticking anything |
+| 2 | tick the **"I understand…"** checkbox |
+| 3 | Left Button Multiclick Filter → **its minimum** (write the number) |
+| 4 | Left Button Multiclick Filter → **its maximum** (write the number) |
+| 5 | Left Button Multiclick Filter → **roughly halfway** (write the number) |
+| 6 | Right Button Multiclick Filter → **its maximum** |
+| 7 | Middle Button Multiclick Filter → **its maximum** |
+| 8 | Forward Button Multiclick Filter → **its maximum** |
+| 9 | Back Button Multiclick Filter → **its maximum** |
+| 10 | the **first** `SPDT:` combo (next to *Left* Button) → **1st item** |
+| 11 | first `SPDT:` combo → **2nd item** |
+| 12 | first `SPDT:` combo → **3rd item** |
+| 13 | the **second** `SPDT:` combo (next to *Right* Button) → **1st item** |
+| 14 | second `SPDT:` combo → **2nd item** |
+| 15 | second `SPDT:` combo → **3rd item** |
 
-Lines 6–8 exist because there are **five** Multiclick sliders, one per button,
-and each needs to be moved at least once for its byte to be located. Lines 2–4
-move one slider three times to prove the byte holds a *number* rather than a
-flag; the rest only need to move once each.
+Lines 7–9 exist because there are **five** Multiclick sliders, one per button,
+and each needs to move at least once for its byte to be located. Lines 3–5 move
+one slider three times to prove its byte holds a *number* rather than a flag;
+the rest only need to move once each.
 
-Both `SPDT:` combos should hold three items. If either holds more, keep going
-and renumber the rest.
+If the `SPDT:` combos turn out to be gated by the acknowledgement too, that is
+fine — it is already ticked by then. If either combo holds more than three
+items, keep going and renumber.
+
+**On the caption.** the owner reports the on-screen text is cut off at *"lower values
+dont affect latenc"*. The full string in the resource is *"I understand that the
+Multiclick Filter is not a traditional debounce slider, lower values don't
+affect click latency."* — so the control is clipping its own label. Cosmetic,
+and it confirms this is checkbox 1064 on DIALOG 153.
 
 ### `05-buttonmapping.pcapng` — the **Button Mapping** tab
 
