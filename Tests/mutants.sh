@@ -96,8 +96,14 @@ if old not in s:
 open(p, "w").write(s.replace(old, new, 1))
 PY
   then echo "  ????      $name -- mutation did not apply"; BROKEN=$((BROKEN+1)); return; fi
-  # Delete the OBJECT FILES, not just the binary. A rebuild that does not
-  # actually recompile leaves an object built from clean source, links a
+  # Delete the OBJECT FILES, not just the binary.
+  #
+  # ROOT CAUSE, found 2026-09-05 and worth naming so nobody "simplifies" this
+  # back: make compares mtimes at ONE-SECOND granularity, and a mutate ->
+  # build -> test cycle here takes well under a second. `touch` sets the source
+  # to the current second, the object was written in that same second, and make
+  # concludes the object is up to date. So the rebuild silently does not
+  # recompile, leaves an object built from clean source, links a
   # "mutant" binary that contains no mutation, and the suite then passes -- and
   # a pass is reported as SURVIVED, i.e. as a hole in the tests. That is the
   # single worst direction for this script to be wrong in, because a hole that
@@ -112,6 +118,9 @@ PY
   # builds are not reproducible, and identical source produced three different
   # hashes across five rebuilds. So hashing proves nothing either way and the
   # only reliable move is to make a stale object impossible.
+  #
+  # The same bug bit Tests/test_config_set.sh's self-check within the hour, so
+  # it is a property of this repo's build, not of one script.
   rm -f ./build/test-flash
   find build -name '*.o' -path '*EGGFlashCore*' -delete 2>/dev/null
   touch "$file"

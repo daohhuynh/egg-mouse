@@ -4,11 +4,12 @@
 // that order, because §4.1 fixes it: "Implement factory reset first and confirm
 // it works before any other write path. It is the undo for bad config state."
 //
-// THERE IS STILL NO `set`. Naming a field requires the field map, which the
-// Windows captures produce; writing a byte whose meaning is [G] is forbidden
-// outright by §1.3. `restore` is different in kind -- it writes back bytes the
-// DEVICE produced, so no byte in it is a guess, even though we cannot yet say
-// what most of them mean.
+// `set` exists but is deliberately tiny. §1.3 forbids writing a byte whose
+// meaning is [G], so the settable table below holds ONLY fields whose meaning
+// was derived from the vendor binary and cited to an address. Everything else
+// in the 115-byte record is reachable through `restore`, which writes back
+// bytes the DEVICE produced -- so no byte in it is a guess, even though we
+// cannot yet say what most of them mean.
 #include "egg/Device.h"
 #include "egg/Transport.h"
 #include "egg/Protocol.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -38,6 +40,8 @@ void usage() {
       "                                    defaults. loses all settings.\n"
       "  egg-config restore F --yes        write a saved record back (A0 11),\n"
       "                                    then read it back and verify\n"
+      "  egg-config set FIELD VALUE --yes  change ONE derived field\n"
+      "  egg-config set                    list the settable fields\n"
       "\n"
       "  -v   hex-dump every frame\n"
       "\n"
@@ -45,8 +49,9 @@ void usage() {
       "sends back only bytes the device itself produced, and factory-reset\n"
       "sends no payload at all -- the device composes its own defaults.\n"
       "\n"
-      "There is no `set`. Changing one named field needs the field map, and a\n"
-      "byte whose meaning is a guess must never reach the hardware.\n"
+      "`set` covers only fields whose MEANING is derived from the vendor\n"
+      "binary and cited to an address -- a byte whose meaning is a guess must\n"
+      "never reach the hardware. `egg-config set` with no arguments lists them.\n"
       "\n"
       "If anything ever goes wrong with the FIRMWARE (not settings):\n");
     std::puts(kRecoveryProcedure);
@@ -272,6 +277,157 @@ int cmdFactoryReset(bool verbose, bool yes) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// The settable fields.
+//
+// §1.3: "Never write a byte whose meaning is [G]." So a field belongs here only
+// when its MEANING is [D] -- derived from the vendor binary and traceable to an
+// address. Knowing where a byte lives is not enough; §7.3 maps all 115 record
+// bytes and only a handful of them are legal to name.
+//
+// Adding a row is a protocol claim. Cite it, or leave the field out.
+struct Settable {
+    const char* name;
+    std::size_t recordOffset;             // offset within the settings record
+    bool (*encode)(long v, std::uint8_t& out);
+    const char* accepts;
+    const char* cite;
+};
+
+// config-protocol.md §7.5. Record 0x05 holds 8000/rate; the vendor's own reader
+// at cfg107 0x413a79 drops anything that is not one of these seven powers of
+// two to a no-op arm, so an unlisted value would be silently ignored rather
+// than rejected -- which is exactly why this encoder refuses it here instead.
+bool encodePolling(long hz, std::uint8_t& out) {
+    if (hz <= 0 || 8000 % hz != 0) return false;
+    const long div = 8000 / hz;
+    if (div < 1 || div > 64 || (div & (div - 1)) != 0) return false;
+    out = static_cast<std::uint8_t>(div);
+    return true;
+}
+
+// config-protocol.md §7.6. Record 0x0e is the CPI stage count, combo index + 1.
+bool encodeCpiLevels(long n, std::uint8_t& out) {
+    if (n < 1 || n > 4) return false;
+    out = static_cast<std::uint8_t>(n);
+    return true;
+}
+
+const Settable kSettable[] = {
+    {"polling",    0x05, encodePolling,
+     "125, 250, 500, 1000, 2000, 4000 or 8000 (Hz)",
+     "config-protocol.md §7.5, cfg107 0x413a79 / 0x413a94-0x413b8f"},
+    {"cpi-levels", 0x0e, encodeCpiLevels,
+     "1, 2, 3 or 4",
+     "config-protocol.md §7.6, cfg107 0x410c47 / 0x410c59 CB_GETCURSEL"},
+};
+
+void listSettable() {
+    std::puts("settable fields (only those whose MEANING is derived, §1.3):");
+    for (const Settable& f : kSettable)
+        std::printf("  %-12s record 0x%02zx   accepts %s\n"
+                    "               %s\n",
+                    f.name, f.recordOffset, f.accepts, f.cite);
+    std::puts("\nEverything else in the record is writable only via `restore`,\n"
+              "which sends back bytes the device itself produced.");
+}
+
+int cmdSet(const std::string& field, const std::string& value,
+           bool verbose, bool yes) {
+    const Settable* f = nullptr;
+    for (const Settable& c : kSettable)
+        if (field == c.name) { f = &c; break; }
+    if (!f) {
+        std::printf("`%s` is not a settable field.\n\n", field.c_str());
+        listSettable();
+        return 2;
+    }
+    char* end = nullptr;
+    const long v = std::strtol(value.c_str(), &end, 10);
+    if (end == value.c_str() || (end && *end)) {
+        std::printf("`%s` is not a number.\n", value.c_str());
+        return 2;
+    }
+    std::uint8_t want = 0;
+    if (!f->encode(v, want)) {
+        std::printf("%ld is not a legal %s. Accepts: %s\n",
+                    v, f->name, f->accepts);
+        return 2;
+    }
+    if (!yes) {
+        std::printf("set %s = %ld would write 0x%02x to record 0x%02zx"
+                    " (wire 0x%03zx).\n"
+                    "  derived: %s\n"
+                    "Exactly one byte changes. Re-run with --yes.\n",
+                    f->name, v, want, f->recordOffset,
+                    kPayloadOffset + f->recordOffset, f->cite);
+        return 2;
+    }
+
+    Log log(verbose);
+    auto dev = Device::open(kProductIdApplication, log);
+    if (!dev) return 1;
+    Transport t(*dev, kConfigBusy, log);
+
+    // §4.1: read-modify-write, and never write after a failed read.
+    std::vector<std::uint8_t> before;
+    if (!readCurrent(t, log, before)) return 3;
+
+    const std::size_t at = kPayloadOffset + f->recordOffset;
+    if (before[at] == want) {
+        std::printf("%s is already 0x%02x. Nothing to write.\n", f->name, want);
+        return 0;
+    }
+
+    std::vector<std::uint8_t> want_rec = before;
+    want_rec[at] = want;
+
+    // The invariant that makes this command safe to have at all: our outgoing
+    // payload differs from what we read in EXACTLY ONE byte, at the offset the
+    // cited derivation names. Checked, not asserted in a comment.
+    std::size_t moved = 0, movedAt = 0;
+    for (std::size_t i = kPayloadOffset; i < kLargeLen; ++i)
+        if (want_rec[i] != before[i]) { ++moved; movedAt = i; }
+    if (moved != 1 || movedAt != at) {
+        std::printf("internal error: %zu payload bytes would change"
+                    " (expected exactly 1, at 0x%03zx). NOT WRITING.\n",
+                    moved, at);
+        return 4;
+    }
+
+    auto out = Transport::frame(kReportLarge, cfg::kWriteSettings);
+    std::memcpy(out.data() + kPayloadOffset,
+                want_rec.data() + kPayloadOffset, kPayloadLen);
+    Reply w = t.exchange(out, kReportSmall, "A0 11 write settings");
+    if (!w.ok()) {
+        std::printf("write was not acknowledged: %s (status 0x%02x)\n",
+                    describe(w.outcome), w.status);
+        return 5;
+    }
+
+    std::vector<std::uint8_t> after;
+    if (!readCurrent(t, log, after)) {
+        std::puts("*** the write was acknowledged but the read-back FAILED.\n"
+                  "    The device's state is unknown. Do not write again until\n"
+                  "    a read succeeds.");
+        return 6;
+    }
+    const int changed = reportDiff(before, after, "before", "after");
+    if (after[at] != want) {
+        std::printf("*** record 0x%02zx is 0x%02x, not the 0x%02x we sent."
+                    " The write did NOT take.\n",
+                    f->recordOffset, after[at], want);
+        return 7;
+    }
+    if (changed != 1)
+        std::printf("\nNOTE: %d bytes changed on the device, not 1. The extra\n"
+                    "      ones are the device's own doing -- we sent exactly one\n"
+                    "      difference. Worth reading before trusting this field.\n",
+                    changed);
+    std::printf("\n%s = %ld confirmed on the device.\n", f->name, v);
+    return 0;
+}
+
 int cmdRestore(const std::string& path, bool verbose, bool yes) {
     std::vector<std::uint8_t> want;
     if (!loadRecord(path, want)) return 1;
@@ -360,6 +516,9 @@ int main(int argc, char** argv) {
     if (cmd == "factory-reset") return cmdFactoryReset(verbose, yes);
     if (cmd == "restore" && args.size() > 1) return cmdRestore(args[1], verbose, yes);
     if (cmd == "diff" && args.size() > 2)    return cmdDiff(args[1], args[2]);
+    if (cmd == "set" && args.size() > 2)
+        return cmdSet(args[1], args[2], verbose, yes);
+    if (cmd == "set") { listSettable(); return 2; }
     usage();
     return 1;
 }
