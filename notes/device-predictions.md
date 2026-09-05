@@ -42,18 +42,82 @@ precisely the claims the descriptor can falsify, so they are what is predicted.
 
 ## The register
 
-| # | prediction `[D]` | derived from | falsified if | observed `[O]` |
+| # | prediction `[D]` | falsified if | observed `[O]` | verdict |
 |---|---|---|---|---|
-| 1 | `VendorID == 0x3367` | `fw110 0x4010fa`, `cmpw $0x3367` against `HidD_GetAttributes`' `VendorID` | any other VID | *pending* |
-| 2 | In normal operation the device presents **`ProductID 0x1978`** | all five call sites of cfg107's matcher `0x4035f0` push `$0x1978` (`0x4130ac 0x413844 0x413edb 0x413f9d 0x414046`); `0x1977` appears nowhere in cfg107 | it enumerates as `0x1977`, or as neither | *pending* |
-| 3 | It presents **two vendor collections**, not one | `config-protocol.md` §10: the vendor patched `hid_open` to filter on usage pair, and the tool opens two | one vendor collection, or three or more | *pending* |
-| 4 | Collection A is **`UsagePage 0xFF01`, `Usage 0x02`** | `cfg107 0x403777`–`0x40377c`, `cmpw $0xff01`; `fw110 0x40113c`/`0x401145`, same pair | either value differs | *pending* |
-| 5 | Collection B is **`UsagePage 0xFF02`, `Usage 0x01`** | `config-protocol.md` §10.1, the second `hid_open` filter | either value differs | *pending* |
-| 6 | Collection A declares a **Feature report `0xA0` of 1041 bytes total** (1 id + 1040) | `updater-protocol.md` §2; `movl $0x411,%esi` at cfg107 `0x403bc9` and `0x404238` | no 1041-byte feature report; or the id is not `0xA0`; or macOS reports a different max | *pending* |
-| 7 | Collection A declares a **Feature report `0xA1` of 64 bytes total** (1 id + 63) | `updater-protocol.md` §2 | no 64-byte feature report, or a different id | *pending* |
-| 8 | Collection B declares an **Input report `0x03` of 8 bytes** | `config-protocol.md` §10.3, the poll thread's `buf[0]==3` guard and 8-byte read | different length or id | *pending* |
-| 9 | `bcdDevice` is the firmware version, and decodes as **BCD, not division** | `updater-protocol.md` §1, "Firmware version display — it is BCD, and the decode is not division" | the BCD reading gives a nonsense version and `raw/100` gives a sensible one | *pending* |
-| 10 | Report IDs are **numbered** — the descriptor declares explicit IDs | byte 0 of every vendor buffer is the report ID (§2) | the descriptor declares no `Report ID` item, making reports unnumbered | *pending* |
+| 1 | `VendorID == 0x3367` | any other VID | `0x3367` | **CONFIRMED** |
+| 2 | `ProductID 0x1978` in normal operation | `0x1977`, or neither | `0x1978` | **CONFIRMED** |
+| 3 | **two** vendor collections | one, or three or more | **three** | **WRONG — see below** |
+| 4 | collection A is `UsagePage 0xFF01` / `Usage 0x02` | either differs | `0xFF01` / `0x02` | **CONFIRMED** |
+| 5 | collection B is `UsagePage 0xFF02` / `Usage 0x01` | either differs | `0xFF02` / `0x01` | **CONFIRMED** |
+| 6 | Feature report `0xA0`, **1041 bytes** total | no such report, or a different id | Feature `0xA0`, 8320 bits = 1040 payload, **1041 on the wire**; macOS `MaxFeatureReportSize` = **1041** | **CONFIRMED, exactly** |
+| 7 | Feature report `0xA1`, **64 bytes** total | no such report, or a different id | Feature `0xA1`, 504 bits = 63 payload, **64 on the wire** | **CONFIRMED, exactly** |
+| 8 | Input report `0x03`, 8 bytes, on collection B | different length or id | Input `0x03`, 56 bits = 7 payload, **8 on the wire** | **CONFIRMED** |
+| 9 | `bcdDevice` decodes as **BCD, not division** | BCD nonsense and `raw/100` sensible | `0x0107` → BCD **1.07**; division gives **2.63** | **CONFIRMED, and division refuted** |
+| 10 | report IDs are numbered | no `Report ID` item | six numbered ids across two interfaces | **CONFIRMED** |
+
+**Nine of ten exactly right, and the tenth is wrong in the direction that
+matters.** Every length, every id and both predicted usage pairs came back
+identical to constants read out of a Windows `.exe` on a machine that has never
+run it. The risk this observation existed to retire — that a report length in
+these notes was an immediate the device does not actually agree with — is
+retired: `0x411` and `0x40` are the device's own numbers.
+
+## The device presents a THIRD vendor collection, and nothing in Endgame's software opens it  [O]
+
+Interface A's descriptor declares **five** top-level collections. The third
+vendor one was not predicted because nothing in the binaries points at it:
+
+| top-level collection | usage page / usage | reports | what it is |
+|---|---|---|---|
+| 1 | `0x01` / `0x06` — Generic Desktop, **Keyboard** | Input `0x02`, 8 bytes | boot-keyboard layout: 8 modifier bits, 1 reserved byte, 5 keycode slots |
+| 2 | `0xFF01` / `0x02` — vendor | Feature `0xA1` (64), Feature `0xA0` (1041) | **the command channel** |
+| 3 | `0x0C` / `0x01` — Consumer Control | Input `0x06`, 3 bytes | 16-bit consumer usage, range `0x01`–`0x23C` |
+| 4 | `0xFF02` / `0x01` — vendor | Input `0x03`, 8 bytes | **the event channel** |
+| 5 | **`0xFF02` / `0x02` — vendor** | **Input `0x08`, 64 bytes** | **unidentified** |
+
+Collection 5 is 63 bytes of vendor-defined input per report — the same payload
+size as Feature `0xA1` — and **no binary in the corpus opens it.** That is
+mechanical, not an impression. The vendor's patched `hid_open` filters on the
+usage *pair*, and every filter site in every config tool compares the usage
+against `1`:
+
+```
+cfg107 0x403777  movl  $0xff01,%edx      cfg107 0x402eb5  movl   $0xff02,%ecx
+       0x40377c  cmpw  %dx,0x57f1d2             0x402eba  cmpw   %cx,0x18(%esi)
+       0x403785  cmpw  $0x2,0x57f1d0            0x402ec0  cmpw   $0x1,0x1a(%esi)
+```
+cfg104 `0x402eca`/`0x402ed0` and cfg101 `0x402eca`/`0x402ed0` are byte-identical
+to cfg107's. The updaters never compare `0xFF02` at all — `litscan.py` finds
+**zero** 4-byte `0xff02` immediates in fw110 and fw104.
+
+**So the mouse has an input channel its own vendor's software never listens to.**
+Recorded as `[O]` and nothing more: its content is completely unknown, no
+`[D]` evidence bears on it, and per §1.3 it is not a basis for anything. It is a
+LIST 3 question and a good one — an 8-byte event channel that reports polling
+rate sits next to a 64-byte one that reports *something*.
+
+## Other observations taken at the same time  [O]
+
+- **The device is at firmware 1.07** (`bcdDevice 0x0107`). The newest updater we
+  have is 1.10, so this mouse is a genuine update target and the flasher has a
+  real job to do.
+- **Two USB HID interfaces, not one.** Interface A is the 156-byte descriptor
+  above (`MaxInput` 64, `MaxFeature` 1041). Interface B is a 69-byte descriptor,
+  Generic Desktop / **Mouse**: Input `0x01`, 8 bytes — 8 button bits, X and Y as
+  **16-bit** values, wheel and AC Pan as 8-bit. Nothing vendor-specific on it.
+- **The keyboard and consumer collections corroborate `config-protocol.md`
+  §12.2 from the hardware side.** That inventory, read out of the config tool's
+  dialogs, lists a `'KEYBOARD KEY'` binding dialog with SHIFT/CTRL/WIN/ALT and
+  media bindings `'PLAY/PAUSE' 'NEXT' 'PREVIOUS' 'MUTE' 'VOLUME UP' 'VOLUME
+  DOWN' 'BROWSER' 'EXPLORER'`. Collections 1 and 3 are exactly the transports
+  those need. Neither was predicted; both are explained.
+- **macOS handed all of this over with no permission prompt at all**, because
+  `ioreg` reads the I/O Registry rather than opening a device. Whether *opening*
+  the vendor collection needs Input Monitoring is still untested and remains on
+  `CLAUDE.md` §5's list.
+- macOS runs **Keyboard Setup Assistant** on plug-in, because collection 1 is an
+  unrecognised keyboard. Quit is the correct answer; there is no keyboard to
+  identify. Worth knowing before our own tool is blamed for it.
 
 **Convention check, so a mismatch is not misread.** macOS's
 `MaxFeatureReportSize` **includes** the report-ID byte — verified against an
@@ -76,5 +140,14 @@ to what `hidobserve.py` prints, with no adjustment.
 
 ## Result
 
-*Not yet run. `Tools/device/hidobserve.py` produces it, reads only `ioreg`, and
-opens no device.*
+Taken 2026-09-04 with `Tools/device/hidobserve.py --save .analysis`, which reads
+`ioreg` and opens no device. Raw properties in `.analysis/hidobserve_3367.json`.
+Interface A's descriptor, verbatim, so anyone can re-parse it:
+
+```
+05010906a1018502050719e029e71500250175019508810295017508810195057508150125
+650507190129658100c00601ff0902a10185a17508953f150025010921b10385a075809541
+150025010922b103c0050c0901a101850619012a3c021501263c02950175108100c00602ff
+0901a1018503190129ff15002500950775088101c00602ff0902a1018508190129ff150025
+00953f75088101c0
+```
