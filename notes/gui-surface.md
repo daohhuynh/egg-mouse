@@ -141,3 +141,30 @@ names. That is real evidence, and the conclusion drawn from it was still wrong:
 the program clearly makes the dropdowns visible at runtime. A missing style bit
 supports "hidden as shipped"; it never supports "hidden while running", and
 `dlgdump.py` prints the bit precisely because it is a template fact.
+
+
+## 5. The APPLY button is gated on dirty state  [O]
+
+The owner, 2026-09-05, at the machine: *"the APPLY button is greyed out if i havent
+changed anything, if i apply after ticking angle snapping then i cant click
+apply again."*
+
+Small, and it settles two things that were open.
+
+**No APPLY in any capture is a no-op.** Every `A0 11` WRITE frame in the session
+captures follows a real user change, so the diff chain in `fieldmap.py` has no
+empty links by construction. An empty diff is therefore a symptom — the setting
+was already at that value, or the write was refused — and not the ordinary case.
+`fieldmap.py` already prints exactly that, and this observation is why that
+message is a diagnosis rather than a shrug.
+
+**It also means a log line can have no frame behind it.** A setting that turns
+out not to exist gets a numbered line and no APPLY, and there is no way to
+produce a filler frame. That is handled in `fieldmap.py` by the `NO_APPLY`
+marker rather than in the capture procedure; see the comment there for why the
+tool absorbs this and the log does not.
+
+Mechanism not derived. MFC's usual shape is `SetModified(TRUE)` on each control
+notification with the sheet enabling `ID_APPLY_NOW`, which would fit, but no
+address has been traced and it is **[G]** whether that is what this program
+does. Nothing depends on it.
