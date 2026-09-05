@@ -220,3 +220,37 @@ live on the device; one that does not, would not — so this single diff
 distinguishes them.
 
 Not derived. No address is offered for the gate and none was looked for.
+
+
+## 8. GX Safe forces that button's multiclick filter to 8  [O]
+
+The owner, 2026-09-05: *"changing to gx safe mode locks the multiclick filter at 8 and
+greys it out so you cant change it"*, and it is per-button — *"if i do the first
+SPDT it does that to the left button filter"*.
+
+So the SPDT mode combo (`Off` / `GX Speed` / `GX Safe`) and the multiclick
+filter are **coupled**: selecting GX Safe writes the filter as well as the mode.
+
+**Consequence for the capture,** and it is why this had to be written down the
+moment it appeared rather than discovered in the diff: a GX Safe line changes
+*two* record fields, breaking the one-change-per-APPLY property the whole method
+rests on. `fieldmap.py` already refuses to reduce a multi-run diff to one and
+prints both runs, so nothing is silently mis-attributed — but a note on the log
+line is what turns "two runs moved, cause unknown" into an attribution.
+
+Avoidable for free: set that button's filter to 8 *before* selecting GX Safe,
+and the mode change then moves one byte.
+
+**Consequence for our own writes, which is the more important half.** This is a
+constraint the *host* enforces by greying out a control. If it is only host-side,
+the device will happily accept a filter value other than 8 while in GX Safe, and
+`egg-config set` would then produce a state the vendor tool cannot represent —
+not corrupt, but outside anything the vendor has been observed to produce, which
+§2's threat model says we should not be the first to try. If instead the device
+enforces it, a write would be silently overridden and a read-back diff would
+show it.
+
+**Which of those is true is `[G]`.** Neither multiclick nor SPDT mode is in
+`egg-config set`'s table (§1.3 — neither meaning is derived), so nothing is at
+risk today. If either is ever added, this coupling has to be settled first, and
+the read-back-and-verify in `set` is what would catch it.

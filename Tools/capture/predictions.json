@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Predictions about the settings record, derived from the vendor binary",
+    "BEFORE the capture that tests them. Kept in a separate file from",
+    "fieldmap.py on purpose: CLAUDE.md §7.1 deleted a previous tool because it",
+    "carried its conclusions inside it, so anyone reading the tool inherited",
+    "them. fieldmap.py must observe without expecting; this file expects; and",
+    "score.py is the only place the two meet.",
+    "",
+    "Every entry needs a `cite` and a `refuted_if`. An entry with no way to",
+    "fail is not a prediction."
+  ],
+  "predictions": [
+    {
+      "id": "polling-divisor",
+      "record_offset": 5,
+      "cite": "config-protocol.md §7.5; cfg107 0x413a79, 0x413a94-0x413b8f",
+      "claim": "record 0x05 holds 8000/rate",
+      "expect_values": {"125": 64, "250": 32, "500": 16, "1000": 8,
+                        "2000": 4, "4000": 2, "8000": 1},
+      "match_log": "polling",
+      "refuted_if": "a polling line moves no byte at record 0x05, or moves it to a value outside {1,2,4,8,16,32,64}, or rate*value != 8000"
+    },
+    {
+      "id": "cpi-stage-count",
+      "record_offset": 14,
+      "cite": "config-protocol.md §7.6; cfg107 0x410c47, 0x410c59 CB_GETCURSEL",
+      "claim": "record 0x0e is the CPI stage count, 1..4",
+      "expect_values": {"1": 1, "2": 2, "3": 3, "4": 4},
+      "match_log": "cpi levels",
+      "refuted_if": "a CPI-levels line moves no byte at record 0x0e, or moves it outside 1..4"
+    }
+  ]
+}
