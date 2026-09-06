@@ -230,6 +230,25 @@ An alternative with the same remedy: `A1 3A` invalidates an application-valid
 marker rather than setting a stay flag. Nothing observed distinguishes the two,
 and **both are cleared by finishing a flash**, so the recovery is the same.
 
+**UPGRADED FROM `[G]` TO `[O]`, 2026-09-05.** "A completed flash clears the
+latch" was an inference when written. It is now observed: after the `A1 3A`
+above left the mouse latched at `0x1977`, **the owner ran Endgame's Windows updater,
+the flash completed, and the mouse returned to `0x1978` application mode** — it
+is there now (`egg-config devices`: seven interfaces, PID `0x1978`,
+`bcdDevice 0x0110`). No other action cleared it; two power cycles had already
+failed to (claim 1 above).
+
+This is the escape hatch the whole plan rests on, and it has now been exercised
+on this mouse rather than assumed. It also means the accepted cost in
+CLAUDE.md §4.2b is bounded by something real: the worst outcome of latching and
+then stopping is "run the vendor's Windows updater again", which is a thing that
+has already worked here once.
+
+**It does NOT establish that OUR flash clears it** — ours has never run. What is
+observed is that a completed flash of the vendor's own doing clears it, and our
+outbound bytes are byte-identical to that updater's capture
+(`Tests/test_golden_vendor.py`, 135 frames, token `ecfc8f88`).
+
 **What is NOT claimed.** That the application image is damaged. Nothing erased
 it: `A0 03` was never sent by anything, and `A1 3A`/`A1 09` carry no address,
 no length and no payload. The zero-write test of that claim is §4.4 stage 3 —
