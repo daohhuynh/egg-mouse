@@ -170,10 +170,16 @@ endif()
 # Is a planted mutant sitting in the tree? Safe as a ctest entry because
 # `mutants` is RUN_SERIAL -- nothing else runs while the source is mutated on
 # purpose -- so a hit here means a run died, or one got staged by hand.
-add_test(NAME no_mutants COMMAND Tools/no-mutants.sh)
+# NAMED `tree_clean`, NOT `no_mutants`, and the name is the whole point.
+# `ctest -E mutants` is the fast loop everyone types, and -E is an unanchored
+# regex -- so a guard called `no_mutants` is excluded by the very command that
+# skips the long run, which is exactly when a leftover mutant is most likely to
+# be sitting in the tree. Caught within the hour of writing the guard, by
+# counting: 31 tests total, 29 under `-E mutants`, not 30.
+add_test(NAME tree_clean COMMAND Tools/no-mutants.sh)
 # notes_tree as well: the guard also refuses a leftover notes/zzz-planted-*.md,
 # and test_auditclaims.py has one on disk for as long as it runs.
-set_tests_properties(no_mutants PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+set_tests_properties(tree_clean PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                      RESOURCE_LOCK notes_tree)
 
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)

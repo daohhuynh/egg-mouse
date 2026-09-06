@@ -69,9 +69,21 @@ cmake --build build
 ```
 
 Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
-`build/test-config`. `ctest --test-dir build -E mutants` runs the thirteen fast
-suites; none of them needs the mouse. Dropping `-E mutants` adds the mutation
-run, which takes ~10 minutes because it rebuilds the tree once per planted bug.
+`build/test-config`. `ctest --test-dir build -E mutants` runs the fast suites --
+thirty of them as of 2026-09-06, none needing the mouse, about two minutes.
+Dropping `-E mutants` adds the mutation run, which takes ~15 minutes because it
+rebuilds the tree once per planted bug.
+
+Then, for the graphical version:
+
+```sh
+./Tools/build-app.sh
+open 'build/EGG Mouse.app'
+```
+
+The app looks for `egg-config` and `egg-flash` next to itself and then in
+`./build`, so build those first. It says so on its home screen if it cannot
+find them.
 
 ## egg-config
 
@@ -84,11 +96,22 @@ egg-config set                     list the settable fields and their citations
 egg-config set FIELD VALUE --yes   change ONE derived field
 egg-config dryrun REC [F V]        offline: print the exact 1041-byte frame
 egg-config encode F V IN OUT       offline: apply one field to a saved record
+egg-config frames                  offline: the bytes of every fixed frame
 egg-config factory-reset --yes     device-side reset (A1 13)
 egg-config restore FILE --yes      write a saved record back, then verify
+
+egg-config map BUTTON ACTION --yes      rebind one button (21 actions)
+egg-config cpi N X [Y] --yes            set CPI stage N (1-4)
+egg-config handedness left|right --yes  swap the primary click
+egg-config multiclick BUTTON MODE [N] --yes   per-button click filter
 ```
 
-`set` covers **twelve** fields, and a field is in the table only when its
+The four verbs in the second group exist because those settings are not single
+bytes. `handedness` in particular is not a flag: it MOVES your mapping between
+entries 0 and 1, so it reads the record before deciding what to write. Running
+any of them with no arguments prints what it accepts.
+
+`set` covers **thirteen** fields, and a field is in the table only when its
 *meaning* is derived from the vendor binary and cited to an address. Knowing
 where a byte lives is not enough: all 115 record bytes are mapped, and most of
 them are still nameless. `egg-config set` with no arguments prints the list with
@@ -196,13 +219,47 @@ whole outbound byte sequence can be diffed against a capture of the vendor's
 tool doing the same flash, and a warning on stdout would make that diff depend
 on whether a backup file happened to exist. A test pins it.
 
+## The app
+
+`Tools/build-app.sh` builds `build/EGG Mouse.app`: a SwiftUI front end with a
+home screen leading to **Settings**, **Firmware** and **New versions**.
+
+It **shells out to the two CLIs and owns no write path.** That is not laziness,
+it is the same reason there are two executables rather than one. A window has a
+close button, a Dock quit item and a force-quit, and a flash between the erase
+and a verified image may not honour any of them — so the flash stays a process
+that cannot be asked to stop, and the app is only its caller.
+
+- **Settings** — read the record, change one field at a time, and every change
+  is previewed before it is written and read back after. It can save a copy and
+  restore one, in two clicks: the preview runs entirely offline (the mouse can
+  be unplugged) and the write button arms only if that preview succeeded. There
+  is a one-click restore of the automatic known-good copy. Fields the *device*
+  reports it cannot accept are disabled with the reason next to them.
+- **Firmware** — back up what is on the mouse now, or write a new image from
+  Endgame's own updater. The backup is a separate run and is required first.
+- **New versions** — hand it an Endgame `.exe` this build has never seen, for
+  either a firmware updater or a config tool, and it re-derives what it needs
+  and prints what it found. It refuses rather than guessing.
+
+Every argument list the app can build is a pure function in
+`Sources/EGGApp/Commands.swift`, and `Tests/test_app_commands.swift` runs those
+argument lists against the real CLIs — so a change to a CLI's output that the
+app parses shows up as a failing test rather than as a greyed-out button.
+
 ## Tests
 
 ```sh
-ctest --test-dir build -E mutants   # thirteen suites, no hardware needed
-ctest --test-dir build              # adds the mutation run (~10 min: it
+ctest --test-dir build -E mutants   # 30 suites, no hardware needed, ~2 min
+ctest --test-dir build              # adds the mutation run (~15 min: it
                                     # rebuilds the tree once per planted bug)
 ```
+
+`-E` is an unanchored regex, which is worth knowing here: `-E mutants` would
+also skip a test called `no_mutants`, so the guard that refuses to let a
+planted mutant reach a commit is called **`tree_clean`** instead. It runs in
+the fast loop, which is exactly when a leftover mutant is most likely to be
+sitting in the tree.
 
 or individually:
 
@@ -213,6 +270,7 @@ or individually:
 ./Tests/test_config_set.sh     # everything `set` must refuse
 ./Tests/test_flash_undo.sh     # the A1 13 settings warning
 ./Tests/test_flash_backup.sh   # every way the backup gate must refuse
+./Tools/no-mutants.sh          # is a planted mutant still in the tree?
 python3 -m unittest Tests.test_golden_vendor    # our bytes vs Endgame's capture
 python3 -m unittest Tests.test_config_replay    # replay the vendor's own writes
 ```
@@ -318,6 +376,11 @@ Tools/capture/          pcapng reader, exchange extractor, record differ
 Tools/pe/               PE resource lister/extractor for the FWFILE images
 Tools/ghidra-export/    static-analysis tooling over the vendor binaries
 Tools/device/           read-only device observation (opens nothing)
+Tools/build-app.sh      builds the SwiftUI front end
+Tools/no-mutants.sh     refuses a commit while a planted mutant is in Sources/
+Sources/EGGApp/         the SwiftUI front end. It SHELLS OUT to the two CLIs
+                        and owns no write path -- a window has a close button
+                        and a post-erase flash may not honour one
 Tools/score-*.py        scorers for the pre-registered predictions, each
                         written and committed BEFORE the run it grades
 notes/                  the derivation, with provenance tags on every claim
@@ -358,6 +421,16 @@ from the vendor's own binary and can be cited to an address — the tool prints
 that citation next to every field. The 115-byte settings record is fully
 *mapped* (`notes/config-protocol.md` §7.3) and mostly not *named*, and mapped is
 not good enough to write.
+
+**And the list has stopped growing, which is a result rather than a pause.**
+Every route from Endgame's own Windows software to a new writable field has now
+been walked: every byte that ever changed across the 82 captured settings
+records is named or inside the CPI or button blocks; the routine that writes the
+factory defaults introduces nothing new; every control the older config tools
+have and 1.07 dropped resolves to a field already named or already refused; and
+the LED page, the last candidate, turns out to be inert in all four tools — its
+controls have no message-map handler in any of them, so nothing Endgame ships
+can move those bytes either. What is left is the firmware image itself.
 
 Everything else is still reachable, through `egg-config restore`, which sends
 back bytes the device itself produced — so no byte in it is a guess even where
