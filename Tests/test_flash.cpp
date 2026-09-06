@@ -535,7 +535,7 @@ static void testStage2Entry() {
         const EntryOutcome o = enterBootloaderAndConfirm(e);
         ok("seven interfaces on one PID read as ONE device, not seven",
            o.result == EntryResult::EnteredAndConfirmed,
-           describe(o.result));
+           describe(o.result, egg::kProductIdBootloader).c_str());
     }
     // A device with the right PID but NO vendor collection is not openable, so
     // it must not be counted as one either.
@@ -674,7 +674,7 @@ static void testStage2Exit() {
         for (std::size_t i = 4; i < o.sent.size(); ++i) if (o.sent[i]) exact = false;
         ok("the frame is a1 09 + 62 zeros, exactly as captured", exact);
         ok("it comes back to the application", o.result == EntryResult::EnteredAndConfirmed,
-           describe(o.result));
+           describe(o.result, egg::kProductIdBootloader).c_str());
         ok("EXACTLY ONE report is ever sent", w.sent.size() == 1);
         ok("and it is the application collection it reports",
            o.seen.productId == kProductIdApplication);

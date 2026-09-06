@@ -215,3 +215,64 @@ publishes is irrelevant, and requiring `0xFF01/0x02` to appear would only add a
 way to time out while the device is plainly present. `bcdDevice` and the product
 string are device-level and ride on every interface, so the identity check in
 prediction items 6 and 7 loses nothing.
+
+---
+
+# RUN 2, 2026-09-05 19:35:40 — SCORED. 9 of 11, and the two misses are the finding
+
+Run 2 sent the frame. Scoring against the pre-registration above, which was
+committed (`2094d98`) before the command ran.
+
+| # | prediction | result |
+|---|---|---|
+| 1 | exactly 64 bytes, `a1 3a 00 00 00 5a a5 32` + 56 zeros | **HIT** |
+| 2 | reply reports `got=63` (N−1 rule) | **HIT** |
+| 3 | `resp[1] == 0x01` | **REFUTED — `0x03`** |
+| 4 | reply byte 0 is `0x00` or `0xa1`, never `0xa0` | **HIT** — `0x50`… see below |
+| 5 | `0x1977` within 10 s, point estimate 300–1500 ms | **HIT** — 717 ms tool-side, 292 ms in the kernel log |
+| 6 | PID `0x1977`, bcdDevice `0x0006`, product `Bootloader` | **HIT**, all three |
+| 7 | manufacturer prints `EGG` | **HIT** |
+| 8 | `egg-config devices` shows `(BOOTLOADER)` | **HIT** |
+| 9 | returns to `0x1978` on a power cycle | **REFUTED — it latches** |
+| 10 | settings match the vault, 0/1024 | **UNTESTABLE** until it is back |
+| 11 | still firmware 1.10 | **UNTESTABLE** until it is back |
+
+**Prediction 3 refuted, and not gating on it is the only reason this worked.**
+`resp[1]` came back `0x03`, a value in neither capture for this command. The
+pre-registration said *"Not gated on; if it comes back something else and the
+device still re-enumerates, the run still succeeds and the surprise is
+recorded."* That decision traces to fw110 `0x004037e1`, which tests only that a
+read happened. Had the tool required `0x01` — the obvious defensive choice — it
+would have reported failure on a successful entry, and the natural next move
+would have been to send `A1 3A` again. **A status gate on an undocumented byte
+is a way to manufacture false failures**, and this is the concrete instance.
+
+**Prediction 4: scored HIT, with the caveat stated.** Byte 0 read `0x50`, which
+is neither `0x00` nor `0xa1` — but the claim as written was falsifiable
+specifically on `0xa0`, and `0xa0` is what would have broken the byte-0 story.
+It did not appear. `0x50` is new and unexplained; note that the `A1 09` replies
+in both captures are `50 01 …`, so `0x50` is a value this device does use in
+byte 0. Recorded as open, not as understood.
+
+**Prediction 9 refuted — this is the result of the rung.** See
+`bootloader-observed.md` §5b. A software entry latches across power loss; a
+button entry does not. The pre-registration's *Risk* section named this exact
+outcome — *"sets a flag that stops the bootloader handing back to the
+application"* — and it happened.
+
+## The risk section was right, including about the way out
+
+It said the bad outcome was *"the mouse is unusable until the owner reaches a Windows
+machine"* rather than a brick, on the strength of `updater-protocol.md` §5.1a.
+That still holds and is unchanged by anything observed since. What the section
+got wrong was only its probability estimate ("small"), which is unscoreable on
+one trial.
+
+## What was learned that was not predicted at all
+
+- `A1 09` is not a way out of a bootloader that has not been flashed. It is
+  acknowledged with the vendor's own success value `0x01` and it **does** reset
+  the device; the device returns to the bootloader. `bootloader-observed.md` §5b.
+- A firmware-initiated reset has a kernel-log signature that a cable pull does
+  not: `AppleUSBXHCICommandRing::setAddress: completed with result code 4`.
+- Two `A1 09` sends produced one reset. Unresolved, §5b.1.

@@ -55,7 +55,13 @@ enum class EntryResult {
     UnrecognisedIdentity,  // 0x1977 appeared and something did not match
 };
 
-const char* describe(EntryResult r);
+// The PID is a REQUIRED argument, not a convenience. The first version of this
+// hardcoded "PID 0x1977 never appeared" into the NoReenumeration text, which is
+// the entry path's wording; the exit path waits for 0x1978 and so printed the
+// wrong device at the exact moment the reader most needs the right one. Making
+// the caller supply what it was waiting for means the string cannot disagree
+// with the loop again.
+std::string describe(EntryResult r, std::uint16_t expectedPid);
 
 struct EntryOutcome {
     EntryResult result{EntryResult::NoApplicationDevice};

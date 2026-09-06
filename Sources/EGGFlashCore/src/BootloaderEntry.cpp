@@ -1,20 +1,24 @@
 #include "egg/BootloaderEntry.h"
 #include "egg/FlashCommands.h"
 
+#include <cstdio>
+
 namespace egg::fw {
 
-const char* describe(EntryResult r) {
+std::string describe(EntryResult r, std::uint16_t expectedPid) {
+    char pid[16];
+    std::snprintf(pid, sizeof pid, "0x%04x", expectedPid);
     switch (r) {
         case EntryResult::EnteredAndConfirmed:
-            return "entered the bootloader and confirmed its identity";
+            return "reached the expected mode and confirmed its identity";
         case EntryResult::NoApplicationDevice:
-            return "no application device to send to; nothing was sent";
+            return "no device to send to; nothing was sent";
         case EntryResult::SendFailed:
             return "the report never went out; nothing changed on the device";
         case EntryResult::NoReenumeration:
-            return "acknowledged, but PID 0x1977 never appeared";
+            return std::string("acknowledged, but PID ") + pid + " never appeared";
         case EntryResult::UnrecognisedIdentity:
-            return "PID 0x1977 appeared but its identity was not recognised";
+            return std::string("PID ") + pid + " appeared but its identity was not recognised";
     }
     return "unknown";
 }

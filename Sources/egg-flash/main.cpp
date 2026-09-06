@@ -201,7 +201,7 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
     }
 
     if (o.result != EntryResult::EnteredAndConfirmed) {
-        std::printf("\nFAILED: %s\n", describe(o.result));
+        std::printf("\nFAILED: %s\n", describe(o.result, egg::kProductIdBootloader).c_str());
         if (o.result == EntryResult::UnrecognisedIdentity)
             std::printf("Refused it rather than proceeding. Expected bcdDevice 0x%04x and \"%s\".\n",
                         egg::kBootloaderRelease, egg::kBootloaderProduct);
@@ -297,13 +297,33 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
     }
 
     if (o.result != EntryResult::EnteredAndConfirmed) {
-        std::printf("\nFAILED: %s\n", describe(o.result));
+        std::printf("\nFAILED: %s\n", describe(o.result, egg::kProductIdApplication).c_str());
+        // NOT kRecoveryProcedure. That text tells the reader to hold LEFT+RIGHT
+        // to reach the bootloader -- which is where they already are. Printing
+        // it here was a real defect: the one moment a recovery instruction is
+        // read closely is the moment it is wrong.
         std::printf(
-          "\nThe mouse is still in the bootloader. NOTHING was erased or written,\n"
-          "so it is not damaged -- it is in the wrong mode.\n"
-          "Endgame's own Windows updater recovers this: it treats a 0x1977 device\n"
-          "as a supported starting state and goes straight to flashing\n"
-          "(notes/updater-protocol.md 5.1a).\n\n%s\n", kRecoveryProcedure);
+          "\nThe mouse is still in the bootloader. NOTHING was erased or written\n"
+          "by this tool -- no A0 03, no A0 06 -- so the application region is\n"
+          "untouched. It is in the wrong mode, not damaged.\n"
+          "\n"
+          "A power cycle will NOT fix it and neither will running this again;\n"
+          "both are [O], twice each (notes/bootloader-observed.md 5b).\n"
+          "A1 09 is working: the device resets and re-enumerates in ~292 ms,\n"
+          "it simply comes back into the bootloader, because the flag that sends\n"
+          "it there lives in NVM and is cleared by a COMPLETED FLASH, not by\n"
+          "the exit command.\n"
+          "\n"
+          "THE WAY OUT IS TO FINISH A FLASH. Two ways to do that:\n"
+          "  1. Endgame's Windows updater, on any Windows machine. It treats a\n"
+          "     0x1977 device as a supported starting state and goes straight to\n"
+          "     flashing (notes/updater-protocol.md 5.1a). No code of ours runs.\n"
+          "  2. This tool, once the flash verb exists. Do the read-only A0 07\n"
+          "     read-back first (4.4 stage 3) -- it is zero-write and it proves\n"
+          "     the block arithmetic against FWFILE 140.\n"
+          "\n"
+          "Settings are safe either way: the vault is on disk and restore is\n"
+          "verified 21/21.\n");
         return 1;
     }
 

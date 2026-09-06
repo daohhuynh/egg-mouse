@@ -134,7 +134,14 @@ Also outstanding: we have never captured the **mouse interface** (`usage 0x02`)
 descriptor in application mode at all — only the bootloader's 69-byte one. Grab
 it on the next replug.
 
-## 5a. Bootloader mode is NOT latched — a power cycle exits it [O]
+## 5a. A BUTTON entry is not latched — a power cycle exits it [O]
+
+> **SCOPE CORRECTED 2026-09-05.** This section originally read "Bootloader mode
+> is NOT latched". That is true of the **button** entry it observed and FALSE of
+> a software `A1 3A` entry, which latches. See §5b. The generalisation was never
+> tested at the time; it was one observation of one entry mechanism, restated
+> without its qualifier. Identical USB identity does not mean identical state.
+
 
 Observed 2026-09-05. The device sat in the bootloader for **about four hours**,
 continuously powered, and stayed there — so the mode does not time out. Unplug
@@ -164,6 +171,99 @@ so nothing in our flasher needs to race a timeout after `A1 3A`.
 off. If it does, a corrupt application would leave the device in the bootloader
 by itself, which would be a second recovery path. Nothing observed either way,
 and the button makes it unnecessary to know.
+
+## 5b. A SOFTWARE entry DOES latch, and `A1 09` does not clear it [O]
+
+2026-09-05, on the physical mouse, firmware 1.10. This is the finding §4.4
+stage 2 existed to produce, and it contradicts the generalised reading of §5a.
+
+**The kernel log, which records every enumeration and is blind to nothing:**
+
+```
+/usr/bin/log show --last 20m --style compact --predicate \
+  'subsystem CONTAINS "usb" OR category CONTAINS "usb" OR senderImagePath CONTAINS "USB"'
+```
+
+```
+19:35:40.363  AppleUSBXHCICommandRing::setAddress: completed with result code 4
+19:35:40.863  terminateDevice: destroying 0x3367/1978/0110 (OP1 8k v2)   <- A1 3A
+19:35:41.155  enumerateDeviceComplete: 0x3367/1977/0006 (Bootloader)        292 ms
+
+19:35:58.942  terminateDevice: destroying 0x3367/1977/0006   <- physical unplug 1
+19:36:07.154  enumerateDeviceComplete: 0x3367/1977/0006      <- BACK AS BOOTLOADER
+19:36:21.972  terminateDevice: destroying 0x3367/1977/0006   <- physical unplug 2
+19:36:30.527  enumerateDeviceComplete: 0x3367/1977/0006      <- BACK AS BOOTLOADER
+
+19:43:00.363  AppleUSBXHCICommandRing::setAddress: completed with result code 4
+19:43:00.363  terminateDevice: destroying 0x3367/1977/0006   <- A1 09
+19:43:00.655  enumerateDeviceComplete: 0x3367/1977/0006         292 ms
+                                                              <- BACK AS BOOTLOADER
+```
+
+Three separate claims, each `[O]`:
+
+1. **An `A1 3A` entry survives loss of power.** Two full power cycles, both
+   returning `0x1977`. Since it survives power loss the flag is in NVM, so
+   **waiting cannot clear it** — there is no capacitor to drain and no timeout
+   to outlast. (§5a already showed the mode does not time out under power.)
+2. **`A1 09` is not ignored — it works, and it reboots the device.** The
+   bootloader answered `resp[1] == 0x01`, which is the exact value updater 1.10
+   requires at `0x00403c30`, in 56 ms. Then the device reset itself and
+   re-enumerated 292 ms later. It simply came back into the bootloader.
+3. **A software-induced reset is distinguishable from an unplug in the log.**
+   Both `A1 3A` and `A1 09` are preceded by
+   `AppleUSBXHCICommandRing::setAddress: completed with result code 4`;
+   neither physical unplug is. Useful discriminator for every later rung —
+   it separates "the firmware reset itself" from "the cable moved" without
+   needing a person to report what they did.
+
+**What this implies about the mechanism, and it is `[G]` — say so.** The shape
+that fits all of the above is a flag in NVM meaning roughly *stay in the
+bootloader / the application is not to be trusted*: `A1 3A` sets it, the
+bootloader tests it on every boot, and **a completed flash clears it while
+`A1 09` alone does not.** That is consistent with the vendor's own sequencing
+(`updater-protocol.md` §5.4): they only ever send `A1 09` after `A0 03` + all
+blocks + a matching whole-image checksum, so clearing on `A1 09` would be
+redundant in their flow and they would never have found it missing.
+
+An alternative with the same remedy: `A1 3A` invalidates an application-valid
+marker rather than setting a stay flag. Nothing observed distinguishes the two,
+and **both are cleared by finishing a flash**, so the recovery is the same.
+
+**What is NOT claimed.** That the application image is damaged. Nothing erased
+it: `A0 03` was never sent by anything, and `A1 3A`/`A1 09` carry no address,
+no length and no payload. The zero-write test of that claim is §4.4 stage 3 —
+`A0 07` read-back of blocks `0x34`–`0x74` compared against `FWFILE` 140, which
+is firmware 1.10 and is what this mouse runs (`bcdDevice 0x0110`, this same log).
+
+### 5b.1 GAP: two `A1 09` sends produced ONE reset [O, unresolved]
+
+`leave-bootloader --yes` was run **twice**. Both sends were acknowledged, the
+second with `resp[1] = 0x01` at 56 ms. The kernel log shows **one** re-enumeration
+(19:43:00), and the live `sessionID` (`ioreg`, converted through the mach
+timebase) confirms no enumeration since. So one of the two sends reset the device
+and the other did not.
+
+Which one is not determined — the run timestamps were not recorded, only the log
+was. Recorded per §1.7 before it is resolved. Two candidate readings:
+
+- The first reset; the second, arriving at a bootloader that had already
+  processed a completion this boot, acked and did nothing.
+- The first did nothing; the second reset.
+
+The first is the better fit for the pasted output (run 1 printed no summary
+before the terminal appeared to hang), but "better fit" is not evidence.
+**Next `A1 09`, timestamp the send** and settle it. It matters because "the
+bootloader accepts a command once per boot" would be a real property of the
+device and would change how retry loops must be written.
+
+### 5b.2 GAP: §5a records `ver=0x0107`, today's log says `0110` [unresolved]
+
+§5a's transcript reads `PID 0x1978 APPLICATION ver=0x0107`. Today's kernel log
+reads `0x3367/1978/0110`, and `egg-config info` reports 1.10. Nothing has ever
+been flashed by us, so the firmware cannot have changed. One of the two numbers
+was mis-transcribed, most likely §5a's. **Do not quote either until the device
+is back in application mode and `bcdDevice` is read directly.**
 
 ## 6. What this does NOT establish
 
