@@ -31,15 +31,39 @@ command byte, different region, 65× the data.
 
 ## 1. THE NECESSITY GATE (CLAUDE.md §4.2a), answered before proposing the send
 
+> **ENTRY CHANGED BEFORE THE RUN, 2026-09-05.** An earlier draft of this file
+> pre-registered a BUTTON entry. the owner overruled it before anything was sent —
+> see gate 3 below. Recorded as an amendment rather than a silent edit, because
+> a pre-registration that can be quietly revised is not one.
+
 **1. What question does this answer?**
-Two, and neither is answerable any other way:
-- **Does the bootloader serve `A0 07` outside a flash session it started with
-  `A0 03`?** Currently `[G]`. It is the last open protocol question in the
-  flash path, and §4.2 forbids erasing without a backup that this command is
-  the only way to produce.
-- **Is our block arithmetic right?** 65 blocks at indices `0x34..0x74`
-  is `[D]`, never confirmed against the device. A read-back is the only way to
-  test it that writes nothing.
+
+**NOT "where does the backup come from".** An earlier draft of this file said
+so, and it was wrong: `fw140.bin`, extracted from the `.exe`, is a valid backup
+and passes the gate without the device being touched at all. The Windows
+updater wrote that exact image today and verified it per block, so a copy of
+what is on the mouse already exists on disk. Correcting this matters, because
+it was the strongest-sounding justification for the command and it does not
+hold.
+
+What the command actually answers, and nothing else does:
+
+- **Can we read a block back and understand the reply?** This is the real one.
+  During the flash, every block is written and then read back and compared at
+  `resp[16..1039]` against the source. If that offset, the index mapping, or
+  the reply length is wrong, block `0x34` fails verification and
+  `driveToVerifiedImage` — which by design never gives up — rewrites it
+  forever, on a device whose application region has already been erased.
+  **This command tests that half of the flash while the firmware is still
+  intact and nothing is at stake.**
+- **Does the bootloader serve `A0 07` outside a flash session started by
+  `A0 03`?** `[G]`, and the last open protocol question in the flash path.
+  Note what this is NOT: the flash only ever reads *inside* a session, which
+  is `[O]` 65 times in each capture. So a refusal here does not predict a
+  failed flash — it is inconclusive, and cheap.
+- **Is our block arithmetic right?** 65 blocks at `0x34..0x74` is `[D]` and
+  never confirmed against the device. A read-back is the only way to test it
+  that writes nothing.
 
 **2. Can it be answered without touching the device?**
 No. Static analysis gives the frame `[D]` and it is already built and tested
@@ -49,23 +73,49 @@ The captures show `A0 07` only ever inside a session, which is exactly why the
 question is open rather than settled.
 
 **3. Is there a hardware-forced alternative?**
-For the *entry*, yes, and it is used: **button entry**, `[O]` and exercised
-four times. §4.2b assigns read-only work to the button because abort is free
-there and a button-entered bootloader is one unplug from normal. For the *read
-itself* there is no hardware alternative — no button dumps flash.
+For the *entry*, yes — the buttons — and **it is deliberately NOT used.**
+
+This is a change made by the owner *before the run*, overruling a split I had written
+into §4.2b on my own initiative. His argument: **a test whose result does not
+transfer is not worth its risk.** The flash reads blocks back inside an
+`A1 3A`-entered bootloader; a read-back performed in a button-entered one
+proves nothing about the flash unless the two bootloaders are identical, and
+that is `[G]`. The fields we can compare — PID `0x1977`, bcdDevice `0x0006`,
+product `Bootloader` — are `[O]`-identical, but a flag set by `A1 3A` would
+not appear in any of them.
+
+I had already conceded the load-bearing half of this and missed what it meant:
+I wrote that a button-mode refusal would be *"inconclusive about the flash"*.
+That makes half the outcomes worthless, which is the argument against paying
+anything at all for that entry mode.
+
+So gate 3 is answered **no, and on purpose**: the hardware alternative exists,
+reaches the same mode, and is rejected because what it would prove is not the
+thing we need proved.
 
 **4. If the effect is unpredictable, what is the recovery, and does the command
 consume it?**
 `A0 07` carries a block index and nothing else: no payload, no length, no
 count. The frame cannot express a write. **That is a statement about the frame,
-not a safety argument** — §4.2a bans treating those as the same thing. The
-safety argument is the recovery: the mouse is in a **button-entered**
-bootloader, which `[O]` exits on a power cycle, and no state this command could
-set survives an unplug that the button entry does not already survive. The
-recovery is a physical act the command cannot reach. It is not consumed.
+not a safety argument** — §4.2a bans treating those as the same thing.
 
-**Verdict: send it.** Gate 3 forces button entry; gate 4 leaves the recovery
-intact and off-wire.
+The recovery, stated honestly and it is weaker than it was: the mouse will be
+in an `A1 3A`-entered bootloader, which **latches**. A power cycle does not
+undo it. The only thing that clears the latch is a completed flash. So if this
+read is refused, the mouse stays a bootloader until either this tool's `flash`
+or Endgame's Windows updater finishes one. Both are `[O]` to accept a `0x1977`
+device as a starting state, and the Windows path was exercised today.
+
+**Does the command consume its own recovery?** No, but only just. The recovery
+is a completed flash, and a flash needs a backup — which is what this command
+produces. If the read fails, the backup does not exist. The escape is that
+`fw140.bin`, extracted from the `.exe`, is a valid backup and passes the gate
+(verified: `flash --backup fw140.bin` is accepted). **So the recovery survives
+a failure of this command only because a backup can be obtained without the
+device at all.** That fact is now load-bearing and is recorded here as such.
+
+**Verdict: send it.** Gate 4 holds, on the strength of `fw140.bin` being an
+acceptable backup independent of the device.
 
 ---
 
@@ -144,11 +194,19 @@ Verified against the mock under both hypotheses: on the refusal path it emits
    writes it, reopens it, and compares. A failure here is a disk problem, not a
    device one, and it must abort rather than report a backup it does not have.
 
-9. **Settings are untouched.** No `A0 11` write, no `A1 13`. After the run,
-   `egg-config read --save after-stage3.bin` then
-   `egg-config diff ~/.egg-mouse-known-good.bin after-stage3.bin` should show
-   **zero differing bytes**. This is the check that the command did what it
-   said and nothing else.
+9. **Settings are untouched.** No `A0 11` write, no `A1 13`.
+   **CORRECTED with the entry change:** this can no longer be checked straight
+   after the run. `A1 3A` latches, so the mouse is a bootloader and
+   `egg-config` — which talks to the application device — has nothing to open.
+   The check moves to *after the flash completes*, at which point `A1 13` will
+   have reset settings anyway, so what gets verified is the restore, not this
+   command. **P9 is therefore UNTESTABLE in this run.** Recorded rather than
+   quietly dropped.
+
+10. **The flash that follows will emit 134 frames, not 135**, because it finds
+   the device already in the bootloader and skips its own `A1 3A`. Falsifiable:
+   count them. 135 would mean the tool sent `A1 3A` to a device already in the
+   bootloader, which nothing has ever done.
 
 ---
 

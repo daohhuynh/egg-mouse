@@ -392,17 +392,31 @@ static bool bootloaderIsPresent(std::size_t* bootColl, std::size_t* appColl) {
     return b == 1 && a == 0;
 }
 
-// The instruction, in one place, so every caller says the same thing. §4.2b
-// makes this the ONLY way in: A1 3A latches and is not to be sent.
+// The instruction, in one place, so every caller says the same thing.
+//
+// CHANGED 2026-09-05 by the owner, overruling a split I had written into §4.2b
+// without asking: the firmware read-back now enters the SAME way the flash
+// does. His reasoning, and it is right -- the flash reads blocks back inside
+// an A1 3A-entered bootloader, so a read-back done in a button-entered one
+// proves nothing about the flash unless the two are identical, and that is
+// [G]. I had already conceded that a button-mode refusal would be
+// "inconclusive about the flash" without noticing that this makes half the
+// test's outcomes worthless.
 static const char* const kButtonEntry =
-    "Get into the bootloader BY BUTTON (§4.2b: read-only work enters by button,\n"
-    "because abort is free there and a button entry is one unplug from normal):\n"
-    "  1. Unplug the mouse.\n"
-    "  2. Hold LEFT and RIGHT mouse buttons together. Keep holding.\n"
-    "  3. Plug the cable in. Keep holding a few more seconds, then release.\n"
-    "  4. Check with: ./build/egg-flash read-firmware --check\n"
-    "A button-entered bootloader EXITS ON A POWER CYCLE (bootloader-observed.md\n"
-    "§5a), so if you change your mind at any point, just unplug it.\n";
+    "Get into the bootloader THE WAY THE FLASH DOES (§4.2b), so that what this\n"
+    "read proves also applies to the flash:\n"
+    "  ./build/egg-flash enter-bootloader --yes\n"
+    "  ./build/egg-flash read-firmware --check\n"
+    "\n"
+    "READ THIS BEFORE YOU RUN IT. A1 3A LATCHES [O]. Once sent, the mouse stops\n"
+    "being a mouse and a power cycle does NOT undo it -- only a completed flash\n"
+    "does. So from here until you finish a flash, it is a bootloader.\n"
+    "That is recoverable, not a brick: Endgame's Windows updater accepts a\n"
+    "0x1977 device as a starting state, and so does `flash`.\n"
+    "\n"
+    "The buttons (hold LEFT+RIGHT while plugging in) reach the same mode and\n"
+    "unplug back out of it, which is safer -- but a read done there may not\n"
+    "tell you anything about the flash, which is why it is not the default.\n";
 
 static int saveAndVerify(const std::vector<std::uint8_t>& image,
                          const std::string& path) {
@@ -467,6 +481,10 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
     if (saveAndVerify(rb.image, outPath) != 0) return 1;
     std::printf("saved      %s, re-read and byte-identical\n", outPath.c_str());
     std::printf(
+      "\nTHE MOUSE IS STILL IN THE BOOTLOADER and stays there until a flash\n"
+      "completes. That is expected, not a fault. The flash below will find it\n"
+      "already there and skip its own A1 3A -- 134 frames instead of 135, which\n"
+      "is the path Endgame's updater takes for a 0x1977 device (§5.1a).\n"
       "\nTHIS FILE IS THE BACKUP A FLASH REQUIRES (§4.2). Pass it with:\n"
       "  ./build/egg-flash flash <updater.exe> --backup %s\n"
       "The flash CHECKS it and takes no read-back of its own, so that run sends\n"
