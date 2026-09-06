@@ -4127,3 +4127,60 @@ that only replays observations cannot catch a missing capability — §4.3's
 coerce), for the reason `encodeCpiStageEntry` gives: the vendor rounds while a
 human watches the box, and we would be silently writing a number the user did
 not ask for into a device whose verify pass and diff would both call it correct.
+
+## 7.32 The KEYBOARD KEY dialog can map 21 keys our table could not  [D]
+
+Found 2026-09-06 by doing what the owner asked — reading the screenshots as the
+inventory of what the mouse can do, rather than reading our own record map as
+the inventory of what we understand. The screenshot
+`windows-run/screenshots/button-mapping-keyboard-key-popup.png` shows the
+KEYBOARD KEY dialog with **`Left Shift`** sitting in its key box. `egg-config
+map ... key:leftshift` could not produce that, and nothing in the project
+noticed, because the only `key` entry ever captured is `a`.
+
+### The vendor's converter, in full
+
+cfg107 turns a captured Windows VK into a HID usage in one function. Four
+ranges are inline and the rest is a jump table:
+
+| VK range | HID | at |
+| --- | --- | --- |
+| `A`–`Z` (`0x41`–`0x5a`) | `VK − 0x3d` → `0x04`–`0x1d` | `0x40a130` |
+| `1`–`9` (`0x31`–`0x39`) | `VK − 0x13` → `0x1e`–`0x26` | `0x40a149` |
+| `0` (`0x30`) | `0x27` | `0x40a13a` |
+| `F1`–`F12` (`0x70`–`0x7b`) | `VK − 0x36` → `0x3a`–`0x45` | `0x40a156` |
+| numpad `1`–`9` (`0x61`–`0x69`) | `VK − 8` → `0x59`–`0x61` | `0x40a163` |
+| numpad `0` (`0x60`) | `0x62` | `0x40a16d` |
+| **everything else** | **jump table** | `0x40a173`–`0x40a18c` |
+
+The table is a 220-byte index at **`0x0040a370`** selected by `VK − 3`
+(`0x40a176 addl $-0x3`, `0x40a179 cmpl $0xdb`), then
+`0x40a18c jmpl *0x0040a2b0(,%index,4)`. Each real arm is `movl $imm32, %eax ;
+retl`; the shared default arm at `0x40a2ac` is not, which is how "this VK has no
+mapping" is told apart from a usage of zero.
+
+### What was missing, all 21
+
+`0x46` PrintScreen, `0x47` ScrollLock, `0x48` Pause/Break, `0x53` NumLock,
+`0x54`–`0x57` keypad `/ * - +`, `0x63` keypad `.`, `0x65` Application/Menu,
+`0x80`/`0x81` the KEYBOARD page's own volume usages, and `0xe0`–`0xe7`, the
+eight modifiers **pressed as keys**.
+
+That last group is the interesting one and it is not a duplicate of anything.
+`key:ctrl+a` puts `01` in `+1` and `0x04` in `+2`; `key:leftctrl` puts `00` in
+`+1` and `0xe0` in `+2`. Different bytes, different behaviour, both reachable in
+the vendor's dialog — the screenshot is one of them.
+
+### Why the gate is a table rebuild and not a list
+
+`Tests/test_keymap.py` parses the index and jump tables **out of the .exe** and
+asserts `egg-config` can emit every usage they reach. A hand-copied list of keys
+in a test file is exactly the defect being fixed, so the test refuses to contain
+one: it also asserts the parse found more than 40 VKs, because a parse that
+silently found nothing would make every other assertion pass.
+
+Falsified by deleting `leftshift` from `kNamedKeys`: 2 of 4 tests fail.
+
+**Blind spot (§1.2a):** this reads ONE jump table reached from ONE comparison. A
+VK handled before it, or a second converter elsewhere, would not appear. The
+four inline ranges never reach the table and are checked separately.

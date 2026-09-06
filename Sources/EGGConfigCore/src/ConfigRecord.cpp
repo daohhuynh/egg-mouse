@@ -503,6 +503,24 @@ const NamedKey kNamedKeys[] = {
     {"insert", 0x49}, {"home", 0x4A}, {"pageup", 0x4B}, {"delete", 0x4C},
     {"end", 0x4D}, {"pagedown", 0x4E},
     {"right", 0x4F}, {"left", 0x50}, {"down", 0x51}, {"up", 0x52},
+    // Added 2026-09-06 (§7.32). These 21 usages are every remaining target of
+    // cfg107's VK->HID jump table at 0x40a185/0x40a18c, and without them
+    // `map key:` could not express what the vendor's own screenshot shows in
+    // its KEYBOARD KEY box -- "Left Shift", HID 0xE1.
+    {"printscreen", 0x46}, {"prtsc", 0x46},
+    {"scrolllock", 0x47}, {"pause", 0x48}, {"break", 0x48},
+    {"numlock", 0x53},
+    {"kp-slash", 0x54}, {"kp-star", 0x55}, {"kp-minus", 0x56},
+    {"kp-plus", 0x57}, {"kp-dot", 0x63},
+    {"menu", 0x65}, {"application", 0x65},
+    // The KEYBOARD page's own volume usages, NOT the MEDIA menu's `volume-up`
+    // (which is a different action type entirely, +0 = 0x20).
+    {"kb-volume-up", 0x80}, {"kb-volume-down", 0x81},
+    // A modifier pressed AS A KEY. Distinct from `key:ctrl+a`, where ctrl is
+    // the +1 modifier byte and `a` is the usage: here the modifier IS the
+    // usage and +1 stays 0. Both are reachable in the vendor's dialog.
+    {"leftctrl", 0xE0},  {"leftshift", 0xE1},  {"leftalt", 0xE2},  {"leftwin", 0xE3},
+    {"rightctrl", 0xE4}, {"rightshift", 0xE5}, {"rightalt", 0xE6}, {"rightwin", 0xE7},
 };
 }  // namespace
 

@@ -95,7 +95,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config lod manifest recmap undo_loadable usbpcap)
+  foreach(t button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config keymap lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
