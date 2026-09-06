@@ -390,3 +390,26 @@ the whole 1.10 set by hash so a swapped file is loud rather than silent.
   no longer ambiguous. **What remains `[G]` is what `a1 09` does to a bootloader
   that was never flashed**, which is the one thing the captures cannot show
   because the vendor only ever sends it after a completed write.
+
+## 2.1b OUR FLASH, ON THE REAL MOUSE, 2026-09-05 [O]
+
+First flash by this tool. `egg-flash flash ... --confirm ecfc8f88`, mouse already
+in an `A1 3A`-entered bootloader, so the 134-frame path (§5.1a), not 135.
+
+```
+write acks 65 | blocks verified 65 | rewrites 0 | reconnects 0 | send failures 0
+whole-image sum MATCHED | A1 09 acked yes
+application back after ~900 ms: PID 0x1978, bcdDevice 0x0110
+A1 13 acked, resp[1]=0x01
+```
+
+**Confirms §2.1a against the device.** `A1 09` was acknowledged on the first
+attempt at a 50 ms read, exactly as the measured 0.19-0.32 ms device latency
+predicts and contrary to the "routine timing race" I had asserted in
+`WritePhase.cpp` before measuring. Re-enumeration at ~900 ms matches §2.1's
+857-896 ms.
+
+**Response byte 0 by mode, this run** — more data for §2.2: `0x50` for 64-byte
+replies and `0x51` for 1041-byte replies while in the bootloader, and `0x00`
+for the `A1 13` reply once back in application mode. So byte 0 tracks the
+reply's report size in bootloader mode and is not the report id.
