@@ -1090,6 +1090,77 @@ static void testWireEqualsPlan() {
     ok("A0 03 is the FIRST frame this link ever sees", sawErase && !readBeforeErase);
 }
 
+// The two defects the 2026-09-05 audit found in driveToVerifiedImage. Both
+// were REACHED by the existing suite and neither failed it, because the mock
+// could not express the device behaviour that makes them bite. Written after
+// the fixes, so each one is checked against the old code by mutation
+// (Tests/mutants.sh) rather than by my say-so.
+static void testAuditRegressions() {
+    std::printf("\nAudit regressions (2026-09-05)\n");
+    Image img;
+    std::string err;
+    if (!img.loadFromExecutable(kExe, err)) { ok("image", false, err); return; }
+
+    // ---- 1. A1 09 is never acknowledged. ---------------------------------
+    // [O] the device re-enumerates 857-896 ms after A1 09, so by then the link
+    // may be gone. NOTE the measurement that corrected this: the device itself
+    // acks in 0.19-0.32 ms (flash-wire-observed.md §2.1a), so this fault models
+    // a DEPARTED DEVICE, not the routine case -- an earlier version of this
+    // comment claimed the latter and was wrong. The old loop had no exit but
+    // a 0x01 status: it spun forever on a correctly-flashed mouse and every 20
+    // attempts advised the user to re-enter the bootloader and start again --
+    // i.e. to erase a good device. If this test ever hangs, that is the bug
+    // back, and a hang is exactly how mutants.sh scores it killed.
+    {
+        Faults f; f.neverAckComplete = true; f.seed = 7;
+        MockBootloader dev(f);
+        Progress p = driveToVerifiedImage(dev, img);
+        ok("a device that never acks A1 09 does not hang the write phase", true);
+        ok("...and the image is still reported VERIFIED", p.imageVerified);
+        ok("...and completeAcked is honestly false", !p.completeAcked);
+        ok("...and the device did receive A1 09", dev.completed());
+        unsigned nine = 0;
+        for (const auto& fr : dev.sent())
+            if (fr.size() > 1 && fr[0] == kReportSmall && fr[1] == 0x09) ++nine;
+        ok("...and it was retried a bounded number of times",
+           nine == kCompleteAttempts,
+           "sent " + std::to_string(nine) + ", bound " +
+           std::to_string(kCompleteAttempts));
+    }
+
+    // ---- 2. A block that will not read back is REWRITTEN, not skipped. ----
+    // The repair loop used to `continue` on a failed read, declining to repair
+    // the one block most likely to be the corruption. The outer loop then
+    // re-queried A1 08, got the same mismatch, and repeated -- forever, inside
+    // the phase that by design cannot return.
+    {
+        const std::uint8_t target = 0x40;      // a device index in 0x34..0x74
+        Faults f;
+        f.lieAboutWholeChecksumTimes = 1;      // force exactly one repair pass
+        f.unreadableAfterVerify = target;      // goes bad after the write-loop read
+        f.seed = 11;
+        MockBootloader dev(f);
+        Progress p = driveToVerifiedImage(dev, img);
+        ok("an unreadable block does not stall the repair pass", p.imageVerified);
+
+        unsigned writes = 0, others = 0;
+        for (const auto& fr : dev.sent()) {
+            if (fr.size() < 4 || fr[0] != kReportLarge || fr[1] != 0x06) continue;
+            if (fr[2] == target) ++writes; else ++others;
+        }
+        ok("the unreadable block is rewritten during repair", writes == 2,
+           "A0 06 frames for block 0x40: " + std::to_string(writes) +
+           " (expect 2: initial write + repair)");
+        // The blocks that read back correctly must NOT be rewritten. Otherwise
+        // "rewrite on failed read" degenerates into "rewrite everything", which
+        // would pass the assertion above while meaning something else entirely.
+        ok("...and only that block; the readable ones are left alone",
+           others == img.blockCount() - 1,
+           "other A0 06 frames: " + std::to_string(others) + ", expect " +
+           std::to_string(img.blockCount() - 1));
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -1103,6 +1174,7 @@ int main() {
     testReadBackAndToken();
     testBackupGate();
     testWireEqualsPlan();
+    testAuditRegressions();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

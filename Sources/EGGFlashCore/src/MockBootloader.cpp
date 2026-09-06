@@ -86,6 +86,14 @@ Io MockBootloader::send(const std::vector<std::uint8_t>& frame) {
     case 0x07: {                                  // read one block back
         const std::uint8_t bi = frame.size() > 2 ? frame[2] : 0;
         auto it = flash_.find(bi);
+        // Goes bad only after it has been read once, so the per-block verify
+        // pass succeeds and the failure surfaces in the whole-image repair --
+        // which is exactly where the skip-the-broken-block defect lived.
+        if (f_.unreadableAfterVerify >= 0 &&
+            bi == static_cast<std::uint8_t>(f_.unreadableAfterVerify)) {
+            if (readOnce_.count(bi)) { reply(kLargeLen, rejected); break; }
+            readOnce_.insert(bi);
+        }
         if (reject || it == flash_.end()) { reply(kLargeLen, rejected); break; }
         reply(kLargeLen, 0x01);
         std::uint16_t sum = blockChecksum(it->second.data(), it->second.size());
@@ -110,6 +118,9 @@ Io MockBootloader::send(const std::vector<std::uint8_t>& frame) {
     }
     case 0x09:                                    // complete
         if (!reject) completed_ = true;
+        // The device acted on it and went away before the status could be read.
+        // [O] both captures: re-enumeration in 857-896 ms, status read at 50 ms.
+        if (f_.neverAckComplete) { pending_.clear(); break; }
         reply(kSmallLen, reject ? rejected : 0x01);
         break;
     default:

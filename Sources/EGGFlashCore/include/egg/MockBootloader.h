@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,16 @@ struct Faults {
     // let it converge. A device that lies FOREVER is a different test -- see
     // the note in test_flash.cpp about why that one cannot terminate.
     unsigned lieAboutWholeChecksumTimes = 0;
+    // Accept A1 09's send but never acknowledge it. Models the [O] timing race:
+    // the device acts on A1 09 and re-enumerates in 857-896 ms while roundTrip
+    // reads the status after 50 ms, so the ack is simply not there to be read.
+    // Added 2026-09-05 -- the mock could not express this, and the unbounded
+    // A1 09 loop it would have caught went undetected until an audit found it.
+    bool neverAckComplete = false;
+    // A block that answers A0 07 with a non-ready status forever AFTER it has
+    // been written and verified once. Models flash that goes bad mid-session,
+    // which is the case the whole-image repair pass exists for.
+    int unreadableAfterVerify = -1;      // device block index, or -1
     std::uint32_t seed = 1;
 };
 
@@ -134,6 +145,7 @@ private:
     std::vector<std::vector<std::uint8_t>> sent_;
     std::vector<std::string> log_;
     std::vector<std::uint8_t> pending_;   // the response recv() will hand back
+    std::set<std::uint8_t> readOnce_;
     unsigned slept_ = 0, silence_ = 0, reconnects_ = 0, lies_ = 0;
     bool down_ = false, started_ = false, completed_ = false;
     std::uint8_t declBlocks_ = 0;

@@ -199,12 +199,28 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
             for (std::size_t i = 0; i < img.blockCount(); ++i) {
                 const std::uint8_t idx = img.deviceIndex(i);
                 std::vector<std::uint8_t> back;
-                if (roundTrip(link, readBlock(idx), 50, kReportLarge, kLargeLen,
-                              &back) != kReady || back.size() < kLargeLen)
+                const int rst = roundTrip(link, readBlock(idx), 50, kReportLarge,
+                                          kLargeLen, &back);
+                const bool readable = (rst == kReady && back.size() >= kLargeLen);
+
+                // A BLOCK THAT WILL NOT READ IS REWRITTEN, NOT SKIPPED. Found
+                // by adversarial audit 2026-09-05: this used to `continue` on a
+                // failed read, which declined to repair the one block most
+                // likely to BE the corruption. The outer loop then re-queried
+                // A1 08, got the same mismatch, and repeated forever -- an
+                // unbounded stream of A0 07 with the single A0 06 that could
+                // have recovered the device never sent, inside the phase that
+                // by design has no exit.
+                //
+                // The main write loop above already treats a failed read as a
+                // reason to rewrite (line ~160). The two paths disagreed about
+                // what a failed read-back means; they no longer do.
+                if (readable &&
+                    std::memcmp(back.data() + 16, img.block(i), kBlockSize) == 0)
                     continue;
-                if (std::memcmp(back.data() + 16, img.block(i), kBlockSize) == 0)
-                    continue;
-                link.note("block " + hex2(idx) + " differs; rewriting.");
+                link.note("block " + hex2(idx) +
+                          (readable ? " differs; rewriting."
+                                    : " did not read back; rewriting anyway."));
                 roundTrip(link, writeBlock(idx, img.block(i), kBlockSize), 50,
                           kReportSmall, kSmallLen);
                 ++p.rewrites;
@@ -216,18 +232,52 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
     }
 
     // ---- A1 09 complete. Vendor: 10 tries with Sleep(1..10) ms. -------------
-    for (unsigned attempt = 1;; ++attempt) {
+    //
+    // BOUNDED, AND THAT IS NOT A VIOLATION OF §4.2. Found by adversarial audit
+    // 2026-09-05; this loop used to be `for (unsigned attempt = 1;; ++attempt)`
+    // with no exit but a 0x01 status, and that was wrong in the most expensive
+    // possible way.
+    //
+    // §4.2's "quitting is the bug" is about returning WITHOUT A VERIFIED IMAGE.
+    // By the time control reaches here, p.imageVerified is already true: the
+    // blocks are written, read back, compared, and the whole-image checksum
+    // agrees. The image is resident. A1 09 does not put it there -- it closes
+    // the session and asks the device to leave the bootloader.
+    //
+    // And that is exactly why spinning here is harmful rather than safe. A1 09
+    // is the one command that makes the device GO AWAY: [O] both captures show
+    // it re-enumerating as 0x1978 in 857-896 ms (flash-wire-observed.md §2.1).
+    // So "the send landed, the status read did not" means the link may simply
+    // no longer exist -- and on that path the old loop spun forever on a mouse
+    // that had just been flashed correctly, never returned, never let the
+    // caller send A1 13, and every 20 attempts printed kRecoveryProcedure,
+    // which tells the user to re-enter the bootloader and "run this command
+    // again" -- i.e. to erase a perfectly good mouse.
+    //
+    // CORRECTION, 2026-09-05, same day: I first wrote that a missing ack was
+    // "a routine timing race" because roundTrip reads at 50 ms. Then I measured
+    // it. THE DEVICE ACKS A1 09 IN 0.19-0.32 ms (§2.1a) -- the 64 ms visible in
+    // the capture is Windows sleeping before it reads, not the device thinking.
+    // There is no race at 50 ms; there is ~800 ms of margin. The bound is still
+    // correct, for the narrower reason above, and p.completeAcked should
+    // normally come back TRUE. If a real run ever reports it false, that is a
+    // finding worth chasing rather than the expected case.
+    //
+    // THE EVIDENCE THAT A1 09 WORKED IS THE DEVICE COMING BACK, not the status
+    // byte. Only the caller can see that, so this returns and lets it look.
+    // The vendor bounds the same loop at 10 and then reports failure.
+    for (unsigned attempt = 1; attempt <= kCompleteAttempts; ++attempt) {
         if (roundTrip(link, bootloaderComplete(), 50, kReportSmall,
                       kSmallLen) == kReady) { p.completeAcked = true; break; }
         link.sleepMs(attempt <= 10 ? attempt : 10);
-        if (attempt % 20 == 0) {
-            link.note("bootloader-complete not acknowledged after " +
-                      std::to_string(attempt) + " attempts. The image IS "
-                      "verified resident; still trying to close out.");
-            link.note(kRecoveryProcedure);
-        }
-        if (attempt % 5 == 0 && link.reconnect()) ++p.reconnects;
     }
+    if (!p.completeAcked)
+        link.note("bootloader-complete was not acknowledged in " +
+                  std::to_string(kCompleteAttempts) + " attempts. THE IMAGE IS "
+                  "VERIFIED RESIDENT -- this is not a failed flash. The most "
+                  "likely reason is that the device acted on A1 09 and left the "
+                  "bootloader before the status could be read. Whether it came "
+                  "back is the caller's to check.");
     return p;
 }
 

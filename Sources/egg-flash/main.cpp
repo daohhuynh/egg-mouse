@@ -11,6 +11,7 @@
 #include "egg/WritePhase.h"
 
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -106,10 +107,14 @@ static int usage() {
         "\n"
         "A FLASH IS TWO RUNS, and that is deliberate (§4.2b, §4.2a):\n"
         "\n"
-        "  1. egg-flash read-firmware backup.bin\n"
-        "     Enters the bootloader BY BUTTON -- hold left+right while plugging\n"
-        "     in -- and reads all 65 blocks out with A0 07. Read-only, abortable\n"
-        "     at any point, and one unplug from normal.\n"
+        "  1. egg-flash enter-bootloader --yes    (A1 3A -- IT LATCHES, see below)\n"
+        "     egg-flash read-firmware backup.bin\n"
+        "     Reads all 65 blocks out with A0 07 and saves them. The READ is\n"
+        "     read-only and abortable; the ENTRY is not. §4.2b requires A1 3A\n"
+        "     for anything touching firmware, because a read taken in a\n"
+        "     button-entered bootloader may prove nothing about a flash done\n"
+        "     in an A1 3A-entered one. From that A1 3A until a flash\n"
+        "     completes, the mouse is a bootloader and not a mouse.\n"
         "\n"
         "  2. egg-flash flash <updater.exe> --backup backup.bin --confirm <token>\n"
         "     Enters with A1 3A, the vendor's own way, and then sends EXACTLY\n"
@@ -402,7 +407,7 @@ static bool bootloaderIsPresent(std::size_t* bootColl, std::size_t* appColl) {
 // [G]. I had already conceded that a button-mode refusal would be
 // "inconclusive about the flash" without noticing that this makes half the
 // test's outcomes worthless.
-static const char* const kButtonEntry =
+static const char* const kBootloaderEntryHelp =
     "Get into the bootloader THE WAY THE FLASH DOES (§4.2b), so that what this\n"
     "read proves also applies to the flash:\n"
     "  ./build/egg-flash enter-bootloader --yes\n"
@@ -451,7 +456,7 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
                 "  %zu application vendor collection(s)  (PID 0x%04x)\n",
                 boot, egg::kProductIdBootloader, app, egg::kProductIdApplication);
     if (!ready) {
-        std::printf("  -> NOT ready. Nothing was sent.\n\n%s", kButtonEntry);
+        std::printf("  -> NOT ready. Nothing was sent.\n\n%s", kBootloaderEntryHelp);
         return 1;
     }
     std::printf("  -> ready.\n");
@@ -539,6 +544,50 @@ static bool checkBackup(const std::string& path, const Image& img) {
                     "           does this too (capture 09-flash-again).\n");
     return true;
 }
+
+// CLAUDE.md §3: "Trap SIGINT/SIGTERM explicitly during the write phase."
+//
+// NEVER IMPLEMENTED UNTIL 2026-09-05, when an adversarial audit noticed the
+// rule had no code behind it. It is not hypothetical: earlier the same day the owner
+// watched a command sit silent and asked "uhh my terminal froze do i control c
+// this?" -- of a read-only command, where the answer was yes. During the write
+// phase the answer is no, and the difference cannot be left to a judgement call
+// made under stress.
+//
+// §4.2: after the erase the device has no valid application, so exiting
+// cleanly GUARANTEES the bad outcome. A default-disposition Ctrl-C terminates
+// the process between two chunks and leaves exactly that.
+//
+// SIG_IGN, not a flag a loop polls: the loops here are deliberately unbounded,
+// so a "please stop" flag would either be ignored anyway or become the early
+// exit §4.2 forbids. The handler is installed for the erase-through-verify unit
+// only and restored immediately after, so before the erase Ctrl-C still works
+// normally -- which is correct, because before the erase abort is always right.
+//
+// This is not an inescapable process. SIGKILL cannot be trapped, so `kill -9`
+// still works for a genuinely wedged tool. It is not offered in the message,
+// because someone reaching for it should have to decide to.
+class NoQuitDuringWrite {
+public:
+    NoQuitDuringWrite() {
+        int_  = std::signal(SIGINT,  SIG_IGN);
+        term_ = std::signal(SIGTERM, SIG_IGN);
+        // SIGHUP too: closing the terminal is the same mistake with less
+        // deliberation behind it than Ctrl-C.
+        hup_  = std::signal(SIGHUP,  SIG_IGN);
+    }
+    ~NoQuitDuringWrite() {
+        if (int_  != SIG_ERR) std::signal(SIGINT,  int_);
+        if (term_ != SIG_ERR) std::signal(SIGTERM, term_);
+        if (hup_  != SIG_ERR) std::signal(SIGHUP,  hup_);
+    }
+    NoQuitDuringWrite(const NoQuitDuringWrite&) = delete;
+    NoQuitDuringWrite& operator=(const NoQuitDuringWrite&) = delete;
+private:
+    void (*int_)(int)  = SIG_ERR;
+    void (*term_)(int) = SIG_ERR;
+    void (*hup_)(int)  = SIG_ERR;
+};
 
 // ---------------------------------------------------------------------------
 // §4.4 stage 4. The real thing.
@@ -649,6 +698,42 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
                     "     NOTHING WAS SENT.\n");
         return 1;
     }
+    // THE ALREADY-IN-BOOTLOADER PATH MUST CONFIRM IDENTITY TOO.
+    //
+    // Found by adversarial audit, 2026-09-05, and it matters far more than it
+    // did an hour ago: with the read-back now entering by A1 3A (§4.2b, the owner's
+    // call), the mouse is ALWAYS latched by the time `flash` runs, so fromBoot
+    // is no longer the rare recovery path -- it is the normal one.
+    //
+    // fromApp gets a full identity check for free, because
+    // enterBootloaderAndConfirm requires PID + bcdDevice + product string
+    // before it returns EnteredAndConfirmed. fromBoot had none: one 16-bit PID
+    // and we erase. §4.2 says "if the bootloader reports a version or an
+    // identity of any kind, refuse anything unrecognised", and it reports both.
+    if (fromBoot) {
+        bool known = false;
+        SeenDevice bl{};
+        for (const auto& d : seen0) {
+            if (d.productId != egg::kProductIdBootloader) continue;
+            bl = d;
+            if (d.releaseNumber == egg::kBootloaderRelease &&
+                d.product == egg::kBootloaderProduct) { known = true; break; }
+        }
+        if (!known) {
+            std::printf("  -> REFUSED: PID 0x%04x is present but its identity is\n"
+                        "     not one we recognise.\n"
+                        "       bcdDevice 0x%04x, expected 0x%04x\n"
+                        "       product   \"%s\", expected \"%s\"\n"
+                        "     §4.2: refuse anything unrecognised. NOTHING WAS SENT.\n",
+                        egg::kProductIdBootloader, bl.releaseNumber,
+                        egg::kBootloaderRelease, bl.product.c_str(),
+                        egg::kBootloaderProduct);
+            return 1;
+        }
+        std::printf("  -> bootloader identity confirmed: bcdDevice 0x%04x, \"%s\"\n",
+                    bl.releaseNumber, bl.product.c_str());
+    }
+
     std::printf(fromApp ? "  -> ready. Will enter the bootloader with A1 3A.\n"
                         : "  -> ready. Already in the bootloader; no entry needed.\n");
 
@@ -729,8 +814,12 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
 
     // ---- The point of no return. ------------------------------------------
     std::printf("\n[3/4] writing. FROM HERE THIS TOOL DOES NOT STOP.\n");
+    std::printf("      Ctrl-C is now IGNORED until the image is resident.\n");
     std::fflush(stdout);
-    const Progress p = driveToVerifiedImage(*link, img);
+    const Progress p = [&] {
+        NoQuitDuringWrite guard;      // §3, and see the comment on the class
+        return driveToVerifiedImage(*link, img);
+    }();
 
     std::printf("\nDONE. The image is verified resident on the device.\n"
                 "  write acks       %zu   (>65 means blocks were rewritten)\n"

@@ -94,6 +94,56 @@ moment it is back on the bus:
 application device's last packet is at 0.2167 s, so the detach happens ~210 ms
 after the ack and the bus is quiet for only ~240 ms.
 
+### 2.1a EVERY DEVICE ACK IS SUB-MILLISECOND EXCEPT `a1 3a`. The 63-65 ms is Windows. [D]
+
+The same trap as §2.1, one level down, and I fell into it on 2026-09-05 before
+measuring: the gap between a command completing and its status arriving is
+**63-65 ms for every block command**, which looks exactly like device latency
+and is not. Splitting each GET_REPORT control transfer into its own SETUP and
+completion timestamps separates the two:
+
+| cmd | n | **device ack**, max / median (ms) | vendor sleep before it reads (ms) |
+| --- | --- | --- | --- |
+| `a0 03` | 1 | 0.24 / 0.24 | 3005.7 |
+| `a0 06` | 65 | 0.63 / 0.23 | 63.8 |
+| `a0 07` | 65 | 1.54 / 0.99 | 63.8 |
+| `a1 08` | 1 | 0.16 / 0.16 | 112.1 |
+| `a1 09` | 1 | 0.32 / 0.32 | 64.0 |
+| `a1 13` | 1 | 0.29 / 0.29 | 911.0 |
+| **`a1 3a`** | 1 | **76.05 / 76.05** | 14.4 |
+
+Capture `09` agrees within noise on every row (`a0 07` median 1.02 ms, `a1 3a`
+**84.93 ms**, `a1 09` 0.19 ms). Method: `Tools/capture/usbpcap.py`
+`control_transfers()`, device ack = last minus first packet timestamp *within
+the GET transfer*; vendor sleep = that transfer's first packet minus the
+preceding SET_REPORT's completion. Reproduce with the snippet in
+`working-memory.md`.
+
+**Two things follow, and they point in opposite directions.**
+
+1. **`a1 3a` is the only slow command, by two orders of magnitude** — 76-85 ms
+   against everything else's sub-millisecond. That is a real device property,
+   not padding: it is the command that tears down the application and brings up
+   the bootloader. Any code that sends `a1 3a` and reads its status must
+   tolerate ~85 ms+. Ours does — entry polls in 25 ms steps to a 10 s ceiling
+   (`kEntryPollStepMs`/`kEntryPollCeilMs`) rather than sleeping a fixed amount.
+
+2. **Nothing else needs the vendor's 63 ms.** `roundTrip`'s fixed 50 ms sleeps
+   sit above every measured ack by 30x+. They are not a race and must not be
+   described as one. **DO NOT "optimise" them away regardless** — they cost 6.5 s
+   across a whole flash, they are closer to the vendor's timing than anything
+   shorter, and §4.2's rule is to mirror the vendor where it is free.
+
+**What this REFUTES, recorded because I asserted it in code before measuring
+it:** the claim that `a1 09` going unacknowledged is the normal outcome of a
+successful flash. It is not. The device acks `a1 09` in 0.19-0.32 ms and only
+then re-enumerates 857-896 ms later (§2.1), so at a 50 ms read there is roughly
+800 ms of margin and the ack should essentially always arrive. Bounding that
+retry loop is still correct — an unbounded one cannot survive a device that has
+genuinely gone away — but the reason is a wedged or departed link, **not** a
+routine race. Corrected in `WritePhase.cpp`, `test_flash.cpp` and
+`working-memory.md` the same day.
+
 ### 2.2 Response byte 0 is mode-dependent, and in application mode it is NOT stable [O]
 
 Histogram over every inbound feature transfer in both flash captures:

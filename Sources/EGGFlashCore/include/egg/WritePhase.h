@@ -53,4 +53,19 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img);
 // find is not a recovery procedure (LIST 4 item 24).
 extern const char* const kRecoveryProcedure;
 
+// How many times A1 09 is sent before returning without an ack. The vendor uses
+// 10 (updater-protocol.md §5.4 step 5); we allow more because we have no reason
+// to be less patient.
+//
+// It MUST be bounded, but NOT for the reason first written here. I justified it
+// as a timing race and then measured the captures, which refuted that: the
+// device acks A1 09 in 0.19-0.32 ms and only leaves the bus 857-896 ms later,
+// so a read at 50 ms has ~800 ms of margin and the ack should essentially always
+// arrive (flash-wire-observed.md §2.1a). The real reason is narrower and still
+// sufficient -- A1 09 is the command that makes the device GO AWAY, so "no ack"
+// can mean the link is gone rather than that anything failed, and the evidence
+// it worked is the device coming back, which only the caller can see. See the
+// comment at the loop for why bounding this does not violate §4.2.
+inline constexpr unsigned kCompleteAttempts = 30;
+
 }  // namespace egg::fw

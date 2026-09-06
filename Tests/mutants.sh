@@ -73,6 +73,7 @@ FWH=Sources/EGGFlashCore/include/egg/Firmware.h
 CS=Sources/EGGConfigCore/src/ConfigSession.cpp
 CR=Sources/EGGConfigCore/src/ConfigRecord.cpp
 CV=Sources/EGGConfigCore/src/RecordVault.cpp
+MB=Sources/EGGFlashCore/src/MockBootloader.cpp
 # Added 2026-09-05 with the read-back and the approval token. It was NOT here
 # when those were written, so the first mutation run after they landed said
 # nothing about them -- recorded as a gap in working-memory.md before it was
@@ -87,7 +88,7 @@ FP=Sources/EGGFlashCore/src/FlashPlan.cpp
 # existed, and the mutation survived into every LATER mutant -- which then made
 # two correctly-labelled equivalent mutants look wrongly labelled. The harness
 # accused itself of a bug it did not have. Add a file here and nowhere else.
-MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP")
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -129,6 +130,25 @@ done
 
 mutate() {  # <kill|equiv> <name> <file> <old|||new>
   local kind="$1" name="$2" file="$3" expr="$4"
+  # HARNESS BUG #5, 2026-09-05, and the worst one yet because it MANUFACTURES
+  # "killed" verdicts rather than losing them. MockBootloader.cpp was given a
+  # variable ($MB) and mutants, and was never added to MUTABLE -- which is the
+  # only list restore() walks. So its mutation was never reverted, every
+  # subsequent mutant ran against a suite that was ALREADY FAILING, and all of
+  # them were graded killed for free. The run reported 43/43 and meant nothing
+  # from that point on. Two mutants labelled equivalent were reported as
+  # "killed", which is the only reason it was noticed at all.
+  #
+  # A file not in MUTABLE is now fatal, not silent. The check is one line; the
+  # bug cost a full 10-minute run and would have been invisible in any run
+  # whose equivalent mutants all happened to come first.
+  local m found=0
+  for m in "${MUTABLE[@]}"; do [ "$m" = "$file" ] && found=1; done
+  if [ $found -eq 0 ]; then
+    echo "FATAL: $file is mutated but is not in MUTABLE, so restore() will"
+    echo "       never revert it and every later verdict would be garbage."
+    exit 2
+  fi
   restore
   if ! python3 - "$file" "$expr" <<'PY'
 import sys
@@ -367,6 +387,31 @@ mutate kill "the write status is read as the large report" "$WP" \
 '            if (roundTrip(link, writeBlock(idx, src, kBlockSize), 50,
                           kReportSmall, kSmallLen) != kReady) {|||            if (roundTrip(link, writeBlock(idx, src, kBlockSize), 50,
                           kReportLarge, kLargeLen) != kReady) {  // MUTANT'
+
+# ---- The two defects the 2026-09-05 adversarial audit found. ----------------
+# Both restore the EXACT code that shipped, so a survivor here means the fix was
+# committed with nothing to hold it in place. Both are expected to be killed by
+# TIMEOUT rather than by an assertion, because both defects hang: that is what
+# made them dangerous, and inside driveToVerifiedImage a hang has no exit.
+mutate kill "A1 09 is retried forever, hanging on a correctly-flashed mouse" "$WP" \
+'    for (unsigned attempt = 1; attempt <= kCompleteAttempts; ++attempt) {|||    for (unsigned attempt = 1;; ++attempt) {  // MUTANT'
+
+mutate kill "the repair pass skips a block that will not read back" "$WP" \
+'                if (readable &&
+                    std::memcmp(back.data() + 16, img.block(i), kBlockSize) == 0)
+                    continue;|||                if (!readable ||   // MUTANT
+                    std::memcmp(back.data() + 16, img.block(i), kBlockSize) == 0)
+                    continue;'
+
+# The mock faults those two tests need. A fault the mock cannot express is a
+# defect the suite cannot see, so the faults are themselves load-bearing and
+# get mutated like anything else.
+mutate kill "the mock always acks A1 09, so the timing race is untestable" "$MB" \
+'        if (f_.neverAckComplete) { pending_.clear(); break; }|||        if (false) { pending_.clear(); break; }  // MUTANT'
+
+mutate kill "the mock never lets a written block go bad" "$MB" \
+'        if (f_.unreadableAfterVerify >= 0 &&|||        if (false &&  // MUTANT'
+
 
 # ---- The backup gate. -----------------------------------------------------
 #

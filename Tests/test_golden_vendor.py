@@ -102,6 +102,51 @@ class Golden(unittest.TestCase):
                           % (i, label, len(bad), bad[0],
                              mine[bad[0]], theirs[bad[0]]))
 
+    def test_the_approval_token_is_sha256_of_the_vendors_own_bytes(self):
+        """§4.2c: an approval must be bound to the exact bytes it approves.
+
+        Until 2026-09-05 nothing checked this end to end. `confirmToken` hashes
+        `plannedFrames()`, and `test_flash.cpp` checks the emitted frames match
+        `plannedFrames()` -- but both halves are OUR code, so together they only
+        prove we are self-consistent. The reference here is the capture: the
+        expected token is SHA-256 over Endgame's own 135 host-to-device frames,
+        decoded by this file's independent pcapng reader.
+
+        So a drift in plannedFrames() that kept our internal chain consistent --
+        exactly what a shared helper being "cleaned up" would produce -- changes
+        the token and fails HERE, where it cannot be explained away.
+        """
+        import hashlib
+        import re
+        blob = b"".join(vendor_frames(CAPTURE))
+        # Pinned so a decoder regression cannot quietly change the reference.
+        self.assertEqual(len(blob), 136627,
+                         "vendor stream is %d bytes, expected 136627" % len(blob))
+        want = hashlib.sha256(blob).hexdigest()[:8]
+        self.assertEqual(want, "ecfc8f88",
+                         "the capture no longer hashes to the pinned value")
+
+        # The token is printed by the FLASH PLAN, not by dryrun. Running `flash`
+        # from a test is safe by construction and the assertions below pin that:
+        # with no --confirm, cmdFlash prints the plan and returns 1 before it
+        # checks the backup, before it enumerates, and long before any link is
+        # opened. If that order is ever changed, this test starts touching the
+        # device -- so it asserts the refusal rather than assuming it.
+        r = subprocess.run([BIN, "flash", EXE, "--backup", "/nonexistent"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1,
+                         "flash without --confirm must refuse, got rc=%d" % r.returncode)
+        self.assertIn("NOTHING WAS SENT", r.stdout,
+                      "flash without --confirm did not state that nothing was sent")
+        got = set(re.findall(r"--confirm ([0-9a-f]{8})\b", r.stdout))
+        self.assertTrue(got, "dryrun printed no approval token")
+        self.assertEqual(len(got), 1, "dryrun printed conflicting tokens: %s" % got)
+        self.assertEqual(
+            got.pop(), want,
+            "THE APPROVAL TOKEN NO LONGER MATCHES THE VENDOR'S BYTE STREAM. "
+            "Either plannedFrames() drifted from the capture, or the token "
+            "derivation changed. Do not flash until this is understood.")
+
     def test_the_two_vendor_flashes_sent_identical_bytes(self):
         """If they did not, there is a nonce or a timestamp in the stream and
         no fixed reference is possible. They did."""
