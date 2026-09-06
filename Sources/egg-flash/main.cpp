@@ -482,7 +482,7 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
       "\nOr compare against the reference directly:\n"
       "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
       "  cmp %s /tmp/fw140.bin\n",
-      outPath.c_str(), outPath.c_str());
+      outPath.c_str(), outPath.c_str(), outPath.c_str());
     return 0;
 }
 

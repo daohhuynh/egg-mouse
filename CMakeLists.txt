@@ -7,6 +7,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
 
+# FORMAT MISMATCHES ARE ERRORS, NOT WARNINGS. 2026-09-05: a printf in
+# cmdReadFirmware grew a third %s without a third argument, which is undefined
+# behaviour -- it reads whatever happens to be in the next argument slot -- and
+# it reached a commit because a warning scrolled past in the same command that
+# made the commit. This tool's output is how a person decides whether to erase
+# a mouse's firmware, so a garbled or crashing message is not cosmetic.
+# -Wall already warns; only -Werror stops it being ignorable.
+add_compile_options(-Werror=format -Werror=format-security -Werror=format-extra-args)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi)
 
