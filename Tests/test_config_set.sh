@@ -175,6 +175,23 @@ want_rc 0 "record 0x09" dryrun "$TMP/plain.bin" lod 5
 want_rc 8 "REFUSED"     dryrun "$TMP/gated.bin" lod 5
 want_rc 8 "0x6f"        dryrun "$TMP/gated.bin" lod 5
 
+# `diff` -- untested until 2026-09-06, which is worse than it sounds. It is
+# offline and read-only, so it looked harmless, but it is the command a person
+# runs to decide whether a restore is safe: a diff that under-reports makes a
+# destructive restore look benign. Four cases, including both refusals.
+want_rc 0 "0 of 1024 payload bytes differ" diff "$TMP/plain.bin" "$TMP/plain.bin"
+want_rc 0 "1 of 1024 payload bytes differ" diff "$TMP/plain.bin" "$TMP/gated.bin"
+# The byte it names must be the one that was actually changed: record 0x6f,
+# which is payload +0x6f and wire 0x7f. Naming the wrong offset is the failure
+# that would still print a plausible-looking line.
+want_rc 0 "wire 0x007f" diff "$TMP/plain.bin" "$TMP/gated.bin"
+want_rc 0 "00 -> 01"    diff "$TMP/plain.bin" "$TMP/gated.bin"
+# ...and it is direction-sensitive, or "what will change" is a coin flip.
+want_rc 0 "01 -> 00"    diff "$TMP/gated.bin" "$TMP/plain.bin"
+printf '\x00\x01\x02' > "$TMP/tiny.bin"
+want_rc 1 "Refusing"    diff "$TMP/tiny.bin" "$TMP/plain.bin"
+want_rc 1 "cannot open" diff "$TMP/does-not-exist.bin" "$TMP/plain.bin"
+
 # THE REFUSAL MUST STILL SAY EVERYTHING, and must be readable while it does.
 # The reason is a paragraph, and it used to print as one 430-character line --
 # the shape people skip, which for the most important message this tool emits
