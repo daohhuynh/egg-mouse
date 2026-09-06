@@ -207,12 +207,35 @@ longer ones. `[G]` either way.
 The correlation that does hold without exception across all nine reads is
 simply: `record 0x01 == 0x80` exactly when the record is at firmware defaults,
 `0x00` exactly when it holds what a host wrote. n=9, one negative case, and
-still a correlation — **not a basis for a write** (§1.3). What is **not** a guess is the consequence, and it is load-bearing
+still a correlation — **not a basis for a write** (§1.3). What is **not** a guess is the consequence, and it was load-bearing
 for §4.1: **we have no evidence that `a0 11` persists across a power cycle, and
 direct evidence that written settings vanished across most capture boundaries.**
 Reading back after a write therefore verifies RAM. It does not verify what
 survives unplugging, and our config tool must not claim otherwise until someone
 writes a setting, replugs, and reads.
+
+**RESOLVED 2026-09-05, first half only.** Someone did exactly that. `egg-config
+restore` wrote all 1024 payload bytes, the mouse was unplugged for 8.6 s
+(kernel USB log, 18:24:06.878 → 18:24:15.465), and the read afterwards was
+**byte-identical to what was written, 0 of 1024 differing**. Scored in
+`prediction-restore.md`. So `a0 11` writes storage that outlives loss of bus
+power — `[O]`, n=1, ~9 s off.
+
+That resolves what the paragraph asked for and **deepens the problem it
+describes.** The reverts above were being explained by power cycling; power
+cycling demonstrably does not revert. Combined with the USB-address finding
+higher in this section — no re-enumeration visible across the boundaries where
+the settings vanished — *neither* of the two comfortable explanations survives.
+Something else emptied those records. Unknown, `[G]`, and open: the vendor tool
+writing defaults at launch or exit, a device-side timeout, or a separate
+commit/discard command not yet found (§1.2a — no command is *named* commit, and
+that is not evidence there isn't one).
+
+Durations, for whoever picks this up: reverted at 231–5501 s, held at 124 s, and
+now held at ~9 s. Two holds and five reverts, with the holds both far below the
+shortest revert. A duration effect is not excluded and two points is not a
+curve. **Nothing here licenses a claim that the record survives overnight** —
+that is one unplug and one read away and has not been done.
 
 ### 0x71, and why the defaults may have changed with the firmware
 

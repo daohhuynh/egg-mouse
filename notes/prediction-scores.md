@@ -20,18 +20,50 @@ with **what was actually observed** and by whom.
    Me reading a capture file is `[O]`. Me reasoning about a binary is not an
    observation and cannot score anything.
 
-## Running tally
+## Running tally — **DO NOT QUOTE THIS UNTIL THE AUDIT BELOW IS DONE**
 
-| | count |
+**The register holds 271 predictions, not 266.** Recomputed 2026-09-05 rather
+than quoted (§6): `#### N. slug` headings = 271, `**Cite:**` bullets = 271,
+`**REFUTED IF:**` bullets = 271, distinct slugs = 271. Four independent counts
+agree. Where 266 came from is unknown and it had been restated here as fact —
+the §7.1 failure mode, in this file, whose whole job is to resist it.
+
+The old single tally was also arithmetic across scopes, which §6 forbids: it
+counted register entries and free-standing claims from other notes in one number
+over a denominator that only covers the register. Split:
+
+| scope | CONFIRMED | REFUTED | PARTIAL | denominator |
+| --- | --- | --- | --- | --- |
+| `wire-predictions.md` register | 4 | 0 | 0 | 271 |
+| pre-registered elsewhere | 3 | 1 | 0 | not enumerated |
+| device runs, own files | 2 | 0 | 0 | 2 |
+
+Zero REFUTED **in the register** at n=4 is not yet informative either way. It
+becomes a red flag if it survives the GUI area, which is ~15 predictions and the
+cheapest to test. The one REFUTED so far came from outside the register.
+
+### GAP: seven scoreboard entries use slugs the register does not contain
+
+Machine-checked against the 271 heading slugs, 2026-09-05. This matters because
+a name that does not grep cannot be de-duplicated, and two entries scoring the
+same underlying prediction under different names would inflate the tally
+silently — the exact thing this file exists to prevent.
+
+| name used here | actually |
 | --- | --- |
-| CONFIRMED | 3 |
-| REFUTED | 0 |
-| PARTIAL | 0 |
-| AMBIGUOUS | 0 |
-| **scored so far** | **3 of 266** |
+| `updater-idle-window` | the register's **`upd-idle-state`** (line 2908). Renamed here; same prediction. |
+| `updater-ui-four-controls` | not a register slug; line 2872 is in the same section — resolve to its real slug |
+| `led-liftoff-inverted` | appears in `wire-predictions.md` prose but is **not** a `####` entry. Claim lives in `config-protocol.md` §7.8 |
+| `led-page-unreachable` | in no notes file but this one. Claim lives in `gui-surface.md` §3 |
+| `rgb-block-tag-is-cpi-stage` | in no notes file but this one. Claim lives in `config-protocol.md` §7.3 |
+| `button-menu-groups` | in no notes file but this one. Claim lives in `config-protocol.md` §7.13 |
+| `cfg-basic-page-invisible-buttons` | not a register slug; the `#19` in that section is `cfg-hidden-buttons-stay-hidden` |
 
-Zero REFUTED at n=3 is not yet informative either way. It becomes a red flag if
-it survives the GUI area, which is ~15 predictions and the cheapest to test.
+Also note the register numbers **restart per section** — there are eight `#20`s.
+`#N` alone identifies nothing here; always carry the slug.
+
+**Until this is reconciled, the counts above are the best available and not
+audited.** Reconciling it is a task, not a note.
 
 **Watch this specifically:** all three confirmations so far are the *same kind of
 claim* — "a control shipped in the resource is hidden by code at page-init, so
@@ -265,3 +297,56 @@ binary: reading what `OnInitDialog` *omits* rather than what it hides.
 And the tally is no longer 4–0. **CONFIRMED 6, REFUTED 1**, all scored the same
 day and all from things the owner volunteered rather than from questions he was asked.
 The refutation is the one that tells us the scoreboard works.
+
+
+---
+
+## Device runs, 2026-09-05 — scored from their own pre-registration files
+
+These are not in the 271-register. Each has its own file, committed to git
+**before** the command ran, which is the only thing that makes them proofs
+rather than postdictions; the commit is named in each.
+
+### CONFIRMED — `notes/prediction-factory-reset.md`, **21 / 21**
+
+`egg-config factory-reset --yes` on the real device, committed at `47f5959`
+first. 21 payload bytes predicted to move, to named values; 21 moved, to exactly
+those values, and nothing else moved. The device afterwards is byte-identical to
+`10-postflash-baseline` across all 1039 comparable bytes — our `a1 13` and
+Endgame's own produce the same record.
+
+Observer: the owner at the machine. **This cleared CLAUDE.md §4.1's gate**, which had
+blocked every config write since the captures showed section 07's reset test was
+vacuous.
+
+### CONFIRMED — `notes/prediction-restore.md` stage A, **21 / 21**
+
+`egg-config restore ~/.egg-mouse-known-good.bin --yes`, committed at `c433007`
+first. The first 1041-byte `SET_REPORT` this machine has ever sent. 21 predicted
+rows, 21 observed, **0 mismatches and 0 extras**, scored by comparing the two
+tables as maps rather than by eye. The factory-reset table with its value columns
+swapped is *equal as a map* to what restore produced, so the two runs are the
+same 21 bytes traversed in opposite directions — which is what they had to be if
+both readings were right.
+
+Observer: the owner at the machine; the map comparison is mine, mechanical.
+
+**Its stage B is deliberately NOT scored** and must not be counted here. No
+prediction was offered on persistence, on purpose, so the observation that the
+record survived a power cycle (0 of 1024 payload bytes differ after 8.6 s
+unplugged) is a finding, not a hit. Counting it would be exactly the inflation
+the "Observed, and deliberately NOT scored" section above exists to refuse.
+
+### The technique-diversity caveat lifts further
+
+The earlier warning was that every confirmation used one technique
+(`ShowWindow(SW_HIDE)` in `OnInitDialog`). These two are a fourth kind: a
+byte-level prediction about what a *write* does to device state, scored against
+the device rather than against a screen, with 42 individually falsifiable byte
+values across the two runs and a cross-check between them that neither could
+have passed alone.
+
+**And they are the first predictions in this project scored by a script rather
+than by reading.** Every earlier entry rests on me comparing prose to a
+sentence. §6.2 says a reader that cannot be trusted must not be load-bearing;
+these two are the first entries where it isn't.

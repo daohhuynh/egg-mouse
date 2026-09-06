@@ -273,9 +273,13 @@ int rcFor(Result r) {
 void noteOnPersistence() {
     std::puts(
       "\nThis was verified by reading the device back, so it is what the mouse\n"
-      "holds now. It is NOT evidence that the setting survives unplugging: in\n"
-      "the capture run the vendor's own writes were gone by the next session in\n"
-      "five gaps out of six. If it matters, unplug, replug and `egg-config read`.");
+      "holds now. A read-back cannot say what survives later.\n"
+      "One write HAS been observed to survive a power cycle intact: unplugged\n"
+      "8.6 s, replugged, all 1024 payload bytes unchanged (2026-09-05, n=1).\n"
+      "But in the capture run the vendor's own writes were gone by the next\n"
+      "session in five gaps out of six, and what emptied them is not known --\n"
+      "so it is not power loss, and it has not been ruled out for you.\n"
+      "If it matters, unplug, replug and `egg-config read`.");
 }
 
 // ---------------------------------------------------------------------------
@@ -814,8 +818,11 @@ int cmdRestore(const std::string& path, bool verbose, bool yes, UnknownBytes pol
     RestoreOutcome o = s.restore(want);
     reportVault(s, vault);
 
+    // "before the restore", NOT "now": o.incoming is diff(o.before, want) and
+    // this prints AFTER the write, so "now" named the state we had just left.
+    // It reads as a failed restore to anyone scanning the output.
     if (!o.before.empty())
-        printDiff(o.incoming, "on the device now", path.c_str());
+        printDiff(o.incoming, "before the restore", path.c_str());
 
     // The one place we knowingly put different bytes on the wire than the file
     // holds. Announced, because a divergence from the only writer observed to

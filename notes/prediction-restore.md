@@ -108,3 +108,107 @@ There is nothing to undo *to* that is better than where we are: the device is
 at vendor defaults, and `egg-config factory-reset --yes` is now a CONFIRMED
 way back to exactly this state. That is the whole reason §4.1 puts factory
 reset first, and it is why this rung is being run second rather than first.
+
+---
+
+# SCORED: stage A **21 / 21**, stage B **SETTINGS PERSIST** [O]
+
+Scored 2026-09-05 ~18:25 local, against the commit that fixed this file
+(`c433007`) before either command ran. Observer: the owner at the machine; the byte
+comparison below is mine, mechanical, over his pasted output.
+
+## Stage A — the first 1041-byte `SET_REPORT` this machine has ever sent
+
+1. **Acknowledged.** `<-- A0 11 write settings len=64 got=63 id=0x00 b1=0x01`.
+   `resp[1] == 0x01` after the 320 ms wait, exactly as `kDelayWriteRecord` was
+   set from the capture. The length did not upset hidapi; the `REFUTED IF` that
+   named `hid_send_feature_report` failing outright did not fire.
+2. **Exactly 21 bytes, every value as predicted.** Scored by parsing the table
+   in this file and the diff in his terminal and comparing them as maps, not by
+   eye: 21 predicted rows, 21 observed rows, **0 mismatches, 0 extras**.
+   No byte outside the 21 moved, so the device did not edit the record on write.
+3. **The inverse check holds too.** The factory-reset table with its two value
+   columns swapped is *equal as a map* to what restore observed — machine-checked,
+   not asserted. The two runs are the same 21 bytes traversed in opposite
+   directions, which is what it had to be if both readings were right.
+4. `egg-config` printed **`verified: the device holds exactly what was sent.`**
+   — verified, not merely acknowledged.
+
+Corroborating detail nobody predicted and worth keeping: the pre-write read
+reported *16 distinct byte values* across the payload and the read-back *17*.
+The vault is the more varied record. Consistent, and it is an independent
+one-number check that something actually changed.
+
+## Stage B — persistence. **The record survived the power cycle, whole.**
+
+**No prediction was offered here on purpose, so nothing is being scored as a
+hit. This is an observation, and it is the one this rung existed to get.**
+
+The post-replug payload was reconstructed from the 64 hexdump rows of his
+`egg-config read` and compared against the vault byte for byte:
+
+```
+payload bytes differing (vault vs post-replug read): 0 of 1024
+sha256 both                23141790a203044aea899771637b3fb29a70e3fcc66e4bc2b290c24c34ac84d9
+```
+
+**`A0 11` writes storage that outlives loss of bus power.** It is not RAM-only.
+n=1, one device, ~8.6 s unpowered.
+
+### The replug is evidenced, not assumed
+
+The terminal output cannot show an unplug, and the entire claim rests on it, so
+it was checked before scoring rather than after:
+
+- **Kernel USB log.** `terminateDevice: destroying 0x3367/1978/0110 … hardware
+  connection lost` at **18:24:06.878**, `enumerateDeviceComplete: enumerated
+  0x3367/1978/0110 … at 480 Mbps` at **18:24:15.465**. 8.6 s with no power.
+- **The predicate was validated before its silence or its speech was trusted**
+  (§1.2a). Over the same window it also shows the four LMB+RMB bootloader cycles
+  at 13:54–13:55 and the earlier application replug at 17:59:19 → 17:59:31, six
+  seconds before `after-replug.bin` was written. It demonstrably sees this event
+  class. An earlier query of mine returned empty only because it searched for
+  `3367` where the log writes `0x3367`.
+- **Ordering.** The `restore` window's zsh session history was flushed at
+  18:23:55 with `egg-config restore … --yes` as its last line; a new window
+  opened at 18:23:57; the unplug follows at 18:24:06; the read output was pasted
+  at 18:24:49. The replug sits between the write and the read.
+- **the owner, directly:** *"i actually did unplug and count to 5 and then replug
+  before running the second command in a second terminal."*
+
+### What this does NOT settle, and it is now a bigger question than before
+
+`config-wire-observed.md` §5 ends: *"we have no evidence that `a0 11` persists
+across a power cycle … our config tool must not claim otherwise until someone
+writes a setting, replugs, and reads."* That has now been done and the answer is
+that it persists. **The five-of-six reverts in the capture run therefore need a
+different explanation, and losing the power-cycle explanation makes them worse,
+not better** — the address analysis in that same section had already found no
+re-enumeration across the boundaries where settings vanished, and now the one
+mechanism everyone assumed was doing it demonstrably does not.
+
+Open, and written down now rather than when it is resolved (§1.7):
+
+- **What reverted the vendor's writes in those five gaps?** Candidates, all `[G]`:
+  the vendor tool writing defaults at launch or exit; a device-side timeout; a
+  distinct commit/discard command we have not found. The gaps that reverted were
+  231 s–5501 s; the one that HELD was 124 s and this one held at ~9 s, so a
+  duration effect is not excluded — but 9 s and 124 s are both far below 231 s
+  and two points is not a curve.
+- **Duration is untested above ~9 s.** Nothing here says the record survives
+  overnight. Cheap to test and worth testing before the README makes any claim
+  broader than what was observed.
+
+## Record `0x01` — the sub-question, answered as far as this run can answer it
+
+`0x80` before, `0x00` after the write, **and still `0x00` after the replug**.
+
+The pre-registered limit stands exactly as written: this run cannot separate
+"we wrote `0x00`" from "the device clears the flag on any host write", because
+both predict `0x00`. It could only have *refuted* the reading by showing `0x80`
+surviving, and it did not. So the `0x80` = "at firmware defaults" reading is
+**still `[G]`, still unrefuted, still not a basis for a write** (§1.3).
+
+The replug adds one thing the pre-registration did not anticipate: the flag did
+not come back on power-up. Under the standing reading that is required — the
+device is not at defaults — so it is consistent and not independent evidence.

@@ -6,8 +6,14 @@ was derived independently from their `.exe` files by static analysis, and is
 being checked against captures of their software talking to the hardware.
 
 **Status: not finished, and not yet safe to point at your mouse.** The flasher
-has no `flash` verb. The config tool can read, and can write only bytes the
-device itself produced. See *Staged bring-up* below for why.
+has no `flash` verb and has never touched hardware.
+
+The config tool has. On 2026-09-05 it read the settings record off a real OP1
+8k v2, factory-reset it, and wrote a saved record back — each against a
+prediction committed to git beforehand, each scoring 21 of 21 bytes. It also
+established, on the device, that **a write survives a power cycle**: unplugged
+8.6 s, replugged, all 1024 payload bytes unchanged. One device, one of each.
+See *Staged bring-up* below for what is still untested.
 
 ---
 
@@ -35,7 +41,7 @@ cmake --build build
 ```
 
 Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
-`build/test-config`. `ctest --test-dir build` runs everything — eleven suites,
+`build/test-config`. `ctest --test-dir build` runs everything — thirteen suites,
 none of which needs the mouse.
 
 ## egg-config
@@ -87,8 +93,14 @@ in one line; `ConfigRecord.h` carries the argument and both arms are scored
 against the captures.
 
 **A successful read-back proves what the mouse holds now, not what survives
-unplugging.** In the capture run the vendor's own writes were gone by the next
-session in five gaps out of six. `egg-config` says so after every write.
+later.** One write has been observed to survive a power cycle intact — 8.6 s
+unplugged, 0 of 1024 payload bytes changed. That is `n=1` at nine seconds and
+nobody has tried overnight.
+
+It also leaves something unexplained rather than settling it: in the capture run
+the vendor's *own* writes were gone by the next session in five gaps out of six,
+and power loss is now ruled out as the cause. What emptied them is not known.
+`egg-config` says all of this after every successful write.
 
 ## egg-flash
 
@@ -113,8 +125,9 @@ it is given.
 `egg-flash` also tells you, on **stderr**, whether a settings undo exists. Its
 last command is `A1 13` — byte for byte the config tool's Factory Reset. Whether
 it means the same thing in both places is a guess and is not testable without
-flashing, and no config write has been observed to survive a power cycle, so a
-wipe might not be undoable from the device. Run `egg-config read` first.
+flashing. If it does, flashing wipes your settings. `egg-config restore` is now
+a confirmed way back, but only from a file you already have, so run
+`egg-config read` first.
 
 That message is on stderr and not stdout deliberately: `stream` exists so the
 whole outbound byte sequence can be diffed against a capture of the vendor's
@@ -126,7 +139,7 @@ There is no `flash` verb yet, on purpose.
 ## Tests
 
 ```sh
-ctest --test-dir build      # all eleven suites, no hardware needed
+ctest --test-dir build      # all thirteen suites, no hardware needed
 ```
 
 or individually:
@@ -191,12 +204,17 @@ frame-builder mutants are what show such bugs exist to be caught.
 The order is fixed, and each stage exists so that the next one has less
 untested code in it:
 
-1. One read-only command round trip. ✅ built, **not yet run against the device**
-2. Bootloader entry and exit only. No erase, no write.
+1. One read-only command round trip. ✅ **done on the device, 2026-09-05**
+2. Bootloader entry and exit only. No erase, no write. ← next
 3. Flash read-back, compared against a reference image. Zero writes.
 4. A real flash.
 
 By stage 4 the only untested code is erase and write.
+
+Stage 1 is complete and then some: every frame the *config* tool sends has now
+been on the wire against real hardware — the 64-byte queries, `A1 13`, and the
+1041-byte `A0 11` write. That was the point of doing it first. What remains
+untested in either tool is bootloader entry, erase, and flash write.
 
 ## Layout
 
