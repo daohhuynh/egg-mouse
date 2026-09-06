@@ -57,3 +57,59 @@ This pre-registers the BYTE-EXACT form of that, which "looks default" is not.
 - **That nothing outside the settings region and the APROM changed.** Nothing
   addressed such a region, but "nothing addressed it" is a claim about the
   commands sent, not about the device.
+
+---
+
+# SCORED, 2026-09-05 — 7 of 7
+
+Committed as `b746d0f` before the read-back was run.
+
+| # | prediction | result |
+|---|---|---|
+| 1 | PID `0x1978`, bcd `0x0110`, product + manufacturer strings | **HIT**, all four fields |
+| 2 | seven interfaces, the same seven | **HIT** |
+| 3 | 1040 of 1041 returned (N−1) | **HIT** |
+| 4 | exactly the 21 tabulated bytes differ from the vault | **HIT** |
+| 5 | no byte outside that set moves | **HIT** |
+| 6 | byte-identical to `10-postflash-baseline` over 1039 bytes | **HIT, by transitivity — not measured directly this time.** `prediction-factory-reset.md` established the device was byte-identical to that baseline after our own reset, and the vault differs from that state in exactly these 21 bytes, which is what was just re-measured. Recorded as inferred, not observed, so nobody later quotes it as a direct comparison. |
+| 7 | firmware still 1.10 | **HIT** — `10 01` at record `+0x11`, bcdDevice `0x0110` |
+
+Scored mechanically, not by eye: the 21 rows were re-parsed out of
+`prediction-factory-reset.md` and set-compared against the actual byte deltas
+between the vault and `after-windows-flash.bin`. Zero predicted-but-unmoved,
+zero moved-but-unpredicted, zero wrong values.
+
+## What this rung established beyond its own predictions
+
+**The command census is complete and every command is an immediate  [D].**
+Re-derived here rather than quoted (§6). `HidD_SetFeature`'s IAT slot is
+dereferenced at exactly 2 sites, both inside the wrapper `0x4012a0`; an
+`E8 rel32` sweep of all 1,154,048 bytes of `.text` gives that wrapper exactly
+7 callers; each writes its command bytes as an immediate, never a computed
+value:
+
+| site | immediate | command |
+| --- | --- | --- |
+| `0x4018e9` | `movl $0x3a0` | `A0 03` erase / bootloader start |
+| `0x4019d5` | `movw $0x6a0` | `A0 06` write block |
+| `0x401b0b` | `movw $0x7a0` | `A0 07` read block |
+| `0x401be5` | `movw $0x8a1` | `A1 08` whole-image checksum |
+| `0x403793` | `movl $0x3aa1` | `A1 3A` enter bootloader |
+| `0x403be4` | `movl $0x9a1` | `A1 09` complete |
+| `0x403dcf` | `movl $0x13a1` | `A1 13` factory reset |
+
+Method blind spots, stated per §1.2a: an `E8 rel32` sweep cannot see indirect
+calls to the wrapper, nor `E9` tail-jumps into it. Within those limits the set
+is exactly seven.
+
+**Consequence, and it is the answer to a question the owner asked directly:** the only
+command that writes flash is `A0 06`, and it carries a block index. Nothing in
+the vendor's tool writes a CONFIG bit, selects a boot source, or addresses
+LDROM. The device's non-APROM regions are not reachable by this protocol, so
+they cannot be quietly damaged by it — and their failure modes are boot-critical
+rather than degrading, so a damaged one does not enumerate at all.
+
+**The full reflash is the deepest reset that exists for this device.** Erase and
+rewrite of all 65 APROM blocks with per-block read-back and a device-computed
+whole-image checksum, then `A1 13`. There is no deeper vendor command to find;
+the census above is why that is a claim and not a hope.
