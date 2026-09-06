@@ -444,7 +444,8 @@ struct FakeWorld {
     bool         replyArrives = true;
     std::uint8_t replyStatus = 0x01;
     unsigned     appearAfterMs = 450;              // [O] 448-489 ms
-    SeenDevice   appearsAs{kProductIdBootloader, kBootloaderRelease, "Bootloader"};
+    SeenDevice   appearsAs{kProductIdBootloader, kBootloaderRelease,
+                           kUsagePageVendor, kUsageVendor, "Bootloader", "EGG"};
     bool         everAppears = true;
     unsigned     clock = 0;
 
@@ -476,9 +477,25 @@ struct FakeWorld {
     }
 };
 
+// EXACTLY what the real mouse publishes, read off it 2026-09-05 with
+// `egg-config devices`: SEVEN interfaces on one PID, of which precisely one is
+// the vendor collection. The earlier version of this helper had a single
+// interface, which is why the first hardware run of stage 2 refused a working
+// device while every test passed. A mock that is tidier than the device is not
+// a mock, it is a second copy of the code's assumptions.
+const std::uint16_t kRealInterfaces[7][2] = {
+    {0x0001, 0x06}, {0xff01, 0x02}, {0x000c, 0x01},
+    {0xff02, 0x01}, {0xff02, 0x02}, {0x0001, 0x02}, {0x0001, 0x01},
+};
+
+void pushRealMouse(FakeWorld& w, std::uint16_t pid, const char* product) {
+    for (const auto& i : kRealInterfaces)
+        w.devices.push_back({pid, 0x0110, i[0], i[1], product, "Endgame Gear"});
+}
+
 FakeWorld appOnly() {
     FakeWorld w;
-    w.devices.push_back({kProductIdApplication, 0x0110, "Endgame Gear OP1 8k v2 Gaming Mouse"});
+    pushRealMouse(w, kProductIdApplication, "Endgame Gear OP1 8k v2 Gaming Mouse");
     return w;
 }
 
@@ -504,6 +521,29 @@ static void testStage2Entry() {
            std::to_string(o.reenumerateMs) + " ms");
     }
 
+    // THE DEFECT THE FIRST HARDWARE RUN FOUND. Seven interfaces, one device.
+    {
+        FakeWorld w = appOnly();
+        ok("the fake world has the real SEVEN interfaces on one PID",
+           w.devices.size() == 7);
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("seven interfaces on one PID read as ONE device, not seven",
+           o.result == EntryResult::EnteredAndConfirmed,
+           describe(o.result));
+    }
+    // A device with the right PID but NO vendor collection is not openable, so
+    // it must not be counted as one either.
+    {
+        FakeWorld w;
+        w.devices.push_back({kProductIdApplication, 0x0110, 0x0001, 0x06,
+                             "Endgame Gear OP1 8k v2 Gaming Mouse", "Endgame Gear"});
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("PID present but no 0xff01/0x02 collection -> refuses, sends nothing",
+           o.result == EntryResult::NoApplicationDevice && w.sent.empty());
+    }
+
     // Nothing to send to -> nothing sent. This is the one that protects the
     // mouse from a half-understood state, so it is asserted on the SEND COUNT
     // and not merely on the result code.
@@ -516,7 +556,7 @@ static void testStage2Entry() {
     }
     {
         FakeWorld w = appOnly();
-        w.devices.push_back({kProductIdApplication, 0x0110, "Endgame Gear OP1 8k v2 Gaming Mouse"});
+        pushRealMouse(w, kProductIdApplication, "Endgame Gear OP1 8k v2 Gaming Mouse");
         EntryEnv e = w.env();
         const EntryOutcome o = enterBootloaderAndConfirm(e);
         ok("TWO application devices -> refuses rather than picking one",
@@ -525,7 +565,8 @@ static void testStage2Entry() {
     }
     {
         FakeWorld w;
-        w.devices.push_back({kProductIdBootloader, kBootloaderRelease, "Bootloader"});
+        pushRealMouse(w, kProductIdBootloader, "Bootloader");
+        for (auto& d : w.devices) d.releaseNumber = kBootloaderRelease;
         EntryEnv e = w.env();
         const EntryOutcome o = enterBootloaderAndConfirm(e);
         ok("already in the bootloader -> confirms without sending A1 3A",
@@ -535,7 +576,8 @@ static void testStage2Entry() {
     // Identity is checked on all three fields, not just the PID.
     {
         FakeWorld w = appOnly();
-        w.appearsAs = {kProductIdBootloader, 0x0007, "Bootloader"};
+        w.appearsAs = {kProductIdBootloader, 0x0007, kUsagePageVendor, kUsageVendor,
+                       "Bootloader", "EGG"};
         EntryEnv e = w.env();
         const EntryOutcome o = enterBootloaderAndConfirm(e);
         ok("wrong bcdDevice on 0x1977 -> REFUSED, not accepted",
@@ -544,7 +586,8 @@ static void testStage2Entry() {
     }
     {
         FakeWorld w = appOnly();
-        w.appearsAs = {kProductIdBootloader, kBootloaderRelease, "Bootloadr"};
+        w.appearsAs = {kProductIdBootloader, kBootloaderRelease, kUsagePageVendor,
+                       kUsageVendor, "Bootloadr", "EGG"};
         EntryEnv e = w.env();
         const EntryOutcome o = enterBootloaderAndConfirm(e);
         ok("wrong product string on 0x1977 -> REFUSED",

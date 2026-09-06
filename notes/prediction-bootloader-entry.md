@@ -148,3 +148,70 @@ Stated in advance so nothing gets over-claimed afterwards:
 - Whether the nine-attempt retry loop works. We send once, deliberately: that
   path has never been exercised on the wire in either capture, and running
   untested retry code against the one mouse buys nothing.
+
+
+---
+
+# RUN 1, 2026-09-05: ABORTED IN PREFLIGHT ON A BUG IN OUR OWN CODE
+
+**Nothing was sent. The prediction is unscored and still stands.**
+
+```
+opened PID 0x1978  Endgame Gear "..."  version 0x0110  usagepage 0xff01 usage 0x02
+FAILED: no application device to send to; nothing was sent
+```
+
+Note the contradiction in those two lines — it opened the application device and
+then said there wasn't one. The cause: the preflight counted **interfaces**
+where it meant **devices**. One mouse publishes seven interfaces on PID 0x1978:
+
+```
+0x0001/0x06   0xff01/0x02   0x000c/0x01   0xff02/0x01
+0xff02/0x02   0x0001/0x02   0x0001/0x01
+```
+
+`Device::open` uses the four-part predicate from `build-design.md` §1 (VID, PID,
+UsagePage `0xFF01`, Usage `0x02`) and finds exactly one. My preflight matched on
+PID alone, counted 7, and refused because 7 ≠ 1.
+
+**Why this is worth writing down rather than just fixing.** `BootloaderLink.h`
+already carries a warning about precisely this shape:
+
+> *"Exactly this defect shipped in the CONFIG transport and passed the whole
+> suite, because the mock returned what the wrong check expected."*
+
+It happened again, in new code, on the same day. The `FakeWorld` had **one**
+application interface because that is what the code assumed, so all 21 tests
+passed against a world tidier than the device. **A mock that is tidier than the
+hardware is not a mock; it is a second copy of the code's assumptions.**
+
+Three things changed:
+
+1. The predicate is now `countVendorCollections()`, shared by the preflight and
+   by the confirmation prompt so the two cannot drift.
+2. `FakeWorld` now publishes the real seven interfaces, read off the mouse with
+   `egg-config devices`. Two new tests: seven interfaces must read as one
+   device, and a PID with no `0xff01/0x02` collection must still be refused.
+3. **The `--yes`-less prompt now runs and prints the preflight**, so this class
+   of bug is visible before sending rather than after:
+
+```
+preflight, right now:
+  7 interface(s) on VID 0x3367 in total
+  1 application vendor collection(s)  (PID 0x1978, 0xff01/0x02)
+  0 bootloader  vendor collection(s)  (PID 0x1977)
+  -> ready. Exactly one mouse to switch.
+```
+
+**The safety design worked exactly as intended.** The guard was wrong in the
+conservative direction: an unexpected count aborted and sent nothing, which is
+§4.2's "before erase, abort is always correct" doing its job. A guard that had
+failed open here would have sent the frame and nobody would have learnt anything
+about the seven interfaces.
+
+Bootloader detection was deliberately **not** tightened to the four-part
+predicate. We never open the bootloader in stage 2, so which collection it
+publishes is irrelevant, and requiring `0xFF01/0x02` to appear would only add a
+way to time out while the device is plainly present. `bcdDevice` and the product
+string are device-level and ride on every interface, so the identity check in
+prediction items 6 and 7 loses nothing.

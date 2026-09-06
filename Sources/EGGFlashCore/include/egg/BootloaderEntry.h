@@ -16,6 +16,7 @@
 
 #include "egg/Protocol.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -29,6 +30,14 @@ namespace egg::fw {
 struct SeenDevice {
     std::uint16_t productId{};
     std::uint16_t releaseNumber{};
+    // The device presents SEVEN interfaces on one PID (0x0001/0x06, 0xff01/0x02,
+    // 0x000c/0x01, 0xff02/0x01, 0xff02/0x02, 0x0001/0x02, 0x0001/0x01 -- read off
+    // the real mouse 2026-09-05). Counting interfaces where you mean devices is
+    // therefore off by six, and that is not hypothetical: the first run of
+    // stage 2 against hardware refused with "no application device" while
+    // staring at a successfully opened one.
+    std::uint16_t usagePage{};
+    std::uint16_t usage{};
     std::string   product;
     // [O] "EGG" on the bootloader, "Endgame Gear" on the application
     // (notes/bootloader-observed.md §2). REPORTED, never gated on: a fourth
@@ -109,5 +118,13 @@ inline constexpr unsigned kEntryPollCeilMs = 10000;
 // running untested code against the one mouse for no gain. If the first attempt
 // fails, stage 2 has failed safely and can simply be run again.
 EntryOutcome enterBootloaderAndConfirm(EntryEnv& env);
+
+// How many openable vendor collections (UsagePage 0xFF01, Usage 0x02) this PID
+// publishes. Exposed so the CONFIRMATION PROMPT can show what it is about to
+// act on, using the same predicate the send path uses rather than a second
+// copy of it that can drift. The first hardware run of stage 2 aborted on this
+// count being wrong and the prompt could not have shown it.
+std::size_t countVendorCollections(const std::vector<SeenDevice>& seen,
+                                   std::uint16_t productId);
 
 }  // namespace egg::fw

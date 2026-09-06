@@ -30,7 +30,24 @@ bool isKnownBootloader(const SeenDevice& d) {
         && d.product       == kBootloaderProduct;
 }
 
+// The four-part predicate of build-design.md §1 -- VID (implicit in
+// enumeration), PID, UsagePage 0xFF01, Usage 0x02. This is the ONE interface
+// Device::open will talk to, and counting anything looser counts interfaces
+// rather than devices.
+bool isVendorCollection(const SeenDevice& d, std::uint16_t pid) {
+    return d.productId == pid
+        && d.usagePage == kUsagePageVendor
+        && d.usage     == kUsageVendor;
+}
+
 }  // namespace
+
+std::size_t countVendorCollections(const std::vector<SeenDevice>& seen,
+                                   std::uint16_t productId) {
+    std::size_t n = 0;
+    for (const auto& d : seen) if (isVendorCollection(d, productId)) ++n;
+    return n;
+}
 
 EntryOutcome enterBootloaderAndConfirm(EntryEnv& env) {
     EntryOutcome o;
@@ -46,6 +63,12 @@ EntryOutcome enterBootloaderAndConfirm(EntryEnv& env) {
     // for exactly this reason.
     {
         const auto before = env.enumerate();
+        // Bootloader detection is PID-only ON PURPOSE, unlike the application
+        // count above. We never open the bootloader in stage 2, so which
+        // collection it publishes is irrelevant; requiring 0xFF01/0x02 to have
+        // appeared would only add a way to time out while the device is plainly
+        // there. bcdDevice and the product string are device-level and are
+        // carried on every interface, so the identity check loses nothing.
         for (const auto& d : before) {
             if (d.productId == kProductIdBootloader) {
                 o.sawBootloaderPid = true;
@@ -55,13 +78,17 @@ EntryOutcome enterBootloaderAndConfirm(EntryEnv& env) {
                 return o;
             }
         }
-        // Otherwise there must be exactly one application device. Zero means
-        // nothing to talk to; more than one means we cannot say which mouse we
-        // would be switching, and switching the wrong one is not recoverable by
-        // apologising afterwards.
-        std::size_t apps = 0;
-        for (const auto& d : before)
-            if (d.productId == kProductIdApplication) ++apps;
+        // Otherwise there must be exactly one application VENDOR COLLECTION.
+        // Zero means nothing to talk to; more than one means we cannot say
+        // which mouse we would be switching, and switching the wrong one is not
+        // recoverable by apologising afterwards.
+        //
+        // COUNT COLLECTIONS, NOT INTERFACES. One mouse publishes seven
+        // interfaces on PID 0x1978, so `d.productId == kProductIdApplication`
+        // counts 7 and this refused a perfectly good device on its first run
+        // against hardware. Device::open uses the four-part predicate; so must
+        // this, or the two disagree about what "one device" means.
+        const std::size_t apps = countVendorCollections(before, kProductIdApplication);
         if (apps != 1) {
             o.result = EntryResult::NoApplicationDevice;
             return o;

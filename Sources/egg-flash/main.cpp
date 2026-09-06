@@ -109,6 +109,14 @@ static int usage() {
 // a mistyped verb could start a flash, and there is no reason for this rung to
 // know what firmware even is.
 // ---------------------------------------------------------------------------
+static std::vector<SeenDevice> seeAll() {
+    std::vector<SeenDevice> out;
+    for (const auto& m : egg::enumerateAll())
+        out.push_back({m.productId, m.releaseNumber, m.usagePage, m.usage,
+                       m.product, m.manufacturer});
+    return out;
+}
+
 static int cmdEnterBootloader(bool yes, bool verbose) {
     if (!yes) {
         std::printf(
@@ -121,6 +129,25 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
           "the observed exit and it has been done on this mouse before.\n"
           "\n"
           "Re-run with --yes.\n");
+
+        // Show the preflight rather than only describing it. Same predicate the
+        // send path uses -- a prompt that cannot see what the send path sees is
+        // a prompt that reassures you about the wrong thing.
+        const auto seen = seeAll();
+        const std::size_t apps = countVendorCollections(seen, egg::kProductIdApplication);
+        const std::size_t bls  = countVendorCollections(seen, egg::kProductIdBootloader);
+        std::printf("\npreflight, right now:\n"
+                    "  %zu interface(s) on VID 0x3367 in total\n"
+                    "  %zu application vendor collection(s)  (PID 0x%04x, 0xff01/0x02)\n"
+                    "  %zu bootloader  vendor collection(s)  (PID 0x%04x)\n",
+                    seen.size(), apps, egg::kProductIdApplication,
+                    bls, egg::kProductIdBootloader);
+        if (apps == 1 && bls == 0)
+            std::printf("  -> ready. Exactly one mouse to switch.\n");
+        else if (bls > 0)
+            std::printf("  -> already in the bootloader; --yes would send nothing.\n");
+        else
+            std::printf("  -> NOT ready: --yes would refuse and send nothing.\n");
         return 2;
     }
 
@@ -138,12 +165,7 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
     env.sleepMs = [](unsigned ms) {
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     };
-    env.enumerate = [] {
-        std::vector<SeenDevice> out;
-        for (const auto& m : egg::enumerateAll())
-            out.push_back({m.productId, m.releaseNumber, m.product, m.manufacturer});
-        return out;
-    };
+    env.enumerate = seeAll;
     env.exchange = [&t](const std::vector<std::uint8_t>& frame,
                         std::vector<std::uint8_t>& reply, bool& readOk) {
         // The vendor sleeps i*2 ms after the send and before the read, i = 1 on
