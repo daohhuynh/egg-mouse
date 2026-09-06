@@ -53,6 +53,39 @@ inline constexpr unsigned kReadBlockTries = 5;
 ReadBack readApplicationRegion(BootloaderLink& link);
 
 // ---------------------------------------------------------------------------
+// Is a file on disk a usable backup of the application region?
+//
+// The other half of the same §4.2 rule, and the half that decides whether an
+// erase is allowed to happen. the owner's call, 2026-09-05: `flash` no longer TAKES
+// the backup -- doing so put 65 A0 07 frames in front of A0 03, which the
+// vendor never sends, inserting our own rule into the one sequence there is a
+// capture of. `read-firmware` takes it in a separate run and `flash` checks it.
+//
+// The trade is only sound if the check is real, which is why the DECISION lives
+// here rather than in the CLI: this file is mutation-tested (Tests/mutants.sh)
+// and main.cpp is not. The CLI does the printing and nothing else.
+//
+// What it rejects, and why each shape is one somebody actually produces:
+//   - a path that is empty or unopenable       -- no backup was taken
+//   - anything but exactly kBlockCount*kBlockSize bytes, INCLUDING one byte
+//     too long                                 -- a truncated or wrong file
+//   - a file that is all one repeated byte     -- an A0 07 loop that failed and
+//                                                 got written out anyway
+// It deliberately does NOT try to judge whether the contents are "real"
+// firmware. Nothing here can: the device serves whatever is resident, and a
+// backup of a half-flashed device is still the best undo available. §1.2a --
+// this check sees length and uniformity, and nothing else.
+// ---------------------------------------------------------------------------
+struct BackupCheck {
+    bool ok = false;
+    std::string reason;    // why not, when !ok. Empty when ok.
+    std::string sha256;    // of the bytes read, when ok.
+    std::size_t size = 0;  // bytes actually read, whether ok or not.
+};
+
+BackupCheck checkBackupFile(const std::string& path);
+
+// ---------------------------------------------------------------------------
 // The frames OUR flasher sends, in order, on the happy path.
 //
 // It BEGINS with A1 3A, as the vendor's does. §4.2b, revised 2026-09-05: a

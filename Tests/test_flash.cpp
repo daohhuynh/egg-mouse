@@ -878,6 +878,137 @@ static void testReadBackAndToken() {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 10. The backup gate. §4.2: "never erase without a saved copy."
+//
+// `flash` no longer takes the backup -- the owner, 2026-09-05 -- so this check is the
+// ONLY thing standing between a bad or absent backup and an erase. It replaced
+// an in-flash A0 07 read-back, i.e. it took over a guarantee that used to be
+// enforced by actually doing the read. A check that replaces a stronger
+// mechanism has to be tested harder than the mechanism it replaced, not less.
+//
+// Every case below is a file somebody actually ends up with.
+// ---------------------------------------------------------------------------
+static std::string tmpPath(const char* tag) {
+    std::string p = "/tmp/egg-backup-test-";
+    p += tag;
+    p += ".bin";
+    return p;
+}
+
+static void writeFile(const std::string& path, const std::vector<std::uint8_t>& b) {
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (f) { if (b.size()) std::fwrite(b.data(), 1, b.size(), f); std::fclose(f); }
+}
+
+static void testBackupGate() {
+    std::printf("\n10. the backup gate (§4.2)\n");
+
+    const std::size_t kFull = kBlockCount * kBlockSize;
+
+    ok("an empty path is refused", !checkBackupFile("").ok);
+    ok("...and says so rather than reporting a size",
+       checkBackupFile("").reason.find("named") != std::string::npos);
+
+    const std::string missing = tmpPath("definitely-not-here");
+    std::remove(missing.c_str());
+    ok("a path that does not exist is refused", !checkBackupFile(missing).ok);
+
+    // Length. The interesting one is +1: a reader that asks for exactly kFull
+    // bytes and checks the count accepts a too-long file by truncation.
+    struct { const char* tag; std::size_t n; } sizes[] = {
+        {"empty", 0}, {"short", 100}, {"minus1", kFull - 1},
+        {"plus1", kFull + 1}, {"double", kFull * 2},
+    };
+    bool allSizesRefused = true, plus1NamesRealSize = false;
+    for (const auto& c : sizes) {
+        std::vector<std::uint8_t> b(c.n);
+        for (std::size_t i = 0; i < b.size(); ++i)
+            b[i] = static_cast<std::uint8_t>(i * 7 + 1);
+        const std::string p = tmpPath(c.tag);
+        writeFile(p, b);
+        const BackupCheck bc = checkBackupFile(p);
+        if (bc.ok) allSizesRefused = false;
+        if (std::string(c.tag) == "plus1")
+            plus1NamesRealSize = bc.reason.find(std::to_string(kFull + 1)) != std::string::npos;
+        std::remove(p.c_str());
+    }
+    ok("every wrong length is refused, including one byte too long", allSizesRefused);
+    ok("...and a too-long file is reported at its REAL size, not truncated",
+       plus1NamesRealSize);
+
+    // Uniform content of the right length: what a failed read leaves behind.
+    bool allUniformRefused = true;
+    for (int fill : {0x00, 0xFF, 0x5A}) {
+        const std::string p = tmpPath("flat");
+        writeFile(p, std::vector<std::uint8_t>(kFull, static_cast<std::uint8_t>(fill)));
+        if (checkBackupFile(p).ok) allUniformRefused = false;
+        std::remove(p.c_str());
+    }
+    ok("a right-sized file of one repeated byte is refused as a failed read",
+       allUniformRefused);
+
+    // A single differing byte is enough to be "varied" -- deliberately, because
+    // this check is about detecting a failed read, not grading firmware. Pinned
+    // so that tightening it later is a visible decision rather than a drift.
+    {
+        std::vector<std::uint8_t> b(kFull, 0xAA);
+        b[kFull - 1] = 0xAB;           // the LAST byte, so a loop that stops
+        const std::string p = tmpPath("onediff");  // early would miss it
+        writeFile(p, b);
+        ok("one differing byte, at the very end, counts as varied",
+           checkBackupFile(p).ok);
+        std::remove(p.c_str());
+    }
+
+    // The positive case, and the fields the CLI prints from.
+    {
+        const std::vector<std::uint8_t> img = synthetic();
+        const std::string p = tmpPath("good");
+        writeFile(p, img);
+        const BackupCheck bc = checkBackupFile(p);
+        ok("a varied file of exactly the right length is accepted", bc.ok);
+        ok("...with no reason attached", bc.reason.empty());
+        ok("...its size reported exactly", bc.size == kFull);
+        ok("...and its sha256 is the sha256 OF THE FILE",
+           bc.sha256 == sha256Hex(img.data(), img.size()), bc.sha256);
+
+        // The check must read the file, not remember an earlier answer: flip
+        // one byte and the digest must move.
+        std::vector<std::uint8_t> img2 = img;
+        img2[12345] ^= 0xFF;
+        writeFile(p, img2);
+        const BackupCheck bc2 = checkBackupFile(p);
+        ok("a different file gives a different digest", bc2.ok && bc2.sha256 != bc.sha256);
+        std::remove(p.c_str());
+    }
+
+    // AND THE PROPERTY THE WHOLE CHANGE RESTS ON: checking a backup emits no
+    // frames. It is a file read, so this is true by construction -- pinned
+    // because "by construction" is exactly the phrase §4.2a bans relying on.
+    {
+        std::string err;
+        Image img;
+        if (img.loadFromExecutable(kExe, err)) {
+            const auto before = plannedFrames(img);
+            const std::string p = tmpPath("good2");
+            writeFile(p, synthetic());
+            (void)checkBackupFile(p);
+            std::remove(p.c_str());
+            const auto after = plannedFrames(img);
+            ok("checking a backup changes nothing about the plan", before == after);
+            bool anyReadBeforeErase = false;
+            for (const auto& f : after) {
+                if (f.size() > 1 && f[0] == kReportLarge && f[1] == 0x03) break;
+                if (f.size() > 1 && f[0] == kReportLarge && f[1] == 0x07)
+                    anyReadBeforeErase = true;
+            }
+            ok("and the plan still emits NO A0 07 before A0 03", !anyReadBeforeErase);
+        }
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -889,6 +1020,7 @@ int main() {
     testStage2Entry();
     testStage2Exit();
     testReadBackAndToken();
+    testBackupGate();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

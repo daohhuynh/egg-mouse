@@ -105,6 +105,11 @@ set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 add_test(NAME flash_undo COMMAND Tests/test_flash_undo.sh)
 set_tests_properties(flash_undo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# The backup gate. Runs with no mouse attached, which is why cmdFlash does its
+# host-side refusals before it enumerates -- see the comment there.
+add_test(NAME flash_backup COMMAND Tests/test_flash_backup.sh)
+set_tests_properties(flash_backup PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Mutation testing: §6.2's check that the flash suite can produce a bad result.
 # RUN_SERIAL because it edits the source tree, rebuilds, and restores -- nothing
 # else may be compiling or running a built binary while it does. Its EXIT trap

@@ -14,7 +14,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <string>
 #include <thread>
 
@@ -101,17 +100,36 @@ static int usage() {
         "                                      back with A0 07 and save it.\n"
         "                                      Read-only. --check just reports\n"
         "                                      whether the bootloader is there.\n"
-        "  egg-flash flash <updater.exe>       the real thing. Prints the plan\n"
+        "  egg-flash flash <updater.exe> --backup <file>\n"
+        "                                      the real thing. Prints the plan\n"
         "                                      and a token; needs --confirm.\n"
         "\n"
-        "ENTRY IS BY BUTTON (§4.2b). This tool will not send A1 3A: a software\n"
-        "entry LATCHES -- observed 2026-09-05, and a power cycle does not undo it\n"
-        "-- while a button entry is one unplug from normal. `flash` refuses\n"
-        "unless the device is already in a bootloader you put it in.\n"
+        "A FLASH IS TWO RUNS, and that is deliberate (§4.2b, §4.2a):\n"
         "\n"
-        "`flash` reads the current image back and saves it BEFORE erasing, and\n"
-        "abandons the flash if that fails (§4.2). It never sends A1 13, so your\n"
-        "settings are not part of the operation.\n"
+        "  1. egg-flash read-firmware backup.bin\n"
+        "     Enters the bootloader BY BUTTON -- hold left+right while plugging\n"
+        "     in -- and reads all 65 blocks out with A0 07. Read-only, abortable\n"
+        "     at any point, and one unplug from normal.\n"
+        "\n"
+        "  2. egg-flash flash <updater.exe> --backup backup.bin --confirm <token>\n"
+        "     Enters with A1 3A, the vendor's own way, and then sends EXACTLY\n"
+        "     their byte stream:\n"
+        "       A1 3A -> A0 03 -> (A0 06, A0 07) x65 -> A1 08 -> A1 09 -> A1 13\n"
+        "     Nothing is inserted. Tests/test_golden_vendor.py diffs those frames\n"
+        "     against Endgame's own capture of this mouse being flashed.\n"
+        "\n"
+        "The split is the whole point: the backup is what §4.2 requires before an\n"
+        "erase, but taking it inside the flash would have put 65 frames the\n"
+        "vendor never sends into the one sequence we have evidence for. So run 1\n"
+        "takes it and run 2 only CHECKS it. `flash` refuses without a valid one.\n"
+        "\n"
+        "A1 3A LATCHES [O]. Once run 2 starts, a power cycle will not return the\n"
+        "mouse to normal -- only a completed flash will. Everything that can fail\n"
+        "is checked before it is sent, and if a flash aborts anyway, re-running it\n"
+        "is the way out. Endgame's Windows updater recovers the same state.\n"
+        "\n"
+        "`flash` ends with A1 13, the vendor's last step, which resets settings.\n"
+        "It refuses to start unless a settings undo already exists.\n"
         "\n"
         "  --vault F   where egg-config keeps the known-good settings record.\n"
         "              Default ~/.egg-mouse-known-good.bin. This tool's last\n"
@@ -334,9 +352,12 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
           "  1. Endgame's Windows updater, on any Windows machine. It treats a\n"
           "     0x1977 device as a supported starting state and goes straight to\n"
           "     flashing (notes/updater-protocol.md 5.1a). No code of ours runs.\n"
-          "  2. This tool, once the flash verb exists. Do the read-only A0 07\n"
-          "     read-back first (4.4 stage 3) -- it is zero-write and it proves\n"
-          "     the block arithmetic against FWFILE 140.\n"
+          "  2. This tool. `flash` treats an already-bootloadered device as a\n"
+          "     supported starting state and skips the A1 3A entry, exactly as\n"
+          "     their updater does. It needs a backup file first, and taking one\n"
+          "     is read-only:\n"
+          "       ./build/egg-flash read-firmware backup.bin\n"
+          "       ./build/egg-flash flash <updater.exe> --backup backup.bin\n"
           "\n"
           "Settings are safe either way: the vault is on disk and restore is\n"
           "verified 21/21.\n");
@@ -446,13 +467,53 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
     if (saveAndVerify(rb.image, outPath) != 0) return 1;
     std::printf("saved      %s, re-read and byte-identical\n", outPath.c_str());
     std::printf(
+      "\nTHIS FILE IS THE BACKUP A FLASH REQUIRES (§4.2). Pass it with:\n"
+      "  ./build/egg-flash flash <updater.exe> --backup %s\n"
+      "The flash CHECKS it and takes no read-back of its own, so that run sends\n"
+      "exactly the vendor's byte stream and nothing else.\n"
       "\nCompare it against the image the updater would write:\n"
       "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
       "  cmp %s /tmp/fw140.bin\n"
       "A match proves the block arithmetic of §3.8 AND that the application is\n"
       "intact. A mismatch is worth understanding BEFORE anything is written.\n",
-      outPath.c_str());
+      outPath.c_str(), outPath.c_str());
     return 0;
+}
+
+// The backup is CHECKED here, never taken. the owner's call, 2026-09-05: the
+// read-back used to run inside the flash, which meant 65 A0 07 frames went out
+// before A0 03 -- something the vendor never does, inserted into the one
+// sequence we have a capture of. It now comes from a separate `read-firmware`
+// run, so the flash run puts exactly the vendor's byte stream on the wire.
+//
+// The tradeoff, stated rather than hidden: a backup taken in an earlier session
+// could in principle be stale. Firmware does not change on its own, so the only
+// way to make it stale is to flash between the two runs -- which is deliberate,
+// not accidental. The file's sha256 is printed here and by `read-firmware`, so
+// the two runs can be confirmed to be talking about the same bytes.
+//
+// This runs BEFORE A1 3A. A refusal here must not leave the mouse latched in a
+// bootloader it was put into for a flash that then did not happen.
+static bool checkBackup(const std::string& path, const Image& img) {
+    // The DECISION is egg::fw::checkBackupFile, in the library, where
+    // Tests/mutants.sh can plant bugs in it. Everything here is presentation.
+    const BackupCheck bc = checkBackupFile(path);
+    if (!bc.ok) {
+        std::printf("\nREFUSED: %s.\n", bc.reason.c_str());
+        std::printf("§4.2 forbids erasing without a saved copy of what is being\n"
+                    "erased. Take one first -- it is read-only and sends no write\n"
+                    "of any kind:\n"
+                    "  ./build/egg-flash read-firmware %s\n",
+                    path.empty() ? "device-firmware.bin" : path.c_str());
+        return false;
+    }
+    std::printf("\nbackup     %s\n", path.c_str());
+    std::printf("           %zu bytes, sha256 %s\n", bc.size, bc.sha256.c_str());
+    if (bc.sha256 == img.sha256())
+        std::printf("           identical to the image about to be written: this\n"
+                    "           is a re-flash of what is already there. The vendor\n"
+                    "           does this too (capture 09-flash-again).\n");
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +536,6 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
         std::printf(
           "\nWHAT WOULD HAPPEN, in order:\n"
           "  A1 3A  enter the bootloader, the vendor's own way (§4.2b)\n"
-          "  A0 07  read all 65 blocks back and save them  <-- your undo\n"
           "  A0 03  erase and declare %zu blocks, checksum 0x%08x  <-- POINT OF NO RETURN\n"
           "  A0 06  write block, then A0 07 read it back and compare, x%zu\n"
           "  A1 08  whole-image checksum, compared against the host's\n"
@@ -484,6 +544,13 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
           "         Restore them afterwards with `egg-config restore`; that path\n"
           "         is verified 21/21. This command refuses to run at all if no\n"
           "         settings undo exists.\n"
+          "\nIF THE MOUSE IS ALREADY IN THE BOOTLOADER, the A1 3A above is\n"
+          "SKIPPED and the other 134 frames are sent unchanged. The vendor does\n"
+          "the same -- their updater treats a 0x1977 device as a supported\n"
+          "starting state (§5.1a). The token still covers all 135 frames, because\n"
+          "it identifies the PLAN and must be reviewable before the mouse is in\n"
+          "any particular mode; the preflight line below says which case you are\n"
+          "in, and it is printed before anything is sent.\n"
           "\nA1 3A LATCHES. Once it is sent, a power cycle will NOT return the\n"
           "mouse to normal -- only a completed flash will. Everything that can\n"
           "fail is checked BEFORE it is sent, so the latched window is the flash\n"
@@ -493,14 +560,50 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
           "\nAfter A0 03 this tool DOES NOT STOP. No cancel, no timeout that gives\n"
           "up: with the application erased, exiting cleanly guarantees the bad\n"
           "outcome. It retries, reconnects, and keeps driving to a verified image.\n"
-          "\nBefore any of it, the current application region is read back with\n"
-          "A0 07 and saved, and the flash is abandoned if that fails (§4.2).\n"
+          "\nThis is EXACTLY the vendor's byte stream, in their order, with nothing\n"
+          "added -- the golden_vendor test diffs it against Endgame's own capture\n"
+          "of this mouse being flashed, and that is what makes the claim checkable\n"
+          "rather than asserted.\n"
+          "\nA BACKUP MUST ALREADY EXIST (§4.2). Take it in its own run, which is\n"
+          "read-only and sends no write:\n"
+          "  ./build/egg-flash read-firmware <file>\n"
+          "then pass it here with --backup <file>. It is checked, not taken, so\n"
+          "that this run inserts nothing into their sequence.\n"
           "\nTo proceed:\n"
-          "  ./build/egg-flash flash <updater.exe> --confirm %s\n"
+          "  ./build/egg-flash flash <updater.exe> --backup <file> --confirm %s\n"
           "\nThat token is SHA-256 over the exact frames listed above. Change the\n"
           "image and it changes, so an approval cannot outlive what it approved.\n",
           img.blockCount(), img.checksum(), img.blockCount(), token.c_str());
-        reportSettingsUndo(vaultPath);
+        // NOT another reportSettingsUndo() here. main() already printed it
+        // before the plan and the gate below prints it again on the way to
+        // deciding; a third copy is noise, and noise is how a real warning
+        // stops being read.
+    }
+
+    // THE HOST-SIDE CHECKS COME FIRST, ahead of even looking at the device.
+    //
+    // Not cosmetic. Two of these three refusals -- the settings undo and the
+    // backup -- are decisions about files sitting on this machine, and putting
+    // them ahead of enumeration means they can be exercised, and regression-
+    // tested, with no mouse plugged in at all. Tests/test_flash_backup.sh does
+    // exactly that. A guard that only runs when the hardware is present is a
+    // guard nothing checks.
+    //
+    // §4.2b: they are all before A1 3A, which latches.
+
+    // A1 13 is in the plan, so this flash WILL reset settings. §4.2's "never
+    // erase without a saved copy" is not specific to firmware: refuse rather
+    // than warn. reportSettingsUndo already prints where to get one.
+    if (!reportSettingsUndo(vaultPath)) {
+        std::printf("\nREFUSED: this flash ends with A1 13 (factory reset) and\n"
+                    "there is no settings undo. Run `egg-config read` first.\n"
+                    "NOTHING WAS SENT.\n");
+        return 1;
+    }
+
+    if (!checkBackup(backupPath, img)) {
+        std::printf("NOTHING WAS SENT.\n");
+        return 1;
     }
 
     // EVERYTHING THAT CAN FAIL HAPPENS BEFORE A1 3A IS SENT. §4.2b: the entry
@@ -525,15 +628,6 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     std::printf(fromApp ? "  -> ready. Will enter the bootloader with A1 3A.\n"
                         : "  -> ready. Already in the bootloader; no entry needed.\n");
 
-    // A1 13 is in the plan, so this flash WILL reset settings. §4.2's "never
-    // erase without a saved copy" is not specific to firmware: refuse rather
-    // than warn. reportSettingsUndo already prints where to get one.
-    if (!reportSettingsUndo(vaultPath)) {
-        std::printf("\nREFUSED: this flash ends with A1 13 (factory reset) and\n"
-                    "there is no settings undo. Run `egg-config read` first.\n"
-                    "NOTHING WAS SENT.\n");
-        return 1;
-    }
 
     if (confirmArg.empty()) return 2;
 
@@ -548,7 +642,7 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
 
     // ---- The entry. The vendor's own, and the plan's first frame. ---------
     if (fromApp) {
-        std::printf("\n[1/5] entering the bootloader (A1 3A)\n");
+        std::printf("\n[1/4] entering the bootloader (A1 3A)\n");
         auto appDev = egg::Device::open(egg::kProductIdApplication, log);
         if (!appDev) {
             std::printf("REFUSED: could not open the application device.\n"
@@ -599,32 +693,8 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
         return 1;
     }
 
-    // ---- The backup. §4.2: no A0 03 until this has succeeded. -------------
-    std::printf("\n[2/5] reading the current application region back (A0 07, read-only)\n");
-    const ReadBack rb = readApplicationRegion(*link);
-    if (!rb.ok) {
-        std::printf("\nABORTED after %zu of %zu blocks: %s\n"
-                    "NOTHING HAS BEEN ERASED OR WRITTEN. §4.2 forbids erasing\n"
-                    "without a saved copy, and there is no saved copy.\n",
-                    rb.blocksRead, kBlockCount, rb.error.c_str());
-        return 1;
-    }
-    if (saveAndVerify(rb.image, backupPath) != 0) {
-        std::printf("NOTHING HAS BEEN ERASED OR WRITTEN.\n");
-        return 1;
-    }
-    std::printf("      saved %s (%zu bytes), re-read and byte-identical\n",
-                backupPath.c_str(), rb.image.size());
-    const std::string beforeSha = sha256Hex(rb.image.data(), rb.image.size());
-    std::printf("      sha256 %s\n", beforeSha.c_str());
-    if (beforeSha == img.sha256()) {
-        std::printf("      NOTE: the device already holds this exact image.\n"
-                    "      Re-flashing it is a no-op the vendor also performs\n"
-                    "      (capture 09-flash-again is exactly that, and it worked).\n");
-    }
-
     // ---- Preflight proper. Any failure aborts and nothing has changed. ----
-    std::printf("\n[3/5] preflight\n");
+    std::printf("\n[2/4] preflight\n");
     std::string err;
     if (!preflight(*link, img, err)) {
         std::printf("\nABORTED: %s\nNOTHING HAS BEEN ERASED OR WRITTEN.\n", err.c_str());
@@ -633,7 +703,7 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     std::printf("      image, block range and a benign round trip all pass\n");
 
     // ---- The point of no return. ------------------------------------------
-    std::printf("\n[4/5] writing. FROM HERE THIS TOOL DOES NOT STOP.\n");
+    std::printf("\n[3/4] writing. FROM HERE THIS TOOL DOES NOT STOP.\n");
     std::fflush(stdout);
     const Progress p = driveToVerifiedImage(*link, img);
 
@@ -644,13 +714,13 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
                 p.blocksWritten, p.blocksVerified, p.rewrites, p.reconnects,
                 p.sendFailures, p.imageVerified ? "MATCHED" : "not matched",
                 p.completeAcked ? "yes" : "no");
-    // ---- [5/5] The vendor's own tail: wait for 0x1978, then A1 13. --------
+    // ---- [4/4] The vendor's own tail: wait for 0x1978, then A1 13. --------
     //
     // §5.4 steps 6-7. The bootloader link is finished with; A1 13 goes to the
     // APPLICATION device, which does not exist yet at this point. The vendor
     // waits with Sleep(800..16000) summing to 168 s; we poll, for the same
     // reason and with a comparable budget.
-    std::printf("\n[5/5] waiting for the application to come back\n");
+    std::printf("\n[4/4] waiting for the application to come back\n");
     SeenDevice appAgain{};
     bool back = false;
     for (unsigned waited = 0; waited <= kPostFlashWaitMs; waited += 100) {
@@ -767,18 +837,11 @@ int main(int argc, char** argv) {
     if (verb == "image") return 0;
 
     if (verb == "flash") {
-        std::string bp = backupPath;
-        if (bp.empty()) {
-            // Timestamped by default so a second run cannot silently overwrite
-            // the first run's backup -- which is the one taken when the device
-            // still held a working image.
-            char stamp[64];
-            const std::time_t t = std::time(nullptr);
-            std::strftime(stamp, sizeof stamp, "device-firmware-%Y%m%d-%H%M%S.bin",
-                          std::localtime(&t));
-            bp = stamp;
-        }
-        return cmdFlash(img, vaultPath, confirmArg, bp, verbose);
+        // No default path. When this command TOOK the backup a generated name
+        // was right; now that it CHECKS one, inventing a name would either
+        // refuse against a file the user never named or, worse, silently accept
+        // an unrelated file that happened to be sitting there.
+        return cmdFlash(img, vaultPath, confirmArg, backupPath, verbose);
     }
 
     // "stream" prints every frame in full, one per line, so the whole outbound

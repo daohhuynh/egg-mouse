@@ -322,11 +322,60 @@ mutate kill "approval token ignores the image bytes" "$FP" \
 '    for (const auto& f : frames)
         all.insert(all.end(), f.begin(), f.end());|||    all = frames.front();  // MUTANT'
 
-# §4.2b: A1 3A latches and is not to be sent. If it ever reappears in the plan,
-# the token changes AND a test asserts its absence directly.
-mutate kill "the plan re-introduces the A1 3A entry command" "$FP" \
+# §4.2b as revised 2026-09-05: the plan opens with EXACTLY ONE A1 3A, because
+# that is what the vendor's capture opens with. A second one is not a harmless
+# repeat -- it would be sent to a device already in the bootloader, an
+# interaction nothing has ever observed, and it breaks the byte-for-byte match
+# with the capture that is the whole basis for trusting this sequence.
+mutate kill "the plan sends A1 3A twice" "$FP" \
 '    out.push_back(bootloaderStart(|||    out.push_back(enterBootloader());  // MUTANT
     out.push_back(bootloaderStart('
+
+# ---- The backup gate. -----------------------------------------------------
+#
+# These matter more than their size suggests. `flash` used to guarantee §4.2 by
+# READING the application region out immediately before erasing it; on
+# 2026-09-05 that was replaced by checking a file a previous run wrote. A check
+# that stands in for a mechanism is only as good as the tests on it, and none of
+# these failures is visible in the byte stream -- the flash proceeds and looks
+# exactly right.
+
+# The +1 read is the whole reason checkBackupFile allocates kFull+1. Asking for
+# exactly kFull bytes makes a too-long file pass by silent truncation, which is
+# how a config dump, a firmware image for another product, or a concatenation
+# gets accepted as a backup.
+mutate kill "backup accepts a file that is too long, by truncating it" "$FP" \
+'    std::vector<std::uint8_t> buf(kBlockCount * kBlockSize + 1);|||    std::vector<std::uint8_t> buf(kBlockCount * kBlockSize);  // MUTANT'
+
+mutate kill "backup accepts anything at least a full image long" "$FP" \
+'    if (got != kBlockCount * kBlockSize) {|||    if (got < kBlockCount * kBlockSize) {  // MUTANT'
+
+# A right-sized file of one repeated byte is what a read loop that returned
+# nothing leaves on disk. Accepting it means erasing with an undo that is 66560
+# copies of 0x00.
+mutate kill "backup skips the failed-read check entirely" "$FP" \
+'    if (!varied) {|||    if (false) {  // MUTANT'
+
+# Scanning only the head passes a file whose first bytes happen to differ, and
+# -- the direction that matters -- REJECTS a real backup whose first block is
+# uniform. A false refusal before an erase is safe, but it is still wrong, and
+# the test pins the boundary at the very last byte for exactly this.
+mutate kill "backup's failed-read scan gives up after 16 bytes" "$FP" \
+'    for (std::size_t i = 1; i < buf.size(); ++i)
+        if (buf[i] != buf[0]) { varied = true; break; }|||    for (std::size_t i = 1; i < 16; ++i)  // MUTANT
+        if (buf[i] != buf[0]) { varied = true; break; }'
+
+# The digest is what a human compares between the read-firmware run and the
+# flash run to confirm they are talking about the same file. One over the first
+# block only still changes when the first block changes, so it looks fine.
+mutate kill "backup digests only the first block" "$FP" \
+'    bc.sha256 = sha256Hex(buf.data(), buf.size());|||    bc.sha256 = sha256Hex(buf.data(), kBlockSize);  // MUTANT'
+
+mutate kill "backup reports ok before it has checked anything" "$FP" \
+'    BackupCheck bc;
+    if (path.empty()) {|||    BackupCheck bc;
+    bc.ok = true;  // MUTANT
+    if (path.empty()) {'
 
 mutate kill "whole-image sum shifted down two bytes" "$FC" \
 '    f[17] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);|||    f[15] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);  // MUTANT'

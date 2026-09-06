@@ -1,6 +1,7 @@
 #include "egg/FlashPlan.h"
 #include "egg/FlashCommands.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace egg::fw {
@@ -72,6 +73,48 @@ ReadBack readApplicationRegion(BootloaderLink& link) {
     }
     rb.ok = true;
     return rb;
+}
+
+BackupCheck checkBackupFile(const std::string& path) {
+    BackupCheck bc;
+    if (path.empty()) {
+        bc.reason = "no backup file was named";
+        return bc;
+    }
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        bc.reason = "cannot open " + path;
+        return bc;
+    }
+    // ONE BYTE MORE than a backup. Reading exactly kBlockCount*kBlockSize and
+    // checking the count would accept a file that is too LONG by silently
+    // taking its first 66560 bytes -- and a file of the wrong length is exactly
+    // the sign that it is not what the reader thinks it is.
+    std::vector<std::uint8_t> buf(kBlockCount * kBlockSize + 1);
+    const std::size_t got = std::fread(buf.data(), 1, buf.size(), f);
+    std::fclose(f);
+    bc.size = got;
+    if (got != kBlockCount * kBlockSize) {
+        bc.reason = path + " is " + std::to_string(got) + " bytes; a backup is exactly " +
+                    std::to_string(kBlockCount * kBlockSize);
+        return bc;
+    }
+    buf.resize(got);
+
+    // §4.1's "structurally plausible" applied to a file. A read loop that
+    // returned nothing but produced a right-sized buffer anyway leaves this.
+    bool varied = false;
+    for (std::size_t i = 1; i < buf.size(); ++i)
+        if (buf[i] != buf[0]) { varied = true; break; }
+    if (!varied) {
+        bc.reason = path + " is " + std::to_string(got) +
+                    " identical bytes (" + hex2(buf[0]) + "); that is a failed read";
+        return bc;
+    }
+
+    bc.sha256 = sha256Hex(buf.data(), buf.size());
+    bc.ok = true;
+    return bc;
 }
 
 std::vector<Frame> plannedFrames(const Image& img) {
