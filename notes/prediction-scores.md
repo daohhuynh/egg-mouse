@@ -449,3 +449,56 @@ Reproduce:
 ./build/egg-config read --save after-flash.bin
 ./build/egg-config diff ~/.egg-mouse-known-good.bin after-flash.bin
 ```
+
+---
+
+## §7.12, the keyboard-key modifier byte — 3/4, scored 2026-09-06
+
+Committed in `notes/config-protocol.md` §7.12 on 2026-09-05, from
+`FUN_00405180` alone, before `05-buttonmapping` was diffed. Scored against
+`windows-run/05-buttonmapping.pcapng` writes 9–11 (`log.txt` lines 10–12).
+
+| # | prediction | outcome |
+| --- | --- | --- |
+| 1 | modifier is `0x00` with nothing ticked | **HIT** |
+| 2 | modifier is `0x01` with CTRL | **HIT** |
+| 3 | CTRL+SHIFT is the bitwise OR, `0x03` | **HIT** — so it is a bitfield, not an enum |
+| 4 | the modifier lives in records `0x4e`–`0x51` (entry `+2`–`+5`) | **MISS** — it is at `+1` |
+
+Bonus, predicted in the same section and not numbered: `A` encodes as HID usage
+`0x04`, not `VK_A` `0x41`. **HIT.**
+
+**The miss is the useful part.** §7.12 reasoned that the keyboard path zeroes
+`obj[0x30+8k]` and `obj[0x32+8k]`, so the modifier had to be among the bytes
+those map to. True, and it never considered `+1`, because §7.3 had named `+1`
+"the button mask" and that name was reused as though it were a type. `+1` is
+discriminated on `+0`: mask for MOUSE, modifier for KEYBOARD, Consumer usage for
+MEDIA. A label learned from one action type concealed four others.
+
+Running tally of scored predictions: bootloader entry, factory reset (21/21),
+restore (21/21), post-Windows (7/7), read-firmware (1/2), §7.12 (3/4 + 1 bonus).
+
+---
+
+## §7.13, the button-action menu — 4/4 exact, scored 2026-09-06
+
+Committed in `notes/config-protocol.md` §7.13 on 2026-09-05 from **one UTF-16
+string run in cfg107** (`0x155cde`–`0x155e78`) plus one rule: submenu items are
+declared before the group name they belong to. Scored against
+`windows-run/screenshots/button-mapping{,-mouse,-CPI,-media}.png`, which the owner
+took before any of this was derived and was never told the expected answer
+(§6.2).
+
+| # | prediction | observed | outcome |
+| --- | --- | --- | --- |
+| 1 | five top-level groups | five | **HIT** |
+| 2 | `MOUSE`, `KEYBOARD KEY`, `CPI`, `MEDIA`, `DISABLE`, in that order | identical, in that order | **HIT** — including the order §7.13 flagged as its weakest clause |
+| 3 | MOUSE = LEFT CLICK, RIGHT CLICK, MIDDLE CLICK, FORWARD, BACK, SCROLL UP, SCROLL DOWN | identical, in order | **HIT** |
+| 4 | CPI = CPI LOOP, FIXED CPI; MEDIA = PLAY/PAUSE, NEXT, PREVIOUS, MUTE, VOLUME UP, VOLUME DOWN, BROWSER, EXPLORER | identical, in order | **HIT** |
+
+§7.13 explicitly hedged that "the string table's order is the order the items
+were declared, which is usually but not necessarily the order they are added to
+the menu." It was the declaration order, in all four menus, with no exceptions.
+
+**This is the cheapest correct prediction in the project** — a complete UI
+vocabulary, ordered, from a single string run and no device interaction at all.

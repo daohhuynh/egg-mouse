@@ -2343,3 +2343,168 @@ which is at least a shared vocabulary with the owner's observation.
 Meaning stays `[G]`. §1.3 preserves the bytes. The point of writing this down is
 that the next person to look at §7.3 will find the three-zone fact already
 weighed rather than arriving at it fresh and reading it as a solution.
+
+## 7.14 The button-mapping encoding, decoded from `05-buttonmapping`  [O]
+
+**The capture existed the whole time.** §7.11 ended "…is `[G]` until that
+capture lands", and §7.12 wrote a prediction to be scored "when
+`05-buttonmapping` is diffed". `windows-run/05-buttonmapping.pcapng` (30,768
+bytes) was uploaded with the rest of the run on 2026-09-05 and had never been
+diffed. It holds **12 `A0 11` writes**, and `windows-run/log.txt` lines 1–12
+label every one of them. This is the best-instrumented capture in the project:
+one labelled action per write, each moving 1–6 bytes.
+
+Recorded here as a lesson as much as a finding: two sections deferred work to
+evidence already sitting in the repo. **Before writing "`[G]` until X lands",
+check whether X has landed.**
+
+### The 12 writes, entry 3 (FORWARD, records `0x4c`–`0x52`)
+
+    log line                              +0 +1 +2 +3 +4 +5 +6
+     (baseline of this capture)           00 10 00 00 00 00 08
+     2  Forward -> MOUSE -> BACK          00 08 00 00 00 00 08
+     3  Forward -> MOUSE -> MIDDLE CLICK  00 04 00 00 00 00 08
+     4  Forward -> DISABLE                ff 00 00 00 00 00 08
+     5  Forward -> MEDIA -> VOLUME UP     20 e9 00 00 00 00 08
+     9  Forward -> CPI -> FIXED CPI 1600  0c 00 40 06 40 06 08
+    10  Forward -> KEYBOARD KEY, A        02 00 04 00 00 00 08
+    11  Forward -> KEYBOARD KEY, CTRL+A   02 01 04 00 00 00 08
+    12  Forward -> KEYBOARD KEY, C+S+A    02 03 04 00 00 00 08
+
+Lines 6 and 7 move entry 4 (BACK, `0x53`): `+1` `08`→`04`→`10`. **Line 6 was
+not refused** — the log flagged it as a possible refusal and it went through.
+Line 8 moves entry 6 (`0x61`): `01 01`→`ff 00`.
+
+### The field layout
+
+`+0` is an **action-type selector**; `+1` is a discriminated second byte whose
+meaning depends on `+0`; `+2`–`+5` are the payload; `+6` is the multiclick
+filter of §7.11, untouched by every one of these writes.
+
+| `+0` | action | `+1` | `+2`–`+5` | evidence |
+| --- | --- | --- | --- | --- |
+| `0x00` | MOUSE button | button mask | zero | `[O]` lines 2,3,6,7 |
+| `0x02` | KEYBOARD KEY | HID modifier byte | `+2` = HID keycode | `[O]` lines 10–12 |
+| `0x0c` | CPI → FIXED CPI | `0x00` | `+2..3` X, `+4..5` Y, u16 LE | `[O]` line 9 |
+| `0x20` | MEDIA | HID Consumer usage | zero | `[O]` line 5 |
+| `0xff` | DISABLE | `0x00` | zero | `[O]` lines 4, 8 |
+
+Mouse masks, all `[O]` from the baseline and the writes:
+`0x01` LEFT, `0x02` RIGHT, `0x04` MIDDLE, `0x08` BACK, `0x10` FORWARD.
+
+### Line 1 is left-handed mode, and it swaps two entries
+This capture's baseline differs from `01-baseline` in exactly one way: entries 0
+and 1 read `00 02` / `00 01` where `01-baseline` reads `00 01` / `00 02`. Line 1
+is "left-handed mode (clicked once)". **Left-handed mode is not a flag byte — it
+is implemented by swapping the LEFT and RIGHT entries' masks.** Nothing else in
+the record moves. Worth knowing before we expose the setting: there is no bit to
+toggle, and a naive "restore defaults" that rewrites masks would silently undo it.
+
+### §7.12's prediction, scored: values HIT, location MISS
+§7.12 predicted from `FUN_00405180` that the keyboard modifier is the standard
+USB HID modifier byte, with `0x00` / `0x01` / `0x03` on lines 10 / 11 / 12, and
+that `A` would be HID usage `0x04` rather than `VK_A` `0x41`.
+
+- modifier `0x00`, `0x01`, `0x03` — **HIT**, all three, and `0x03` is the
+  bitwise OR of the CTRL and SHIFT cases, so the field is a bitfield and
+  unobserved combinations are derivable rather than merely unobserved.
+- keycode `0x04` for `A` — **HIT**. It is HID usage, not a virtual-key code.
+- **MISS on location.** §7.12 placed the modifier "somewhere in records
+  `0x4e`–`0x51`", i.e. entry `+2`–`+5`. It is at `+1`. The reasoning was that
+  `obj[0x30+8k]` and `obj[0x32+8k]` are zeroed on that path, which is true and
+  was the wrong inference: `+1` is zeroed on that path too and was not
+  considered, because §7.3 had already labelled `+1` "the mask" and that label
+  was carried forward as though it were type information. **A field's meaning is
+  conditional on `+0`; naming it from one action type hid the other four.**
+
+`0xe9` is HID Consumer Page **Volume Increment**. Like the modifier byte, this
+is an external published standard matching on the nose, which is evidence of a
+different and stronger kind than the vendor's bytes corroborating themselves.
+
+### What is still `[G]`, stated precisely
+1. **`+0 = 0x09`**, entry 5's default (`09 f1`). Unobserved. Entry 5 is the only
+   one of the eight never touched by any capture, and no line of any log names
+   it. The 8 entries are LEFT, RIGHT, MIDDLE, FORWARD, BACK, **?5**, WHEEL UP
+   (line 8 proves entry 6 is Wheel Up), and presumptively WHEEL DOWN.
+2. **CPI LOOP's `+0`.** §7.13's menu has two CPI items; only FIXED CPI was
+   exercised. A tempting reading is that `0x09` is CPI LOOP and entry 5 is the
+   underside CPI button carrying it as a default — coherent, and `[G]`.
+3. **`+0 = 0x01`** (entries 6 and 7, `01 01` and `01 ff`). Reads naturally as
+   scroll with a signed delta in `+1`, which would make it MOUSE → SCROLL
+   UP/DOWN. Never written by any capture: line 8 set Wheel Up to DISABLE rather
+   than assigning a scroll to a button.
+4. **Seven of the eight MEDIA usages.** Only VOLUME UP was captured. The obvious
+   HID Consumer values are guessable, but note that §7.13's menu includes
+   BROWSER and EXPLORER, whose HID Consumer usages (`0x223`, `0x194`) **do not
+   fit in `+1`**. So either those two use `+2`–`+3`, or the encoding is not a
+   raw usage after all. **This is a real hole, not a formality.**
+5. **The full keycode set.** One datapoint (`A` = `0x04`) fixes the standard;
+   which keys the dialog actually offers is not derived.
+6. **`+2`–`+5` for MOUSE, MEDIA and DISABLE.** Zero in every observation. Whether
+   the firmware ignores them or the vendor merely never sets them is untested.
+
+### Search for the vendor's menu→byte table: not found, and by what method
+`0xe9`, `0xea`, `0xcd` appear **nowhere in cfg107's `.text` as immediates**
+(`objdump -d`, `$0x..` operands). The raw file contains no byte run
+`cd b5 b6 e2 e9 ea` nor its 16-bit-LE form, in either the §7.13 menu order or
+adjacent-pair form, and no `0x20e9`/`0xe920` literal.
+
+Per §1.2a this is **not** a claim that no table exists. The method sees only
+immediates and those two specific byte orders; it cannot see a table built at
+runtime, one in a different order, one with a stride or a bias applied, or
+values reached through a menu-ID arithmetic transform. The staging globals are
+identified — `0x57f377` → obj `+0x2e` (entry 0 `+0`), `0x57f378` → `+0x2f`,
+`0x57f379`/`0x57f37a` → the `+2`/`+3` word, all read at `0x403e8b`–`0x403eb8`
+— but no absolute write to any of them exists, so the UI reaches them through a
+computed pointer. **Finding the writer is the next step and is not done.**
+
+## 7.15 The Button Mapping page exposes SIX rows, not eight  [O]
+
+`windows-run/screenshots/button-mapping.png`, read 2026-09-06. The page lists:
+
+    Right Button    RIGHT CLICK
+    Middle Button   MIDDLE CLICK
+    Forward Button  FORWARD
+    Back Button     BACK
+    Wheel Up        SCROLL UP
+    Wheel Down      SCROLL DOWN
+
+plus a `Left-handed Mode` checkbox. **There is no Left Button row.** The record
+has eight entries; the UI exposes six of them. The two it does not expose are
+entry 0 (mask `0x01`, LEFT) and entry 5 (`09 f1`).
+
+That resolves most of §7.14's open list:
+
+### `+0 = 0x01` is SCROLL, and `+1` is a signed step  — now `[O]`
+Entry 6 holds `01 01` and its row reads **SCROLL UP**. Entry 7 holds `01 ff` and
+its row reads **SCROLL DOWN**. `0xff` is `-1`. §7.14 listed this as `[G]`
+("reads naturally as scroll with a signed delta"); the vendor's own UI labels
+the two bytes, so it is now observed rather than guessed. `+1` is therefore
+discriminated three ways — mask under `0x00`, modifier under `0x02`, Consumer
+usage under `0x20`, signed step under `0x01`.
+
+### Entry 5 is a button the software cannot reach  — still `[G]`, and now bounded
+Six rows for eight entries, with LEFT accounted for. Entry 5 (`09 f1`, action
+type `0x09`, never written by any capture, named by no menu row) is a control
+the config tool does not expose. `0x09` is the one plausible home for **CPI
+LOOP**, the only §7.13 menu item with no observed byte — but nothing observed
+connects them, and "the only unexplained value and the only unexplained item
+must be each other" is precisely the reasoning §1.2a exists to stop. It stays
+`[G]`, and §1.3 keeps its bytes.
+
+### KEYBOARD KEY captures a live keypress; it is not a list  — `[O]`
+`button-mapping-keyboard-key-popup.png`: one field labelled `Enter a`, showing
+the last key pressed (`Left Shift` in the shot), plus the four ticks of §7.12.
+So the offered key set is whatever the keyboard produces, and §7.14's open item
+6 ("which keys the dialog actually offers") is answered — all of them. What we
+need is the published HID keyboard usage table, and `A` = `0x04` fixes that it
+*is* that table.
+
+### MEDIA's two long usages are a confirmed problem, not a hypothetical
+`button-mapping-media.png` shows all eight items including **BROWSER** and
+**EXPLORER**. §7.14 flagged that their HID Consumer usages (`0x223`, `0x194`)
+do not fit the single byte `+1` where VOLUME UP's `0xe9` was observed. The menu
+items are real, so the encoding question is real: either those two spill into
+`+2`–`+3`, or `+1` is an index into a vendor table rather than a raw usage, and
+VOLUME UP matching HID exactly is then a coincidence worth doubting. **No MEDIA
+value other than `0xe9` may be written until this is settled.**
