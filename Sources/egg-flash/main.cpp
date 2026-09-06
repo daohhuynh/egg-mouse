@@ -471,11 +471,17 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
       "  ./build/egg-flash flash <updater.exe> --backup %s\n"
       "The flash CHECKS it and takes no read-back of its own, so that run sends\n"
       "exactly the vendor's byte stream and nothing else.\n"
-      "\nCompare it against the image the updater would write:\n"
-      "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
-      "  cmp %s /tmp/fw140.bin\n"
+      "\nSCORE IT against the pre-registered predictions before drawing any\n"
+      "conclusion from it (§7). This extracts the reference image itself and\n"
+      "names the reading for whatever shape of mismatch comes back:\n"
+      "  python3 Tools/score-read-firmware.py %s\n"
       "A match proves the block arithmetic of §3.8 AND that the application is\n"
-      "intact. A mismatch is worth understanding BEFORE anything is written.\n",
+      "intact. A mismatch is worth understanding BEFORE anything is written --\n"
+      "notes/prediction-read-firmware.md §5 says what each shape means, written\n"
+      "down before the data existed so it cannot be reasoned backwards from.\n"
+      "\nOr compare against the reference directly:\n"
+      "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
+      "  cmp %s /tmp/fw140.bin\n",
       outPath.c_str(), outPath.c_str());
     return 0;
 }
