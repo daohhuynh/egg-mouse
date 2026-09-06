@@ -216,6 +216,24 @@ could never have shown a difference. `Log::frame` now takes the transport's
 actual `rc` and prints `got=N` whenever it differs from the buffer. The next
 read that shows `id=0xa1` will say whether `rc` moved with it.
 
+**First data from that instrument, same day.** Three exchanges during the
+factory reset, all with `id=0x00`:
+
+```
+<-- A1 12 read settings   len=1041  got=1040   id=0x00 b1=0x01
+<-- A1 13 factory reset   len=64    got=63     id=0x00 b1=0x01
+<-- A1 12 read settings   len=1041  got=1040   id=0x00 b1=0x01
+```
+
+**N−1 is now `[O]` on macOS for BOTH report sizes**, which it had never been —
+1040 against a 1041-byte report and 63 against 64, matching the two Windows
+capture files exactly. §2.1 derived this from cfg107's own code; the device has
+now said it directly, through a third API.
+
+The `0xa1` case did not recur in this run, so the question of whether `rc` moves
+with `buf[0]` is still open. It is no longer *unanswerable*, which was the
+point.
+
 ### 2.4 THE RECORD SURVIVES A POWER CYCLE UNTOUCHED  [O], 2026-09-05
 
 Read, unplug, wait, replug, read again: **all 1041 bytes identical**, vault

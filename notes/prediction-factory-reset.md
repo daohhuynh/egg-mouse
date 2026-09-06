@@ -66,3 +66,38 @@ Both are confirmed loadable offline (`Tests/test_undo_loadable.py`), and
 neither has been exercised against the device -- restore is the first
 1041-byte SET_REPORT this machine will ever send. The worst realistic case
 is settings lost and re-entered by hand or from Windows.
+
+---
+
+# SCORED: 21 / 21. CONFIRMED [O], 2026-09-05
+
+Run against the device after this file was committed. `git log` shows the
+prediction commit (`47f5959`) precedes the result, which is the only thing that
+makes the score mean anything.
+
+- **Acknowledged** after the 1100 ms wait: `<-- A1 13 factory reset  len=64
+  got=63 id=0x00 b1=0x01`.
+- **Exactly 21 payload bytes changed**, and every one took the tabulated value.
+  No byte outside the set moved.
+- **The device is now byte-identical to `10-postflash-baseline`** across all
+  1039 comparable bytes — the state Endgame's own updater left it in after its
+  own `a1 13`. Our reset and theirs produce the same record.
+- `egg-before-reset.bin` written, 1041 bytes, payload identical to the vault.
+
+`0x71` did not need its exemption: it moved `01 -> 00` exactly as tabulated, so
+the "firmware-dependent default" hedge was unnecessary here. That hedge remains
+correct about `01-baseline` vs `10-postflash`; it simply was not load-bearing.
+
+## What this closes
+
+**CLAUDE.md §4.1's gate.** "Implement factory reset first and confirm it works
+before any other write path." Confirmed — from a knowingly non-default state,
+against a reference produced by the vendor rather than by us, with the expected
+result written down first. The config write path is unlocked.
+
+## What it does not close
+
+The reset was verified by a read-back, which proves what the device holds NOW.
+Whether it survives a power cycle is untested, and §2.4's baseline says the
+record is stable across a replug when nobody writes — so that test is now
+meaningful and was not before.
