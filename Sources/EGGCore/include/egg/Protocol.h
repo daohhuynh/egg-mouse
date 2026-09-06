@@ -99,7 +99,12 @@ inline constexpr std::size_t kRecordLen = 0x73;   // 115
 // [D] The four record bytes the vendor's serializer never writes, so its frames
 // carry zeros there while the device reports 0x80 00 00 00. §7.4 -- the single
 // place where §4.1 read-modify-write and vendor-mimicry disagree on a wire byte.
-// UNRESOLVED, the owner's call. Named here so there is exactly one place to change.
+// DECIDED 2026-09-05: zero them, matching the vendor. The policy lives in
+// EGGConfigCore/ConfigRecord.h as kDefaultUnknownBytes, which is where the
+// reasoning and the reversal instructions are; this header only names the
+// range. (Said "UNRESOLVED, the owner's call" until 2026-09-06, months of commits
+// after the decision -- one decision described in three places is two places
+// too many, and both of the extras went stale.)
 inline constexpr std::size_t kRecordUnknownFirst = 0x01;
 inline constexpr std::size_t kRecordUnknownLast  = 0x04;
 

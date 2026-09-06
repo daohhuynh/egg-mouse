@@ -1109,6 +1109,68 @@ static void testMulticlick() {
     }());
 }
 
+// The defect this exists to prevent shipped once and survived a 14/14 replay
+// score, because every FIXED CPI entry ever captured has X == Y and a legal
+// value. So these assert the DOMAIN and the INDEPENDENCE as rules (§4.3),
+// never against a recorded example.
+static void testFixedCpi() {
+    std::printf("\nfixed-cpi (button payload, §7.31)\n");
+
+    ok("the domain is exactly 10..30000 by 10 -- NOT the CPI-stage grid", [] {
+        for (long v = -100; v <= 30500; ++v) {
+            const bool onGrid = (v >= 10 && v <= 30000 && v % 10 == 0);
+            if ((normaliseFixedCpi(v) == v) != onGrid) return false;
+        }
+        return true;
+    }());
+
+    ok("it differs from the stage grid exactly above 10000", [] {
+        // 10010 is legal here and illegal as a CPI stage. If these two ever
+        // agree everywhere, one of them has been pointed at the wrong dialog.
+        if (normaliseFixedCpi(10010) != 10010) return false;
+        if (normaliseCpi(10010) == 10010) return false;
+        bool differsSomewhere = false;
+        for (long v = 10; v <= 30000; v += 10)
+            if ((normaliseFixedCpi(v) == v) != (normaliseCpi(v) == v))
+                differsSomewhere = true;
+        return differsSomewhere;
+    }());
+
+    const ButtonAction* fx = findButtonAction("fixed-cpi");
+    ok("there is a fixed-cpi action to test", fx != nullptr);
+    if (!fx) return;
+
+    ok("the four values the old 50..26000 bound got wrong are all decided right",
+       [&] {
+        std::uint8_t e[kButtonEntryLen]; const char* err = nullptr;
+        // Legal, and the old code rejected them.
+        for (long v : {10L, 40L, 26010L, 30000L})
+            if (!encodeButtonEntry(*fx, v, v, 0, 0x00, e, &err)) return false;
+        // Illegal, and the old code accepted 1337.
+        for (long v : {5L, 1337L, 30010L, 0L, -10L})
+            if (encodeButtonEntry(*fx, v, v, 0, 0x00, e, &err)) return false;
+        return true;
+    }());
+
+    ok("X goes to +2 and Y to +4, independently (cfg107 0x407c7e/0x407ca0)", [&] {
+        std::uint8_t e[kButtonEntryLen]; const char* err = nullptr;
+        if (!encodeButtonEntry(*fx, 1600, 800, 0, 0x00, e, &err)) return false;
+        return e[2] == 0x40 && e[3] == 0x06     // 1600 LE
+            && e[4] == 0x20 && e[5] == 0x03;    // 800 LE  -- NOT a copy of X
+    }());
+
+    ok("an illegal Y is refused even when X is legal", [&] {
+        std::uint8_t e[kButtonEntryLen]; const char* err = nullptr;
+        return !encodeButtonEntry(*fx, 1600, 1337, 0, 0x00, e, &err);
+    }());
+
+    ok("+6 is still carried through untouched (§1.3)", [&] {
+        std::uint8_t e[kButtonEntryLen]; const char* err = nullptr;
+        if (!encodeButtonEntry(*fx, 1600, 1600, 0, 0x5a, e, &err)) return false;
+        return e[6] == 0x5a;
+    }());
+}
+
 int main() {
     std::printf("EGGConfigCore\n");
     testTable();
@@ -1121,6 +1183,7 @@ int main() {
     testHandedness();
     testMulticlick();
     testCapabilityGate();
+    testFixedCpi();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILURES" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

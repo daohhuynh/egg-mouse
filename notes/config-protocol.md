@@ -1382,16 +1382,28 @@ and the 0x81 from the capture, independently.
 
 Pushing `0x413db0`'s inline factory defaults (§7.2b) through this map predicts
 91 of the 115 record bytes — the other 24 come from object bytes the default
-writer never sets. Against `01-baseline.pcapng`, which is **the owner's own settings
-and not defaults**:
+writer never sets. Against `01-baseline.pcapng`:
 
 > **90 of 91 predicted bytes match the observed device record.**
 
-The single disagreement is record `0x71` (wire `0x81`): predicted `0x00`,
-observed `0x01`. It is the last non-zero byte in the whole record, it comes from
-object `0x2d`, and the honest reading is that **the owner had changed exactly one
-setting from factory default** — which `01b-reset.pcapng` will confirm or refute
-outright, since after a reset that byte must read `0x00`.
+The single disagreement is record `0x71` (wire `0x81`), predicted `0x00` and
+observed `0x01`.
+
+**Corrected 2026-09-06, and the original reading was wrong twice.** This
+paragraph used to call `01-baseline` "the owner's own settings and not defaults" and
+conclude that "the owner had changed exactly one setting from factory default",
+deferring to a capture named `01b-reset.pcapng` to settle it.
+
+1. `01-baseline` **is** the factory state. Diff its record against the post-`A1
+   13` record in `07-factory-reset.pcapng`: **0 differing bytes of 0x73.**
+   `config-wire-observed.md` §7 reaches the same conclusion from the
+   screenshots, 16 of 16.
+2. `01b-reset.pcapng` does not exist and never will; §1.1a quarantined the file
+   that scheduled it.
+3. So the refutation condition it named actually **fired** — after the reset
+   `0x71` still reads `0x01` — and the disagreement has a different cause
+   entirely, which §7.2c gives: cfg107's compiled-in value is the **1.10**
+   default, and this device was on **1.07** when the baseline was taken.
 
 Two things this is *not*. It is not a fit: the map was extracted before the
 comparison and no parameter was tuned. And it is not proof the *meanings* are
@@ -1404,8 +1416,9 @@ sets which byte.
 | --- | --- | --- | --- |
 | `0x0f`–`0x22` | `0x1f`–`0x32` | **four 5-byte RGB records**: `ff ff 00 01 01`, `00 00 ff 01 02`, `ff 00 00 01 03`, `00 ff 00 01 04` — yellow/blue/red/green, each followed by `0x01` and a **stage index 1..4** | structure `[O]`, meaning `[G]` |
 | `0x23`–`0x36` | `0x33`–`0x46` | **four 5-byte CPI records**, `flag, X lo, X hi, Y lo, Y hi`: 400/400, 800/800, 1600/1600, 3200/3200, each led by an `X≠Y` flag byte | `[D]` — **corrected §7.8** |
-| `0x37`–`0x6e` | `0x47`–`0x7e` | **eight 7-byte button records** (§7.11). Masks `01 02 04 10 08 f1 01 ff` at `+1`; the `0x08` at `+6` is the **multiclick filter**, default 8. Was written `0x37`–`0x6f` here, which is 57 bytes for 8×7=56 — corrected | structure `[D]`, roles of `+0` and `+2`..`+5` still `[G]` |
-| `0x70`–`0x72` | `0x80`–`0x82` | three trailing bytes. `0x70` is **Sensor Angle Tuning** (§7.9, `TBM_GETPOS`), `0x71` is **Force max Sensor fps** (§7.8) and is the byte the owner changed. Only `0x72` is still unattributed | `0x70`/`0x71` `[D]`, `0x72` `[G]` |
+| `0x37`–`0x6e` | `0x47`–`0x7e` | **eight 7-byte button records** (§7.11). `+0` is the action type and `+1` is **discriminated by `+0`** — a button mask for MOUSE, a signed step for SCROLL, `0x00` for FIXED CPI, `0xf1` for CPI LOOP (§7.14, §7.17); `+2`–`+5` are the payload; `+6` is the **multiclick filter**, default 8 | `[D]` throughout — §7.17 gives every action's `+0`/`+1` from an immediate, §7.31 the FIXED CPI payload |
+| `0x6f` | `0x7f` | **Sensor Glass Mode** (§7.25). It gates what `lod` means | `[D]`+`[O]` |
+| `0x70`–`0x72` | `0x80`–`0x82` | `0x70` **Sensor Angle Tuning** (§7.9, `TBM_GETPOS`), `0x71` **Force max Sensor fps** (§7.8), `0x72` a **UI acknowledgement** and not a mouse setting (§7.23) | all three `[D]` |
 
 **The RGB block resolves `wire-observed.md` §5.1**, which recorded four records
 "reading as RGB" but with a stride that would not close. The stride is 5 and the
@@ -1652,15 +1665,29 @@ chose to report, which is precisely what §1.3 exists to prevent. A plausible
 reading — `0x80` is a direction or status marker meaningful only device→host —
 is **[G]** and cannot justify either choice.
 
-**Recommendation: follow the vendor and zero them**, on the narrow grounds that
-the vendor's write path is the only write path observed to work, and these four
-bytes are the only ones where we would otherwise diverge from it. But this is
-not mine to settle and nothing is changed until the owner rules.
+**DECIDED 2026-09-05: follow the vendor and zero them.** The narrow grounds are
+that the vendor's write path is the only write path observed to work, and these
+four bytes are the only ones where we would otherwise diverge from it.
 
-**Until then `egg-config restore` preserves them** (current behaviour, §1.3's
-default) and must say so when it runs, so the divergence is never silent. The
-same four bytes are also the reason a future frame-by-frame diff of our output
-against a vendor capture will show a difference that is **expected, not a bug**.
+`kDefaultUnknownBytes = UnknownBytes::MatchVendor` in `ConfigRecord.h` is the
+one line that carries it, both arms are implemented, and
+`Tests/test_config_replay.py` scores each against the vendor's captured writes:
+**MatchVendor reproduces all of them across all 1024 payload bytes; Preserve
+differs at record `0x01` alone.** `--unknown-bytes preserve` reverses it per
+run. The header states what is given up if `0x01` turns out to be a persisted
+device-side bit, and what would upgrade the choice from a default to a
+derivation.
+
+*(Corrected 2026-09-06. This section, and `Protocol.h`, both still read
+"unresolved, the owner's call" and "until then `egg-config restore` preserves them"
+long after the code had stopped doing that. Three descriptions of one decision,
+two of them stale, on the single byte where our wire output can differ from the
+device's own report — so a reader trusting either would predict the wrong four
+bytes when diffing against a vendor capture, which is the very thing the next
+paragraph warns about.)*
+
+The same four bytes are the reason a frame-by-frame diff of our output against a
+vendor capture shows a difference that is **expected, not a bug**.
 
 ## 7.5 Record byte `0x05` is the polling rate, encoded as a divisor  [D]
 
@@ -2158,12 +2185,23 @@ the expensive way. It was not — but the claim was only ever checked against
 functions reachable from APPLY, and this path is not one of them.
 
 ### What it changes
-1. ~~**`log.txt` gains section 06**, four radio-button clicks with no APPLY, so
-   the bypass gets an isolated capture instead of arriving as noise at the end
-   of a long section.~~ **Moot as of 2026-09-06:** the log is quarantined
-   (§1.1a) and no section 06 capture was ever taken. The bypass is still real
-   and still `[D]`; what is missing is an isolated capture of it, and that needs
-   a new capture run.
+1. **The isolated capture EXISTS — `windows-run/06-cpi-stage.pcapng`.** This
+   entry said "no section 06 capture was ever taken" and asked for a new capture
+   run. Wrong, and the file was on disk when it was written. Decoded with the
+   repo's own reader, it holds one `A1 12` baseline and then four `A0 11` writes
+   whose per-write diffs are:
+
+   | write | record bytes that changed |
+   | --- | --- |
+   | 1 | `0x0d` `1`→`0`, plus `0x01` `0x80`→`0x00` (§7.4's zeroing) |
+   | 2 | `0x0d` `0`→`1` |
+   | 3 | `0x0d` `1`→`2` |
+   | 4 | `0x0d` `2`→`3` |
+
+   Four radio clicks, one byte moving, nothing else — exactly the isolated
+   observation this entry asked for. §7.19.5 in this same file already counted
+   `06` among the captures it decodes, so the file contradicted itself.
+   `[O]`, and the bypass is `[D]` as it always was.
 2. **`fieldmap.py` must not assume a diff implies an APPLY.** It attributes by
    log line, not by APPLY count, so it is already correct — but the reasoning
    was accidental and is now deliberate.
@@ -2270,13 +2308,18 @@ filter, default 8 in all eight entries.
 
 Column `+1` is `01 02 04 10 08 f1 01 ff`, the mask set §7.3 already had. Column
 `+6` is `08` throughout, the multiclick default. Entries 5–7 differ from the
-first five in `+0` as well as in mask, and have no slider on the Buttons page;
-`05-buttonmapping` covers wheel up and wheel down, which is the obvious
-candidate for two of the three and is **`[G]` until that capture lands**.
+first five in `+0` as well, and have no slider on the Buttons page.
+
+*(Both hedges in this paragraph have since been settled and are corrected here
+2026-05-06 rather than left to be re-read as open. "`[G]` until that capture
+lands": `05-buttonmapping` did land, and §7.15 has entries 6 and 7 `[O]` as
+SCROLL UP / SCROLL DOWN, with `+1` a signed step rather than a mask. Entry 5 is
+CPI LOOP's `09 f1`, `[D]` at cfg107 `0x407ccf`/`0x407cdd` — §7.17.)*
 
 The block ends at `0x6e`, not `0x6f`: eight entries of seven is 56 bytes from
-`0x37`. Record `0x6f` comes from object `0x2b`, is `0x00` in the baseline, and
-is **unattributed**.
+`0x37`. **Record `0x6f` is Sensor Glass Mode** — object `0x2b`, `0x00` in the
+baseline, `[D]`+`[O]` in §7.25, and the byte that gates what `lod` means. It was
+called "unattributed" here until 2026-09-06.
 
 ### An independent confirmation of §7.8's CPI phase correction
 Record `0x35`/`0x36` read `80 0c` in the baseline, and `0x0c80` is 3200 — CPI
@@ -3424,16 +3467,31 @@ make ninety unrelated bytes line up.**
 **And the one disagreement is already known from a different route.** Record
 `0x71` is `force-max-fps`, and it is the single factory default firmware 1.10
 changed (working-memory, derived by comparing `01-baseline` with
-`10-postflash-baseline`). cfg107 predates that firmware, so its compiled-in
-default is the OLD value. The host defaults are not stale *in general* — they are
-stale in exactly one byte, and it is the byte we already knew had moved.
+`10-postflash-baseline`).
+
+**The direction here was BACKWARDS until 2026-09-06, and the bytes settle it.**
+This paragraph used to read "cfg107 predates that firmware, so its compiled-in
+default is the OLD value", which inverts the fact:
+
+| | record `0x71` |
+| --- | --- |
+| cfg107's compiled-in default, object `0x2d` via `0x413e3e movl $0x0,0x2b(%eax)` | **`0x00`** |
+| the device on firmware **1.07** (`01-baseline`, both reads in `07-factory-reset`) | `0x01` |
+| the device on firmware **1.10** (`10-postflash-baseline`) | **`0x00`** |
+
+So cfg107's compiled-in value **disagrees with 1.07 and agrees with 1.10.** The
+config tool's build date does not track the firmware's defaults, and assuming it
+did is what produced the inversion. `Tests/test_defaults.py` computed this
+correctly all along (host `0x00` vs the 1.07 device's `0x01`); only the prose
+reading it was wrong.
 
 Two consequences worth stating:
 
 1. **`0x413db0` is a usable reference for what a factory record should contain**,
-   on firmware 1.07. On 1.10 it is right everywhere but `0x71`. It is not a
-   substitute for reading the device (§7.2b's point stands) but it is a strong
-   cross-check on any claim about a default.
+   and it is exact on **1.10**, the firmware actually on the mouse. On 1.07 it is
+   right everywhere but `0x71`. It is not a substitute for reading the device
+   (§7.2b's point stands) but it is a strong cross-check on any claim about a
+   default.
 2. **It is a source of new field names.** Everything it writes lands on a record
    byte §7.3 maps, and it names defaults for bytes nothing else has: record
    `0x00`, `0x07`, `0x6f` and `0x72` are all `0` here.
@@ -3496,10 +3554,61 @@ ever move these bytes, which is exactly what 82 records show.
 
 **Corroborated from a second direction, 2026-09-06, across all four tools.**
 `Tools/ghidra-export/ctlchain.py` resolves every control on dialog 137 in all
-four config tools, and **on dialog 137 every one of them has a DDX binding and
-zero message-map entries** — not a dead handler like §7.21's `retl`, simply no
-entry. So it is not merely that the page is never created: even reached, no
-control on it is wired to anything.  [D]
+four config tools, and every one it resolves has a DDX binding and no
+message-map entry.
+
+> **RETRACTED THE SAME DAY, and this is the §1.2b failure verbatim.** This
+> paragraph used to end "**zero message-map entries** ... even reached, no
+> control on it is wired to anything." **That is false.** Dialog 137's class has
+> a message map and it holds exactly one entry:
+>
+> ```
+> cfg107  GetMessageMap 0x405930 -> movl $0x556ca8,%eax ; retl
+>         AFX_MSGMAP@0x556ca8 = { pfnGetBaseMap 0x414b3c, lpEntries 0x556c78 }
+>         entry[0]  msg=273 (WM_COMMAND)  code=0 (BN_CLICKED)
+>                   id=1043  last=1043  sig=57  pfn=0x00405940
+>         entry[1]  END
+> ```
+>
+> Control **1043 is `Apply led settings`**, a PUSHBUTTON on dialog 137
+> (`dlgdump.py cfg107`). **A pushbutton has no DDX member, so `ctlchain` never
+> prints it** — and its silence was read as absence. `ctlchain.py`'s own
+> docstring says not to: "a control this prints nothing for is a control THIS
+> METHOD did not resolve. It is never evidence that no handler exists."
+>
+> Same map in all four: cfg100 `0x5b425c`→`0x5b4264`, handler `0x406b50`;
+> cfg101 `0x5570a8`→`0x557078`, handler `0x4058a0`; cfg104 `0x555ca8`→
+> `0x555c78`, handler `0x4058a0`.
+>
+> **The conclusion is unchanged and its reason is not.** The tab-creation run
+> makes only 135/140/153/139 — `0x4133ff` `pushl $0x87`, `0x41342b` `$0x8c`,
+> `0x413457` `$0x99`, `0x413483` `$0x8b`; **137 (`0x89`) is absent** — so the
+> handler cannot fire in a shipped build. That single fact carries the whole
+> claim. The "two independent negatives" framing was worth exactly one of them.
+
+### What the LED handler actually assembles — and why it argues AGAINST this block
+
+`0x00405940` is worth reading, because nothing had. It is `UpdateData(TRUE)`,
+then `CB_GETCURSEL` (`0x147`) on the `LED effect` combo at member `+0x158`, then
+`BM_GETCHECK` (`0xf0`) on members `+0x1cc`, `+0x240`, `+0x2b4` — `Scroll led`,
+`Logo led`, `DPI led` — OR-ing a 3-bit mask (`0x40599d orb $0x2`, `0x4059b6 orb
+$0x4`). It then reads the R/G/B DDX members `+0x308`, `+0x30c`, `+0x310` and
+builds **11 bytes** at `dlg+0xb8` (`0x4059cf`–`0x405a10`):
+
+    [effect+1] [3-bit lamp mask] [R,G,B] [R,G,B] [R,G,B]
+
+**Three triples, and all three are the SAME R, G, B** — one colour applied to
+three named lamps. Records `0x0f`–`0x22` are **four** triples of **different**
+colours, each followed by `01` and an index, at stride 5. The two shapes do not
+correspond, which is evidence — not proof — that this block is **not** dialog
+137's payload at all. Neither the old note nor the audit that found the handler
+had weighed it.
+
+*(`0x405a18 calll *0x57f29c` is an indirect call through a pointer in `.data`'s
+zero-filled tail — `.data` paddr `0x171200` raw `0x5e00`, vaddr `0x573000`, so
+`0x57f29c` is past the raw size. The only 4-byte occurrence of `0x57f29c` in the
+file is that call operand. Per §1.2a: "not found by an absolute-literal scan",
+which does not exclude a register-relative store.)*
 
 **This closes `gui-surface.md`'s own stated blind spot, which is why it is
 worth having rather than being a second opinion.** That file's method is a
@@ -3678,9 +3787,18 @@ is 1.07, and 1.07 cannot set the byte. That is a fact about the *tool*, not
 about the mouse — an OP1 8k v2 configured once with 1.04 would carry whatever
 that checkbox was left at, and `factory-reset` is what clears it.
 
-`0x413db0`, cfg107's compiled-in default writer, leaves object `+0x2b`
-at the caller's zero fill — consistent, and §7.2c's cross-check therefore says
-nothing about it either way.
+**Corrected 2026-09-06.** This said `0x413db0`, cfg107's compiled-in default
+writer, "leaves object `+0x2b` at the caller's zero fill", so that §7.2c's
+cross-check "says nothing about it either way". It writes it explicitly:
+
+    413e3e  c7 40 2b 00 00 00 00   movl $0x0, 0x2b(%eax)
+
+one 32-bit store covering object `0x2b`–`0x2e`, which §7.2b already lists. So
+the default for record `0x6f` is `0` from the binary as well as from the device,
+§7.2c's cross-check **does** cover it, and the two agree. §7.2c said as much
+ninety lines earlier — "it names defaults for bytes nothing else has: record
+`0x00`, `0x07`, `0x6f` and `0x72` are all `0` here" — and this paragraph
+contradicted it in the same file.
 
 ### Why `glass-mode` is derived and still NOT offered
 
@@ -3924,3 +4042,88 @@ handles rather than the dialog's own map. What it does cover is every entry in
 every `AFX_MSGMAP` `ctlchain.py` resolves, in all four config tools.
 
 **Reproduce:** `python3 Tools/ghidra-export/uidiff.py`.
+
+## 7.31 FIXED CPI is a SECOND CPI domain, and it is not the stage grid  [D]
+
+Found 2026-09-06 by an adversarial audit of every writable byte, and it was a
+live defect rather than a documentation gap: `encodeButtonEntry` gated this
+payload on `arg < 50 || arg > 26000`. **`26000` cited nothing** — the only two
+occurrences in the whole repo were that comparison and its own error string —
+which is exactly the defect §7.18 was written to catch, in the one field §7.18
+did not re-audit because `map` was added afterwards.
+
+It was wrong in both directions at once. It rejected 10–40 and 26010–30000,
+which the vendor produces, and accepted 1337, which the vendor cannot.
+
+### The domain, from the normaliser dialog 150 actually calls
+
+`0x00401e70`–`0x00401ea9`, a leaf function, three steps and nothing else:
+
+```
+401e70  83 f9 0a           cmpl  $0xa, %ecx        ; below 10
+401e75  b8 0a 00 00 00     movl  $0xa, %eax        ;   -> 10
+401e7b  81 f9 30 75 00 00  cmpl  $0x7530, %ecx     ; above 30000
+401e83  b8 30 75 00 00     movl  $0x7530, %eax     ;   -> 30000
+401e89  b8 cd cc cc cc     movl  $0xcccccccd, %eax ; /10 by reciprocal
+401e90  c1 ea 03           shrl  $0x3, %edx
+401e9d  83 f9 05           cmpl  $0x5, %ecx        ; remainder >= 5
+401ea2  40                 incl  %eax              ;   -> round up
+401ea4  8d 04 80           leal  (%eax,%eax,4),%eax; *5
+401ea7  03 c0              addl  %eax, %eax        ; *2   => *10
+```
+
+**Clamp to `[10, 30000]`, then round to the nearest multiple of 10, ties up.**
+
+**It is NOT the CPI-stage grid**, and that is the whole point of writing it down
+separately. §7.19's normaliser at `0x0040d880` switches to a **50** step above
+10000; this one keeps the 10 step across the entire range. So `10010` is legal
+for a button's fixed CPI and illegal for a CPI stage. Two dialogs, two
+validators, both `[D]` — using either one for the other field is a bug in
+whichever direction it is made.
+
+### The value that reaches the record is the normalised one
+
+`0x004016e0` is the `EN_CHANGE` handler for edit control `0x3fc` (1020):
+
+```
+4016ff  cmpl $0x0, -0xc(%eax)      ; empty box
+401705  movl $0xa, 0x300(%esi)     ;   -> member 0x300 = 10
+401712  calll 0x507a5a             ; atoi -> member 0x300
+401720  movl 0x300(%esi), %ecx
+401726  calll 0x401e70             ; NORMALISE
+40174d  movl %ecx, 0x300(%esi)     ; store the normalised value BACK
+401753  calll *0x52d880            ; TBM_SETPOS the slider to value/10
+```
+
+So the member is normalised before anything reads it, and `0x00401813` is the
+same sequence for the Y box into member `0x304`.
+
+### X and Y are INDEPENDENT, and the code claimed the opposite
+
+`encodeButtonEntry` forced `out[4] = out[2]`, justified by a comment reading
+"the Button Mapping dialog has one CPI box, not two". It has two, from three
+directions:
+
+- §7.19.3 already recorded it: dialog **150**, caption `FIXED CPI`, trackbars
+  **1077 and 1080**, `SetRange(1, 1400)` at `0x00401900` on `this` offsets
+  `+0x130` and `+0x1a4`.
+- `0x00401eb0` reads both members and stores them apart:
+  `0x401eba movl 0x304(%esi),%ecx` and `0x401ec0 movl 0x300(%esi),%eax`, then
+  `0x401ec6 movl %ecx, 0x57f32c` and `0x401ece movl %eax, 0x57f328`.
+- `0x00407c7e movl 0x57f328,%edx` → `0x00407c92 movw %dx, 0x57f240(,%ecx,8)`
+  and `0x00407ca0 movw 0x57f32c,%cx` → `0x00407ca7 movw %cx, 0x57f242(,%eax,8)`.
+  Object stride 8 from `0x0057f23e`, so those are entry `+2` and entry `+4`.
+
+`0x00407c84 movb $0x0, 0x57f23f(,%eax,8)` writes entry `+1` = 0 on the same
+path, which is the `b1` §7.14's table already carries for action `0x0c`.
+
+**Why the old code looked right for a year of captures.** Every FIXED CPI entry
+in `05-buttonmapping.pcapng` has X == Y, so `out[4] = out[2]` reproduced all of
+them, and `Tests/test_button_map.py` scored 14/14 with the bug present. A test
+that only replays observations cannot catch a missing capability — §4.3's
+"assert invariants, not examples", failing in the direction it warns about.
+
+**We refuse rather than round** (`normaliseFixedCpi` is used to TEST, not to
+coerce), for the reason `encodeCpiStageEntry` gives: the vendor rounds while a
+human watches the box, and we would be silently writing a number the user did
+not ask for into a device whose verify pass and diff would both call it correct.

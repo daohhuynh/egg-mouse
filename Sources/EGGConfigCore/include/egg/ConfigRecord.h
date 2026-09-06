@@ -187,7 +187,11 @@ struct Withheld { const char* name; const char* why; };
 // Capability gates -- a field whose MEANING depends on another record byte
 // ---------------------------------------------------------------------------
 // config-protocol.md §7.25. Record 0x6f decides what record 0x09 (`lod`) means.
-// cfg107 never writes 0x6f; it compares it to 1 at three sites and, when it is
+// cfg107 exposes no CONTROL for it -- cfg100/101/104 do -- but it does write the
+// byte: the compiled-in default writer zeroes object 0x2b at 0x413e3e, and the
+// serializer copies it to record 0x6f at 0x4045c1. (This comment used to say
+// "cfg107 never writes 0x6f", which is false in both halves.) It compares it to
+// 1 at three sites and, when it is
 // 1, the Lift-off Distance combo holds two entries instead of eleven, on a
 // DIFFERENT scale -- `1` is 1.0mm there and 0.8mm otherwise -- and is greyed
 // out (cfg107 0x40ec42, 0x40eeb6, 0x40f1e5).
@@ -359,13 +363,45 @@ bool hidKeycode(const char* name, std::uint8_t& out);
 // "ctrl+shift" -> 0x03. Empty string is 0. Returns false on an unknown name.
 bool hidModifiers(const char* spec, std::uint8_t& out);
 
+// ---------------------------------------------------------------------------
+// FIXED CPI, the button payload  (config-protocol.md §7.31)
+// ---------------------------------------------------------------------------
+// A DIFFERENT domain from the CPI stages above, and conflating them was a real
+// defect: this path used to test `arg < 50 || arg > 26000`, a bound that cited
+// nothing, rejected legal values at both ends and accepted illegal ones in the
+// middle. cfg107's dialog 150 (`FIXED CPI`) normalises through `0x00401e70`:
+//
+//     clamp to [10, 30000]                    0x401e70 cmpl $0xa
+//                                             0x401e7b cmpl $0x7530
+//     round to the nearest multiple of 10     0x401e89 (0xcccccccd, shr 3)
+//     ties up (rem >= 5)                      0x401e9d cmpl $0x5
+//
+// and `0x0040174d` stores that normalised result back into member `0x300`,
+// which is the value that reaches the record. Note the STEP: this dialog rounds
+// to 10 across the whole range, where the CPI-stage normaliser at `0x0040d880`
+// switches to 50 above 10000. Using the stage grid here would wrongly reject
+// 10010, which this dialog produces.
+inline constexpr long kFixedCpiMin  = 10;
+inline constexpr long kFixedCpiMax  = 30000;
+inline constexpr long kFixedCpiStep = 10;
+
+long normaliseFixedCpi(long v);
+
 // Compose one entry's seven bytes. `keepPlus6` is the multiclick byte read back
 // from the device and is copied through untouched (§1.3, read-modify-write).
-// `arg` is the CPI value for FixedCpi and the keycode for Key; `mods` is the
-// modifier bitfield for Key and must be 0 otherwise.
-bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,
-                       std::uint8_t keepPlus6, std::uint8_t out[kButtonEntryLen],
-                       const char** err);
+// `mods` is the modifier bitfield for Key and must be 0 otherwise.
+//
+// `argX` is the keycode for Key. For FixedCpi it is the X CPI and `argY` the Y
+// CPI, which are INDEPENDENT: cfg107 `0x00401eb0` reads members `0x300` (X) and
+// `0x304` (Y) into `0x0057f328`/`0x0057f32c`, and `0x00407c7e`/`0x00407ca0`
+// store those to entry `+2` and `+4`. This used to force Y = X on the strength
+// of a comment claiming the dialog had one CPI box; §7.19.3 records two
+// trackbars on dialog 150, ids 1077 and 1080. `argY` is ignored for every other
+// payload -- pass argX, and the caller that means "one value" says so by
+// passing it twice rather than by a sentinel this function has to interpret.
+bool encodeButtonEntry(const ButtonAction& a, long argX, long argY,
+                       std::uint8_t mods, std::uint8_t keepPlus6,
+                       std::uint8_t out[kButtonEntryLen], const char** err);
 
 // Look a field up by name, or nullptr.
 const Settable* findSettable(const char* name);

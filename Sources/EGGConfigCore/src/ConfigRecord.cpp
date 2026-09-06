@@ -744,7 +744,17 @@ const char* describeMulticlick(std::uint8_t byte, long& value) {
     return nullptr;             // a value the vendor's page cannot produce
 }
 
-bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,
+// Mirrors cfg107 `0x00401e70` exactly: clamp, then round to the nearest 10 with
+// ties going up. See kFixedCpiMin/Max/Step in the header for the instruction
+// addresses of each of those three steps.
+long normaliseFixedCpi(long v) {
+    if (v > kFixedCpiMax) v = kFixedCpiMax;
+    if (v < kFixedCpiMin) v = kFixedCpiMin;
+    const long q = v / kFixedCpiStep, rem = v - q * kFixedCpiStep;
+    return (rem * 2 >= kFixedCpiStep ? q + 1 : q) * kFixedCpiStep;
+}
+
+bool encodeButtonEntry(const ButtonAction& a, long arg, long argY, std::uint8_t mods,
                        std::uint8_t keepPlus6, std::uint8_t out[kButtonEntryLen],
                        const char** err) {
     const char* dummy = nullptr;
@@ -763,17 +773,24 @@ bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,
         return true;
     case ButtonPayload::FixedCpi: {
         if (mods) { *err = "fixed-cpi takes no modifiers"; return false; }
-        // The vendor writes X and Y as two 16-bit LE words and this path sets
-        // them equal: the Button Mapping dialog has one CPI box, not two.
-        if (arg < 50 || arg > 26000) {
-            *err = "fixed-cpi wants a CPI value between 50 and 26000";
-            return false;
+        // REFUSE rather than round, for the reason encodeCpiStageEntry gives:
+        // the vendor's edit box rounds while a human watches the number change,
+        // and we are writing to a device where a value the user did not ask for
+        // would pass both the verify and the diff looking correct.
+        for (long v : {arg, argY}) {
+            if (v != normaliseFixedCpi(v)) {
+                *err = "fixed-cpi wants 10 to 30000 in steps of 10 "
+                       "(cfg107 0x401e70)";
+                return false;
+            }
         }
-        const std::uint16_t v = static_cast<std::uint16_t>(arg);
-        out[2] = static_cast<std::uint8_t>(v & 0xFF);
-        out[3] = static_cast<std::uint8_t>(v >> 8);
-        out[4] = out[2];
-        out[5] = out[3];
+        // X to +2, Y to +4, independently -- cfg107 0x407c7e / 0x407ca0.
+        const std::uint16_t x = static_cast<std::uint16_t>(arg);
+        const std::uint16_t y = static_cast<std::uint16_t>(argY);
+        out[2] = static_cast<std::uint8_t>(x & 0xFF);
+        out[3] = static_cast<std::uint8_t>(x >> 8);
+        out[4] = static_cast<std::uint8_t>(y & 0xFF);
+        out[5] = static_cast<std::uint8_t>(y >> 8);
         return true;
     }
     case ButtonPayload::Key:

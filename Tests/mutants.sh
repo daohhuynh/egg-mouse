@@ -143,7 +143,7 @@ objdir_for() {
 # it -- including every equivalent -- never ran. The script printed nothing
 # about it because the summary lives below the error too. A count fixed at the
 # TOP is the only version of this check that a truncated script cannot skip.
-DECLARED_KILL=76
+DECLARED_KILL=80
 DECLARED_EQUIV=7
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
@@ -812,6 +812,37 @@ mutate kill "the gated-offset list reports itself as empty" "$CR" \
 # adjacency check notices.
 mutate kill "the gated-offset list reports the value, not the offset" "$CR" \
 '    for (std::size_t i = 0; i < count; ++i) offs[i] = kGates[i].governedBy;|||    for (std::size_t i = 0; i < count; ++i) offs[i] = kGates[i].onlyWhen;  // MUTANT'
+
+# ---------------------------------------------------------------------------
+# FIXED CPI (§7.31). The defect these replace SHIPPED and scored 14/14 on the
+# capture replay, because every captured FIXED CPI entry has X == Y and a legal
+# value. So each of these breaks the encoder in a way no recorded example can
+# see, which is the whole point of grading this file rather than trusting it.
+# ---------------------------------------------------------------------------
+
+# The original bug, restored verbatim: a bound that cites nothing, rejects 10-40
+# and 26010-30000, and accepts 1337.
+mutate kill "the fixed-cpi bound goes back to the uncited 50..26000" "$CR" \
+'    if (v > kFixedCpiMax) v = kFixedCpiMax;|||    if (v > 26000) v = 26000;  // MUTANT'
+
+# The other half of the original bug: Y is a copy of X, so the dialog'"'"'s second
+# trackbar (1080) can never be expressed.
+mutate kill "fixed-cpi Y is copied from X instead of encoded" "$CR" \
+'        out[4] = static_cast<std::uint8_t>(y & 0xFF);|||        out[4] = out[2];  // MUTANT'
+
+# Silently coercing instead of refusing. Every value becomes legal and the user
+# gets a CPI they did not ask for, past both the verify and the diff.
+mutate kill "fixed-cpi rounds the value instead of refusing it" "$CR" \
+'            if (v != normaliseFixedCpi(v)) {|||            if (false) {  // MUTANT'
+
+# The step confusion this section exists to prevent: using the CPI-STAGE grid
+# for the button payload. Only differs above 10000, so it needs the test that
+# checks the two normalisers disagree there.
+mutate kill "fixed-cpi uses the CPI-stage 50 step above 10000" "$CR" \
+'    const long q = v / kFixedCpiStep, rem = v - q * kFixedCpiStep;
+    return (rem * 2 >= kFixedCpiStep ? q + 1 : q) * kFixedCpiStep;|||    const long st = (v <= 10000) ? 10 : 50;  // MUTANT
+    const long q = v / st, rem = v - q * st;
+    return (rem * 2 >= st ? q + 1 : q) * st;'
 
 # The known-good blob stops being known-good: every read overwrites it, so the
 # undo becomes a mirror of whatever state the device is in now.

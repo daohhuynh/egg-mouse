@@ -887,7 +887,10 @@ void listButtons() {
             std::printf("  %s:\n", group);
         }
         if (a.payload == ButtonPayload::FixedCpi)
-            std::printf("    %-14s takes a CPI value, e.g. fixed-cpi:1600\n", a.name);
+            std::printf("    %-14s takes a CPI value 10-30000 in steps of 10,\n"
+                        "    %-14s e.g. fixed-cpi:1600, or fixed-cpi:1600x800\n"
+                        "    %-14s for independent X and Y\n",
+                        a.name, "", "");
         else if (a.payload == ButtonPayload::Key)
             std::printf("    %-14s takes a key, e.g. key:a  key:ctrl+shift+a  key:f5\n", a.name);
         else
@@ -905,8 +908,8 @@ void listButtons() {
 
 // Parse "<action>" or "<action>:<arg>" into the pieces encodeButtonEntry wants.
 bool parseAction(const std::string& spec, const ButtonAction*& act,
-                 long& arg, std::uint8_t& mods) {
-    act = nullptr; arg = 0; mods = 0;
+                 long& arg, long& argY, std::uint8_t& mods) {
+    act = nullptr; arg = 0; argY = 0; mods = 0;
     const std::size_t colon = spec.find(':');
     const std::string name = spec.substr(0, colon);
     const std::string rest = colon == std::string::npos ? "" : spec.substr(colon + 1);
@@ -926,16 +929,26 @@ bool parseAction(const std::string& spec, const ButtonAction*& act,
     }
     if (rest.empty()) {
         std::printf("%s needs an argument, e.g. %s\n", act->name,
-                    act->payload == ButtonPayload::FixedCpi ? "fixed-cpi:1600"
+                    act->payload == ButtonPayload::FixedCpi ? "fixed-cpi:1600 (or fixed-cpi:1600x800)"
                                                             : "key:ctrl+a");
         return false;
     }
     if (act->payload == ButtonPayload::FixedCpi) {
-        char* end = nullptr;
-        arg = std::strtol(rest.c_str(), &end, 10);
-        if (end == rest.c_str() || (end && *end)) {
-            std::printf("`%s` is not a number.\n", rest.c_str());
-            return false;
+        // `1600` sets both axes; `1600x800` sets them independently, which the
+        // vendor's dialog 150 supports through two trackbars (§7.31).
+        const std::size_t ex = rest.find('x');
+        const std::string xs = rest.substr(0, ex);
+        const std::string ys = ex == std::string::npos ? xs : rest.substr(ex + 1);
+        long* dst[2] = {&arg, &argY};
+        const std::string* src[2] = {&xs, &ys};
+        for (int i = 0; i < 2; ++i) {
+            char* end = nullptr;
+            *dst[i] = std::strtol(src[i]->c_str(), &end, 10);
+            if (src[i]->empty() || end == src[i]->c_str() || (end && *end)) {
+                std::printf("`%s` is not a number. Use fixed-cpi:1600 or "
+                            "fixed-cpi:1600x800.\n", rest.c_str());
+                return false;
+            }
         }
         return true;
     }
@@ -980,9 +993,9 @@ int cmdMap(const std::string& button, const std::string& spec,
     }
 
     const ButtonAction* act = nullptr;
-    long arg = 0;
+    long arg = 0, argY = 0;
     std::uint8_t mods = 0;
-    if (!parseAction(spec, act, arg, mods)) return 2;
+    if (!parseAction(spec, act, arg, argY, mods)) return 2;
 
     const std::size_t at = kButtonBlockFirst + kButtonEntryLen * slot->index;
 
@@ -990,7 +1003,7 @@ int cmdMap(const std::string& button, const std::string& spec,
         std::uint8_t preview[kButtonEntryLen];
         const char* err = nullptr;
         // +6 shown as ?? because it is read from the device and copied through.
-        if (!encodeButtonEntry(*act, arg, mods, 0x00, preview, &err)) {
+        if (!encodeButtonEntry(*act, arg, argY, mods, 0x00, preview, &err)) {
             std::printf("%s\n", err ? err : "cannot encode that");
             return 2;
         }
@@ -1022,7 +1035,7 @@ int cmdMap(const std::string& button, const std::string& spec,
 
     std::uint8_t entry[kButtonEntryLen];
     const char* err = nullptr;
-    if (!encodeButtonEntry(*act, arg, mods,
+    if (!encodeButtonEntry(*act, arg, argY, mods,
                            before[kPayloadOffset + at + 6], entry, &err)) {
         std::printf("%s\n", err ? err : "cannot encode that");
         return 2;

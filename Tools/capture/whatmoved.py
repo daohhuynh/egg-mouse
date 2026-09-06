@@ -23,10 +23,14 @@ between separately-scoped numbers.
 
 REACHABLE/CLOSED membership is a claim about the vendor binaries, so it is
 listed here with its evidence and its blind spot rather than being inferred:
-see config-protocol.md §7.24a (dialog 137 is created by no tool AND every
-control on it has zero message-map entries in all four) and §7.26 (records
-0x00 and 0x07, a bounded negative whose scan cannot see a store through a
-base register).
+see config-protocol.md §7.24a (the tab-creation run makes 135/140/153/139 and
+never 137, in all four tools) and §7.26 (records 0x00 and 0x07, a bounded
+negative whose scan cannot see a store through a base register).
+
+§7.24a used to offer a SECOND negative -- "no control on 137 has a message-map
+entry" -- and it was false: 1043 `Apply led settings` has one (cfg107
+0x405940). It was retracted 2026-09-06. Nothing here rests on it; the
+never-created fact carries the CLOSED claim on its own.
 
     python3 Tools/capture/whatmoved.py
 """
@@ -45,8 +49,10 @@ CAPTURES = os.path.join(ROOT, "windows-run")
 # Bytes no control in ANY of the four config tools writes. Each carries the
 # section that established it; auditclaims.py checks those citations exist.
 CLOSED = {
-    **{r: "LED page, dialog 137: created by no tool, and every control on it "
-          "has zero message-map entries in all four (§7.24a)"
+    **{r: "LED page, dialog 137: the tab-creation run makes 135/140/153/139 "
+          "and never 137, in all four tools (§7.24a). NOT 'no handler' -- "
+          "control 1043 `Apply led settings` has one (cfg107 0x405940); that "
+          "claim was retracted 2026-09-06, and it never carried the argument"
        for r in range(0x0F, 0x23)},
     0x00: "serialised from object +0x00, always zero, no control traced (§7.26)",
     0x07: "serialised from object +0x0c, always zero, no control traced (§7.26)",
