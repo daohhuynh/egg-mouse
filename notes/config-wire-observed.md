@@ -237,6 +237,53 @@ shortest revert. A duration effect is not excluded and two points is not a
 curve. **Nothing here licenses a claim that the record survives overnight** —
 that is one unplug and one read away and has not been done.
 
+**And the duration framing is probably wrong, recorded 2026-09-05 so it stops
+being restated.** Those numbers are gaps *between capture files*, not durations
+of power loss. Nobody has established that the mouse was unpowered for any of
+them, and the USB-address finding above argues it was not. Treating them as a
+retention curve reads a physical mechanism into a wall-clock artefact.
+
+The physics also does not have a knee there. Whatever holds this record survived
+8.6 s with no bus power. Nothing passive in a wired mouse holds SRAM that long —
+decoupling capacitance drains in milliseconds — so the record is in non-volatile
+memory, and NVM retention is specified in years, not minutes. There is no memory
+technology whose retention window is "longer than nine seconds but shorter than
+a few minutes." Retention is effectively discrete: milliseconds, or years.
+That reasoning is `[G]` — it is inference from general knowledge, not from this
+device — which is exactly why the longer unplug is still worth running. It is
+cheap confirmation of a near-certain thing, not an open risk, and it should not
+be written up as one.
+
+### Machine-checked 2026-09-05: the revert is invisible to all eleven captures
+
+Over every `windows-run/*.pcapng`, ordered feature traffic with timestamps:
+
+- **Every config capture opens `A1 02` → `A1 12`** — small query, then a READ.
+  No write precedes the first read in any of them.
+- **Each one has 3.6–15.2 s of captured silence before that first command**, so
+  the capture was already running when the tool was launched. That window is
+  covered and it contains nothing. **"The vendor tool writes defaults at launch"
+  is ruled out with coverage, not by absence of evidence.**
+- **Every config capture ends immediately after an `A0 11` write** — trailing
+  silence is 0.0 s in all but `05`, which has 10.1 s of it and nothing in it.
+  So the tool being *closed* is outside the capture window in every case.
+  **"The vendor tool writes defaults on exit" is NOT ruled out** — it is simply
+  never observed, and `05`'s ten quiet seconds are the only evidence against it,
+  worth little because we do not know the tool was closed inside them.
+
+So the last thing on the wire in section N is a write of non-default settings,
+and the first thing in section N+1 is a read returning defaults, **and nothing
+in between was ever captured.** Whatever reverts the record happens in a window
+no capture covers.
+
+**The cheapest remaining test is not a capture — it is asking the owner what he did
+between sections.** He ran them. If he pressed Factory Reset between sections to
+get a clean baseline per section — which is what a careful person capturing
+`02-basic`, `03-sensor`, `04-buttons` separately would do, and it would explain
+`03 → 04` holding as the one he skipped — then there is no device behaviour here
+at all and this whole subsection collapses into a methodology note. **Ask before
+deriving further.** §1.2a: the obvious human explanation was never checked.
+
 ### 0x71, and why the defaults may have changed with the firmware
 
 `0x71` is the single byte separating `01-baseline` (fw 1.07) from
