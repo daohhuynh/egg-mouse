@@ -46,6 +46,77 @@ enum Commands {
         ["map", button, action, "--yes"]
     }
 
+    // CPI. Y is optional and the CLI defaults it to X, so the GUI passes it
+    // only when the user has actually unticked "X/Y Settings" -- that keeps the
+    // common case producing the shorter argv the CLI tests already pin, rather
+    // than a second spelling of the same thing.
+    static func previewCpi(stage: Int, x: Int, y: Int?) -> [String] {
+        var a = ["cpi", String(stage), String(x)]
+        if let y = y, y != x { a.append(String(y)) }
+        return a
+    }
+
+    static func applyCpi(stage: Int, x: Int, y: Int?) -> [String] {
+        previewCpi(stage: stage, x: x, y: y) + ["--yes"]
+    }
+
+    // Handedness (§7.20). NOT a flag: the CLI reads the record and decides,
+    // and refuses a record in neither state. The GUI must therefore never
+    // present this as a toggle whose position it already knows -- it runs the
+    // preview and shows what the CLI says, the same as every other verb here.
+    static func previewHandedness(_ side: String) -> [String] {
+        ["handedness", side]
+    }
+
+    static func applyHandedness(_ side: String) -> [String] {
+        ["handedness", side, "--yes"]
+    }
+
+    // Multiclick / SPDT (§7.22). `value` is used only by the "off" mode.
+    static func previewMulticlick(button: String, mode: String,
+                                  value: Int?) -> [String] {
+        var a = ["multiclick", button, mode]
+        if mode == "off", let v = value { a.append(String(v)) }
+        return a
+    }
+
+    static func applyMulticlick(button: String, mode: String,
+                                value: Int?) -> [String] {
+        previewMulticlick(button: button, mode: mode, value: value) + ["--yes"]
+    }
+
+    // Only LEFT and RIGHT have an SPDT combo on the vendor's page, so only they
+    // may be offered a GX mode. This mirrors a refusal the CLI makes
+    // independently; the GUI's copy exists to keep an impossible choice off the
+    // screen, never to decide what is written.
+    static let multiclickButtons = ["left", "right", "middle", "forward", "back"]
+
+    static func multiclickModes(for button: String) -> [String] {
+        ["left", "right"].contains(button)
+            ? ["off", "gx-speed", "gx-safe"] : ["off"]
+    }
+
+    static func multiclickIsLegal(mode: String, value: Int?, button: String) -> Bool {
+        guard multiclickModes(for: button).contains(mode) else { return false }
+        if mode != "off" { return true }
+        guard let v = value else { return false }
+        return v >= 0 && v <= 25
+    }
+
+    // The legal CPI grid, from config-protocol.md §7.19: 10..10000 in steps of
+    // 10, then 10050..30000 in steps of 50, rounded half up and clamped. The
+    // GUI needs this to disable Apply before a round trip, NOT to decide what
+    // gets written -- egg-config re-derives it and refuses independently. Two
+    // gates, and the one nearer the wire is the authority.
+    static func normaliseCpi(_ v: Int) -> Int {
+        let c = min(max(v, 10), 30000)
+        let step = c <= 10000 ? 10 : 50
+        let q = c / step, rem = c - q * step
+        return (rem * 2 >= step ? q + 1 : q) * step
+    }
+
+    static func cpiIsLegal(_ v: Int) -> Bool { v == normaliseCpi(v) }
+
     // -------------------------------------------------------------- egg-flash
     static func listVersions() -> [String] { ["--versions"] }
 

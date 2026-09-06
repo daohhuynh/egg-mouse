@@ -36,6 +36,8 @@ enum class Result {
     ReadImplausible,     // it answered, and the record was not a record
     AlreadySet,          // nothing to do; no frame was sent
     RefusedSelfCheck,    // OUR frame differed from what we intended -- a bug in us
+    RefusedCapability,   // the DEVICE reports a variant in which this field
+                         // means something else (ConfigRecord.h, §7.25)
     WriteRejected,       // the device did not acknowledge the write
     VerifyReadFailed,    // wrote, then could not read back: state UNKNOWN
     VerifyMismatch,      // read back, and the byte we sent is not there
@@ -56,6 +58,9 @@ struct SetOutcome {
     // Bytes our frame changed relative to the read. Under MatchVendor this
     // legitimately includes record 0x01..0x04; under Preserve it must not.
     std::vector<ByteChange>  weChanged;
+    // Set only for RefusedCapability: which gate fired, in words. Owned by the
+    // static table in ConfigRecord.cpp, so it outlives the outcome.
+    const char*              refusal{nullptr};
     bool wrote{false};                     // did any frame reach the link?
 };
 

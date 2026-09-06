@@ -291,6 +291,20 @@ const Settable kSettable[] = {
      "config-protocol.md §7.8, cfg107 0x40677a/0x406786; scored against "
      "windows-run/04-buttons line 1, which flipped bit 0 and held the rest",
      0x01, 0},
+    // Same byte as slamclick-filter, bit 4, and derived to the same standard:
+    // written twice, by the click handler at 0x411e7a/0x411e86 and by the APPLY
+    // collector at 0x411aeb/0x411af1, both agreeing on the bit. The `accepts`
+    // string carries the caveat rather than hiding it -- CLAUDE.md §1.2a's rule
+    // that absence is a claim cuts both ways, and silently withholding a fully
+    // derived field tells the user less than offering it with the warning.
+    {"motion-jitter-filter", 0x06, encodeBool,
+     "0 or 1 -- NOTE: the vendor's own Advanced Sensor page HIDES this control "
+     "on this model (prediction-scores.md #21, observed 2026-09-05), so nobody "
+     "has ever set it and its effect on the sensor is unobserved. The BIT is "
+     "derived; the BEHAVIOUR is not",
+     "config-protocol.md §7.8, cfg107 0x411e7a/0x411e86 (click) and "
+     "0x411aeb/0x411af1 (APPLY collect), both orb $0x10 / andb $-0x11",
+     0x10, 4},
     {"cpi-downshift", 0x0b, encodeDownshift,
      "1 to 4, the dropdown item counting from the top (stored remapped: "
      "1->2, 2->3, 3->1, 4->0)",
@@ -315,7 +329,15 @@ const Withheld kWithheld[] = {
      "record 0x3d + 7n, and it SHARES its byte with that button's SPDT mode: "
      "0..25 is a filter value, 0xf0 is GX Safe and 0xf1 is GX Speed. One field "
      "cannot express both, and picking the wrong encoding silently changes the "
-     "switch mode. Observed but not yet given a safe interface"},
+     "switch mode -- so `set` will not take it. Use `egg-config multiclick`, "
+     "which names the mode and refuses GX on the three buttons that have no "
+     "SPDT switch behind them (\u00a77.22.3)"},
+    {"multiclick-ack",
+     "record 0x72 (\u00a77.23). [D] from cfg107 0x4045d9, and deliberately not "
+     "offered: it records that someone ticked a warning checkbox in Endgame's "
+     "Windows application. It configures no mouse behaviour, so listing it "
+     "beside `polling` and `lod` would imply it does. Read-modify-write carries "
+     "it through untouched"},
     {"button-mapping",
      "not withheld any more -- use `egg-config map`. Kept in this list only to "
      "say so, because the reason it WAS withheld is worth not forgetting: five "
@@ -324,6 +346,36 @@ const Withheld kWithheld[] = {
      "capture covered more"},
 };
 const std::size_t kWithheldCount = sizeof(kWithheld) / sizeof(kWithheld[0]);
+
+// §7.25. One row per gate: the field, the byte that governs it, the only value
+// of that byte under which the field's documented meaning holds, and why.
+namespace {
+struct Gate {
+    const char*  field;
+    std::size_t  governedBy;      // record offset of the governing byte
+    std::uint8_t onlyWhen;        // its value under which `field` is as documented
+    const char*  why;
+};
+const Gate kGates[] = {
+    {"lod", 0x6f, 0x00,
+     "record 0x6f is not 0, and it decides what `lod` means. Endgame's own tool "
+     "(cfg107 0x40ec42/0x40eeb6/0x40f1e5) offers eleven steps 0.7mm-1.7mm when "
+     "this byte is 0 and only two, on a different scale, when it is 1 -- where "
+     "1 is 1.0mm rather than 0.8mm. Every record ever read from this model has "
+     "reported 0, so a device reporting otherwise is one nothing here has seen. "
+     "Refusing costs no frame; guessing costs a wrong lift-off distance. "
+     "See config-protocol.md \u00a77.25"},
+};
+}  // namespace
+
+const char* capabilityRefusal(const Settable& f, const std::uint8_t* record) {
+    if (!record) return nullptr;
+    for (const Gate& g : kGates) {
+        if (std::strcmp(f.name, g.field) != 0) continue;
+        if (record[kPayloadOffset + g.governedBy] != g.onlyWhen) return g.why;
+    }
+    return nullptr;
+}
 
 const Settable* findSettable(const char* name) {
     if (!name) return nullptr;
@@ -492,6 +544,184 @@ bool hidModifiers(const char* spec, std::uint8_t& out) {
         ++i;
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// CPI stages -- config-protocol.md §7.19
+// ---------------------------------------------------------------------------
+// Transcribed from cfg107 `0x0040d880`-`0x0040d93a`, the ONE function every
+// typed CPI passes through in the vendor tool. The magic multiplies there are
+// the compiler's division-by-constant, not part of the protocol:
+//
+//   40d8ac  cmpl $0xa,%ecx      / jge 40d8ee      ; below 10?
+//   40d8b1  movl $0xa,%ecx                        ; ...then treat it as 10
+//   40d8b6  edx = ecx/10 (0xcccccccd, >>3); rem = ecx - edx*10
+//   40d8c7  cmpl $0x5,%ecx / jb ; else incl %edx  ; ROUND HALF UP
+//   40d8cd  edx *= 10
+//   40d8d2  movl %edx,(%esi)                      ; the stored value
+//   40d8ee  cmpl $0x7530,%ecx   / jle             ; 30000 ceiling
+//   40d8f6  movl $0x7530,%ecx
+//   40d8fd  cmpl $0xa,%ecx      / jae             ; 10 floor
+//   40d918  cmpl $0x2710,%ecx   / jbe 40d8b6      ; <=10000 -> step 10
+//   40d920  edx = ecx/50 (0x51eb851f, >>4); rem = ecx - edx*50
+//   40d931  cmpl $0x19,%ecx / jb ; else incl %edx ; ROUND HALF UP at 25
+//   40d937  edx *= 50
+//
+// The trackbar path reaches the same set independently: position 1..1400 with
+// pos<=1000 -> pos*10 and pos>1000 -> (pos-800)*50 (`0x0040c2f0`-`0x0040c312`,
+// X; `0x0040c354`-`0x0040c395`, Y). 1400 -> 30000, and the two step sizes and
+// the changeover at 10000 agree exactly. That agreement is why this is [D]
+// rather than one reading of one function.
+long normaliseCpi(long v) {
+    if (v > kCpiMax) v = kCpiMax;
+    if (v < kCpiMin) v = kCpiMin;
+    const long step = (v <= kCpiFineLimit) ? 10 : 50;
+    const long q = v / step, rem = v - q * step;
+    return (rem * 2 >= step ? q + 1 : q) * step;
+}
+
+bool encodeCpiStageEntry(long x, long y, std::uint8_t out[kCpiEntryLen],
+                         const char** err) {
+    // REFUSE rather than round. The vendor's edit box rounds silently because a
+    // human is watching the number change; we are writing to a device with one
+    // verify pass and a diff the user reads afterwards, and a value they did
+    // not ask for would sail through both looking correct.
+    for (long v : {x, y}) {
+        if (v != normaliseCpi(v)) {
+            if (err) *err = "not a CPI the vendor tool can produce";
+            return false;
+        }
+    }
+    // flag = X != Y, computed from THIS stage. cfg107 gets stage 4 wrong --
+    // `0x0040edde`/`0x0040ede4` load stage 3's controls for stage 4's flag
+    // (§7.8) -- and we deliberately do not reproduce that. §4.2 says mirror the
+    // vendor's VERIFICATION; it does not say mirror its arithmetic, and the
+    // flag's meaning is [D] while the bug is just a bug.
+    out[0] = static_cast<std::uint8_t>(x != y ? 1 : 0);
+    out[1] = static_cast<std::uint8_t>(x & 0xFF);
+    out[2] = static_cast<std::uint8_t>((x >> 8) & 0xFF);
+    out[3] = static_cast<std::uint8_t>(y & 0xFF);
+    out[4] = static_cast<std::uint8_t>((y >> 8) & 0xFF);
+    return true;
+}
+
+CpiStage decodeCpiStageEntry(const std::uint8_t* e) {
+    CpiStage s;
+    s.flag = e[0] != 0;
+    s.x = static_cast<long>(e[1]) | (static_cast<long>(e[2]) << 8);
+    s.y = static_cast<long>(e[3]) | (static_cast<long>(e[4]) << 8);
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Left-handed mode -- config-protocol.md §7.20
+// ---------------------------------------------------------------------------
+// cfg107 `0x408b00` hard-sets whichever entry is the primary click to
+// `00 01 00 00 00 00` and moves the user's assignment to the other. Byte `+6`
+// is the multiclick filter (§7.22) and is NOT part of the action, which is why
+// the state test below ignores it -- the vendor's arm B swaps `+6` and its arm
+// A only copies it, so `+6` cannot be used to identify the state.
+static const std::uint8_t kLeftClickEntry[6] = {0x00, 0x01, 0x00, 0x00, 0x00, 0x00};
+
+static bool isLeftClickDefault(const std::uint8_t* entry) {
+    return std::memcmp(entry, kLeftClickEntry, sizeof kLeftClickEntry) == 0;
+}
+
+Handedness readHandedness(const std::uint8_t* record) {
+    const std::uint8_t* e0 = record + kButtonBlockFirst;
+    const std::uint8_t* e1 = e0 + kButtonEntryLen;
+    const bool a = isLeftClickDefault(e0), b = isLeftClickDefault(e1);
+    if (a == b) return Handedness::Unknown;   // neither, or ambiguously both
+    return a ? Handedness::Right : Handedness::Left;
+}
+
+bool applyHandedness(const std::uint8_t* record, Handedness want,
+                     std::uint8_t out[2 * kButtonEntryLen], bool& changed,
+                     const char** err) {
+    changed = false;
+    if (want == Handedness::Unknown) {
+        if (err) *err = "handedness must be `left` or `right`";
+        return false;
+    }
+    const Handedness now = readHandedness(record);
+    if (now == Handedness::Unknown) {
+        if (err) *err = "the record is in neither handedness state -- refusing "
+                        "rather than guessing which entry holds your mapping";
+        return false;
+    }
+    const std::uint8_t* e0 = record + kButtonBlockFirst;
+    const std::uint8_t* e1 = e0 + kButtonEntryLen;
+    std::memcpy(out, e0, kButtonEntryLen);
+    std::memcpy(out + kButtonEntryLen, e1, kButtonEntryLen);
+    if (now == want) return true;             // nothing to write
+
+    // The MOVE. `keep` is the entry holding the user's assignment; it becomes
+    // the other one, and the vacated slot becomes left-click. Byte +6 is
+    // swapped, which is cfg107's arm B; arm A copies it one way instead. We
+    // swap in both directions ON PURPOSE -- copying would silently overwrite
+    // one button's multiclick filter with the other's, and §7.22 makes that a
+    // separate setting the user configured deliberately.
+    const std::uint8_t* keep = (now == Handedness::Right) ? e1 : e0;
+    std::uint8_t* dst = out + ((want == Handedness::Right) ? kButtonEntryLen : 0);
+    std::uint8_t* vac = out + ((want == Handedness::Right) ? 0 : kButtonEntryLen);
+    const std::uint8_t keepPlus6 = keep[6];
+    const std::uint8_t vacPlus6  = (keep == e0 ? e1[6] : e0[6]);
+    std::memcpy(dst, keep, kButtonEntryLen);
+    std::memcpy(vac, kLeftClickEntry, sizeof kLeftClickEntry);
+    dst[6] = keepPlus6;
+    vac[6] = vacPlus6;
+    changed = true;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Multiclick filter and SPDT mode -- config-protocol.md §7.22
+// ---------------------------------------------------------------------------
+bool encodeMulticlick(std::size_t button, const char* mode, long value,
+                      std::uint8_t& out, const char** err) {
+    if (button >= kMulticlickCount) {
+        if (err) *err = "only left, right, middle, forward and back have a "
+                        "multiclick filter";
+        return false;
+    }
+    const bool hasSpdt = (button < 2);        // left and right only (§7.22.3)
+    if (mode && std::strcmp(mode, "gx-speed") == 0) {
+        if (!hasSpdt) {
+            if (err) *err = "only the left and right buttons have an SPDT combo; "
+                            "the vendor's page offers no GX mode for this one";
+            return false;
+        }
+        out = kSpdtGxSpeed;
+        return true;
+    }
+    if (mode && std::strcmp(mode, "gx-safe") == 0) {
+        if (!hasSpdt) {
+            if (err) *err = "only the left and right buttons have an SPDT combo; "
+                            "the vendor's page offers no GX mode for this one";
+            return false;
+        }
+        out = kSpdtGxSafe;
+        return true;
+    }
+    if (!mode || std::strcmp(mode, "off") != 0) {
+        if (err) *err = "mode must be `off`, `gx-speed` or `gx-safe`";
+        return false;
+    }
+    if (value < 0 || value > kMulticlickMax) {
+        if (err) *err = "the filter is 0 to 25 (CSliderCtrl::SetRange(0, 0x19) "
+                        "at cfg107 0x405f84)";
+        return false;
+    }
+    out = static_cast<std::uint8_t>(value);
+    return true;
+}
+
+const char* describeMulticlick(std::uint8_t byte, long& value) {
+    value = byte;
+    if (byte == kSpdtGxSpeed) return "gx-speed";
+    if (byte == kSpdtGxSafe)  return "gx-safe";
+    if (byte <= kMulticlickMax) return "off";
+    return nullptr;             // a value the vendor's page cannot produce
 }
 
 bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,

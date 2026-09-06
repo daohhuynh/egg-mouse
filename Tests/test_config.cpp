@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <concepts>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,25 @@ using namespace egg;
 using namespace egg::cfg;
 
 static int failures = 0;
+
+// PASSING A LAMBDA INSTEAD OF CALLING IT IS A COMPILE ERROR, not a pass.
+//
+// The house style here is `ok("...", [] { ... }())` -- note the trailing `()`.
+// Twelve CPI checks were written without it on 2026-09-06. A lambda decays to a
+// function pointer, a function pointer converts to `true`, and all twelve
+// printed PASS having evaluated nothing. `ctest` was green and every one of the
+// ten CPI mutants SURVIVED, which is the only reason it was noticed --
+// Tests/mutants.sh earning its keep exactly as §6.2 intends.
+//
+// CMakeLists.txt already warns about this shape in its Swift comment ("a test
+// that passes by doing nothing at all"). A comment did not prevent it; this
+// does. The overload is a better match than `bool` for anything callable, and
+// it is deleted, so the mistake stops being possible rather than being caught
+// by whoever next runs the mutants.
+template <class F>
+    requires requires(F f) { { f() } -> std::convertible_to<bool>; }
+void ok(const char* what, F fn, const std::string& detail = "") = delete;
+
 static void ok(const char* what, bool cond, const std::string& detail = "") {
     std::printf("  %s  %s%s%s\n", cond ? "PASS" : "FAIL", what,
                 detail.empty() ? "" : "  --  ", detail.c_str());
@@ -336,7 +356,11 @@ static void testAdversarial() {
         MockConfigDevice dev;
         ConfigSession s(dev, UnknownBytes::MatchVendor);
         SetOutcome o = s.set(field("lod"), 6);
-        // A redundant `set` must put NOTHING on the wire, under either policy.
+        ok("a cooperative device succeeds -- so the failures above are real",
+           o.result == Result::Ok && dev.storedRecord(0x09) == 6, describe(o.result));
+    }
+
+    // A redundant `set` must put NOTHING on the wire, under either policy.
     // Under MatchVendor our frame differs from the read at record 0x01..0x04
     // even when the field is already correct, so a naive "did the frame change?"
     // test would write every time someone re-applied a setting they already had.
@@ -365,10 +389,6 @@ static void testAdversarial() {
            o.result != Result::Ok && o.result != Result::AlreadySet);
         ok("...and the frame really did go out, so this is the unknown-state case,\n            not a refusal before the write",
            dev.sentFrames().size() == 1 && dev.acceptedWrites() == 1);
-    }
-
-    ok("a cooperative device succeeds -- so the failures above are real",
-           o.result == Result::Ok && dev.storedRecord(0x09) == 6, describe(o.result));
     }
 }
 
@@ -623,6 +643,436 @@ static void testVault() {
     std::remove(path.c_str());
 }
 
+// ---------------------------------------------------------------------------
+// 7. The CPI stage encoder.
+// ---------------------------------------------------------------------------
+// Scored as INVARIANTS over the whole range, not at a handful of examples
+// (§4.3). The rule itself is derived in config-protocol.md §7.19 from cfg107
+// `0x40d880`-`0x40d93a`, and Tests/test_cpi.py checks that transcription
+// against the vendor's raw bytes and against every settings record in
+// `windows-run/`. What is checked HERE is the C++ -- which is what
+// Tests/mutants.sh can grade, and the Python cannot.
+static void testCpi() {
+    std::printf("\ncpi\n");
+
+    ok("the grid is exactly 10..10000 by 10 then 10050..30000 by 50", [] {
+        // Independent statement of the domain, so the encoder is compared
+        // against a rule rather than against itself.
+        for (long v = -100; v <= 30500; ++v) {
+            const bool onGrid =
+                (v >= 10 && v <= 10000 && v % 10 == 0) ||
+                (v >= 10050 && v <= 30000 && v % 50 == 0);
+            if ((normaliseCpi(v) == v) != onGrid) return false;
+        }
+        return true;
+    }());
+
+    ok("normalise is idempotent, and every output is on the grid", [] {
+        for (long v = -100; v <= 30500; ++v) {
+            const long n = normaliseCpi(v);
+            if (normaliseCpi(n) != n) return false;
+            if (n < kCpiMin || n > kCpiMax) return false;
+        }
+        return true;
+    }());
+
+    ok("normalise is monotone -- a bigger request never gives a smaller CPI", [] {
+        long prev = normaliseCpi(-100);
+        for (long v = -99; v <= 30500; ++v) {
+            const long n = normaliseCpi(v);
+            if (n < prev) return false;
+            prev = n;
+        }
+        return true;
+    }());
+
+    ok("rounding is HALF UP and never moves a value by half a step or more", [] {
+        for (long v = 10; v <= kCpiMax; ++v) {
+            const long step = (v <= kCpiFineLimit) ? 10 : 50;
+            const long d = normaliseCpi(v) - v;
+            if (d > step / 2 || d < -(step / 2)) return false;
+        }
+        // The exact half cases go UP, which is what `cmpl $5` / `jb` encodes.
+        return normaliseCpi(15) == 20 && normaliseCpi(10025) == 10050;
+    }());
+
+    ok("the changeover is at 10000, and the gap above it is real", [] {
+        // `jbe 0x40d8b6` at 0x40d91e: <= 10000 takes the FINE arm. Above it the
+        // coarse arm rounds on `rem >= 25` (`cmpl $0x19` at 0x40d931), so
+        // 10001..10024 come back DOWN to 10000 and 10050 is the first value
+        // above it that exists. This test first asserted 10005 -> 10050, which
+        // is what "steps of 50 above 10000" sounds like and is not what the
+        // vendor computes; the disassembly settled it against the test.
+        if (normaliseCpi(10000) != 10000) return false;
+        for (long v = 10001; v <= 10024; ++v)
+            if (normaliseCpi(v) != 10000) return false;
+        for (long v = 10025; v <= 10074; ++v)
+            if (normaliseCpi(v) != 10050) return false;
+        // Nothing legal lives strictly between them.
+        for (long v = 10001; v < 10050; ++v)
+            if (normaliseCpi(v) == v) return false;
+        return true;
+    }());
+
+    ok("clamping happens at both ends", [] {
+        return normaliseCpi(0) == kCpiMin && normaliseCpi(-9999) == kCpiMin
+            && normaliseCpi(kCpiMax + 1) == kCpiMax
+            && normaliseCpi(1 << 20) == kCpiMax;
+    }());
+
+    ok("encode refuses anything off the grid and accepts everything on it", [] {
+        std::uint8_t e[kCpiEntryLen];
+        const char* err = nullptr;
+        for (long v = 1; v <= 30100; ++v) {
+            const bool got = encodeCpiStageEntry(v, v, e, &err);
+            if (got != (normaliseCpi(v) == v)) return false;
+            if (!got && !err) return false;      // a refusal must say why
+        }
+        return true;
+    }());
+
+    ok("X and Y are independently checked", [] {
+        std::uint8_t e[kCpiEntryLen];
+        const char* err = nullptr;
+        return !encodeCpiStageEntry(1600, 1605, e, &err)
+            && !encodeCpiStageEntry(1605, 1600, e, &err)
+            &&  encodeCpiStageEntry(1600, 800,  e, &err);
+    }());
+
+    ok("the payload is u16 little-endian with the flag first", [] {
+        std::uint8_t e[kCpiEntryLen];
+        const char* err = nullptr;
+        if (!encodeCpiStageEntry(1600, 800, e, &err)) return false;
+        if (!(e[0] == 1 && e[1] == 0x40 && e[2] == 0x06
+              && e[3] == 0x20 && e[4] == 0x03)) return false;
+        // 400/800/1600/3200: the baseline record's own four stages.
+        const long defaults[4] = {400, 800, 1600, 3200};
+        for (long v : defaults) {
+            if (!encodeCpiStageEntry(v, v, e, &err)) return false;
+            if (e[0] != 0) return false;
+            if (e[1] != static_cast<std::uint8_t>(v & 0xFF)) return false;
+            if (e[2] != static_cast<std::uint8_t>((v >> 8) & 0xFF)) return false;
+            if (e[3] != e[1] || e[4] != e[2]) return false;
+        }
+        return true;
+    }());
+
+    ok("the flag byte is X != Y and nothing else", [] {
+        std::uint8_t e[kCpiEntryLen];
+        const char* err = nullptr;
+        for (long x = 10; x <= 30000; x += 370) {
+            for (long y = 10; y <= 30000; y += 730) {
+                const long nx = normaliseCpi(x), ny = normaliseCpi(y);
+                if (!encodeCpiStageEntry(nx, ny, e, &err)) return false;
+                if ((e[0] != 0) != (nx != ny)) return false;
+                if (e[0] > 1) return false;
+            }
+        }
+        return true;
+    }());
+
+    ok("decode inverts encode over the whole grid", [] {
+        std::uint8_t e[kCpiEntryLen];
+        const char* err = nullptr;
+        for (long x = 10; x <= 30000; x += 370) {
+            const long nx = normaliseCpi(x), ny = normaliseCpi(x + 1000);
+            if (!encodeCpiStageEntry(nx, ny, e, &err)) return false;
+            const CpiStage s = decodeCpiStageEntry(e);
+            if (s.x != nx || s.y != ny || s.flag != (nx != ny)) return false;
+        }
+        return true;
+    }());
+
+    ok("the block geometry matches the record map", [] {
+        // §7.3: record 0x23..0x36, four entries of five. The last byte of the
+        // last stage must be 0x36 -- one past and it would overwrite 0x37,
+        // which §7.7 says is the first button entry.
+        return kCpiBlockFirst == 0x23 && kCpiEntryLen == 5 && kCpiStageCount == 4
+            && kCpiBlockFirst + kCpiEntryLen * kCpiStageCount - 1 == 0x36;
+    }());
+}
+
+// ---------------------------------------------------------------------------
+// 8. Handedness and the multiclick/SPDT byte.
+// ---------------------------------------------------------------------------
+static std::vector<std::uint8_t> recordWithEntries(const std::uint8_t* e0,
+                                                   const std::uint8_t* e1) {
+    std::vector<std::uint8_t> r(kRecordLen, 0);
+    std::memcpy(r.data() + kButtonBlockFirst, e0, kButtonEntryLen);
+    std::memcpy(r.data() + kButtonBlockFirst + kButtonEntryLen, e1,
+                kButtonEntryLen);
+    return r;
+}
+
+// §7.25. `lod` means one thing when record 0x6f is 0 and another when it is 1,
+// so the value is refused rather than written under the reading we did not
+// derive. The test that matters is not "it refused" -- it is that NOTHING WENT
+// ON THE WIRE, because a refusal that has already sent a frame is not a refusal.
+static void testCapabilityGate() {
+    std::printf("\ncapability gate (record 0x6f -> lod)\n");
+    const Settable* lod = findSettable("lod");
+    ok("`lod` is still a settable field", lod != nullptr);
+    if (!lod) return;
+
+    ok("a record with 0x6f == 0 does not trip the gate", [&] {
+        MockConfigDevice dev;
+        return capabilityRefusal(*lod, dev.stored().data()) == nullptr;
+    }());
+
+    ok("a record with 0x6f == 1 does trip it, with a reason", [&] {
+        MockConfigDevice dev;
+        dev.pokeStored(0x6f, 0x01);
+        const char* why = capabilityRefusal(*lod, dev.stored().data());
+        return why != nullptr && std::strstr(why, "0x6f") != nullptr;
+    }());
+
+    ok("every other value of 0x6f trips it too -- the gate is not a 0-vs-1 test",
+       [&] {
+        for (int v = 1; v <= 255; ++v) {
+            MockConfigDevice dev;
+            dev.pokeStored(0x6f, static_cast<std::uint8_t>(v));
+            if (capabilityRefusal(*lod, dev.stored().data()) == nullptr) return false;
+        }
+        return true;
+    }());
+
+    ok("the gate does not fire on a DIFFERENT field", [&] {
+        const Settable* p = findSettable("polling");
+        if (!p) return false;
+        MockConfigDevice dev;
+        dev.pokeStored(0x6f, 0x01);
+        return capabilityRefusal(*p, dev.stored().data()) == nullptr;
+    }());
+
+    ok("set lod is REFUSED on a gated device", [&] {
+        MockConfigDevice dev;
+        dev.pokeStored(0x6f, 0x01);
+        ConfigSession s(dev, UnknownBytes::MatchVendor);
+        SetOutcome o = s.set(*lod, 5);
+        return o.result == Result::RefusedCapability && o.refusal != nullptr;
+    }());
+
+    ok("and NOTHING was written -- the refusal is off-wire", [&] {
+        MockConfigDevice dev;
+        dev.pokeStored(0x6f, 0x01);
+        const std::uint8_t was = dev.storedRecord(0x09);
+        ConfigSession s(dev, UnknownBytes::MatchVendor);
+        (void)s.set(*lod, 5);
+        return dev.sentFrames().empty() && dev.writes() == 0 &&
+               dev.storedRecord(0x09) == was;
+    }());
+
+    ok("the read still happened, so the refusal is informed by the device", [&] {
+        MockConfigDevice dev;
+        dev.pokeStored(0x6f, 0x01);
+        ConfigSession s(dev, UnknownBytes::MatchVendor);
+        (void)s.set(*lod, 5);
+        return dev.reads() >= 1;
+    }());
+
+    ok("an UNREADABLE device refuses for the read, not the gate", [&] {
+        ConfigFaults f; f.rejectReadRate = 1.0;
+        MockConfigDevice dev(f);
+        ConfigSession s(dev, UnknownBytes::MatchVendor);
+        SetOutcome o = s.set(*lod, 5);
+        return o.result != Result::RefusedCapability && dev.sentFrames().empty();
+    }());
+
+    ok("with 0x6f == 0 the ordinary write still goes through", [&] {
+        // Pick a value the mock is NOT already holding, so an AlreadySet does
+        // not masquerade as a pass. The first version of this test asserted
+        // Result::Ok against whatever the mock happened to hold and failed for
+        // that reason rather than for the gate.
+        MockConfigDevice dev;
+        const std::uint8_t was = dev.storedRecord(0x09);
+        const std::uint8_t want = static_cast<std::uint8_t>(was == 5 ? 6 : 5);
+        ConfigSession s(dev, UnknownBytes::MatchVendor);
+        SetOutcome o = s.set(*lod, want);
+        return o.result == Result::Ok && dev.storedRecord(0x09) == want &&
+               !dev.sentFrames().empty();
+    }());
+}
+
+static void testHandedness() {
+    std::printf("\nhandedness\n");
+    const std::uint8_t L[7] = {0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08};
+    const std::uint8_t R[7] = {0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x08};
+
+    ok("the factory record reads as right-handed", [&] {
+        auto r = recordWithEntries(L, R);
+        return readHandedness(r.data()) == Handedness::Right;
+    }());
+
+    ok("the swapped record reads as left-handed", [&] {
+        auto r = recordWithEntries(R, L);
+        return readHandedness(r.data()) == Handedness::Left;
+    }());
+
+    ok("a record in neither state is Unknown, not a coin flip", [&] {
+        const std::uint8_t X[7] = {0x02, 0x04, 0, 0, 0, 0, 8};   // both remapped
+        auto r = recordWithEntries(X, X);
+        return readHandedness(r.data()) == Handedness::Unknown;
+    }());
+
+    ok("a record with BOTH entries left-click is Unknown too", [&] {
+        auto r = recordWithEntries(L, L);
+        return readHandedness(r.data()) == Handedness::Unknown;
+    }());
+
+    ok("Unknown is REFUSED, never guessed", [&] {
+        const std::uint8_t X[7] = {0x02, 0x04, 0, 0, 0, 0, 8};
+        auto r = recordWithEntries(X, X);
+        std::uint8_t out[2 * kButtonEntryLen];
+        bool ch = true;
+        const char* err = nullptr;
+        return !applyHandedness(r.data(), Handedness::Left, out, ch, &err)
+            && err != nullptr;
+    }());
+
+    ok("right -> left swaps entries 0 and 1", [&] {
+        auto r = recordWithEntries(L, R);
+        std::uint8_t out[2 * kButtonEntryLen];
+        bool ch = false;
+        const char* err = nullptr;
+        if (!applyHandedness(r.data(), Handedness::Left, out, ch, &err)) return false;
+        return ch && std::memcmp(out, R, 7) == 0
+                  && std::memcmp(out + 7, L, 7) == 0;
+    }());
+
+    ok("asking for the state it is already in writes nothing", [&] {
+        auto r = recordWithEntries(L, R);
+        std::uint8_t out[2 * kButtonEntryLen];
+        bool ch = true;
+        const char* err = nullptr;
+        return applyHandedness(r.data(), Handedness::Right, out, ch, &err) && !ch;
+    }());
+
+    ok("APPLYING TWICE IS A NO-OP -- the vendor's own transform is not", [&] {
+        // cfg107's handler runs on a checkbox TRANSITION and would, applied
+        // twice, overwrite the user's assignment with the left-click reset.
+        // A CLI has no transition, so this is the property that has to hold.
+        const std::uint8_t mine[7] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11};
+        auto r = recordWithEntries(L, mine);
+        std::uint8_t a[2 * kButtonEntryLen], b[2 * kButtonEntryLen];
+        bool ch = false;
+        const char* err = nullptr;
+        if (!applyHandedness(r.data(), Handedness::Left, a, ch, &err) || !ch)
+            return false;
+        auto r2 = recordWithEntries(a, a + kButtonEntryLen);
+        if (!applyHandedness(r2.data(), Handedness::Left, b, ch, &err)) return false;
+        return !ch && std::memcmp(a, b, sizeof a) == 0
+            && std::memcmp(a, mine, 7) == 0;     // the mapping is still there
+    }());
+
+    ok("the round trip left->right->left returns the original bytes", [&] {
+        const std::uint8_t mine[7] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11};
+        auto r0 = recordWithEntries(L, mine);
+        std::uint8_t a[14], b[14];
+        bool ch = false;
+        const char* err = nullptr;
+        if (!applyHandedness(r0.data(), Handedness::Left, a, ch, &err)) return false;
+        auto r1 = recordWithEntries(a, a + 7);
+        if (!applyHandedness(r1.data(), Handedness::Right, b, ch, &err)) return false;
+        return std::memcmp(b, r0.data() + kButtonBlockFirst, 14) == 0;
+    }());
+
+    ok("byte +6 travels with its own button, both ways", [&] {
+        // cfg107's OFF arm COPIES +6 one way; we swap it. §7.22 makes +6 a
+        // separate deliberate setting, so copying would destroy one of them.
+        std::uint8_t l6[7] = {0x00, 0x01, 0, 0, 0, 0, 0x03};
+        std::uint8_t r6[7] = {0x00, 0x02, 0, 0, 0, 0, 0xf1};
+        auto r = recordWithEntries(l6, r6);
+        std::uint8_t out[14];
+        bool ch = false;
+        const char* err = nullptr;
+        if (!applyHandedness(r.data(), Handedness::Left, out, ch, &err)) return false;
+        return out[6] == 0xf1 && out[13] == 0x03;
+    }());
+}
+
+static void testMulticlick() {
+    std::printf("\nmulticlick / SPDT\n");
+
+    ok("all five buttons take 0..25 and nothing else", [] {
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        for (std::size_t k = 0; k < kMulticlickCount; ++k)
+            for (long v = -5; v <= 40; ++v)
+                if (encodeMulticlick(k, "off", v, b, &err)
+                    != (v >= 0 && v <= kMulticlickMax)) return false;
+        return true;
+    }());
+
+    ok("the value IS the byte", [] {
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        for (long v = 0; v <= kMulticlickMax; ++v) {
+            if (!encodeMulticlick(0, "off", v, b, &err)) return false;
+            if (b != static_cast<std::uint8_t>(v)) return false;
+        }
+        return true;
+    }());
+
+    ok("only LEFT and RIGHT accept a GX mode", [] {
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        for (std::size_t k = 0; k < kMulticlickCount; ++k) {
+            const bool want = (k < 2);
+            if (encodeMulticlick(k, "gx-speed", 0, b, &err) != want) return false;
+            if (want && b != kSpdtGxSpeed) return false;
+            if (encodeMulticlick(k, "gx-safe", 0, b, &err) != want) return false;
+            if (want && b != kSpdtGxSafe) return false;
+        }
+        return true;
+    }());
+
+    ok("a sixth button is refused", [] {
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        return !encodeMulticlick(kMulticlickCount, "off", 8, b, &err)
+            && !encodeMulticlick(99, "off", 8, b, &err);
+    }());
+
+    ok("an unknown mode is refused, not treated as off", [] {
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        return !encodeMulticlick(0, "gx", 8, b, &err)
+            && !encodeMulticlick(0, "", 8, b, &err)
+            && !encodeMulticlick(0, nullptr, 8, b, &err);
+    }());
+
+    ok("the GX bytes are outside the numeric range, so they cannot collide", [] {
+        return kSpdtGxSpeed > kMulticlickMax && kSpdtGxSafe > kMulticlickMax;
+    }());
+
+    ok("describe inverts encode, and rejects bytes the page cannot produce", [] {
+        long v = 0;
+        std::uint8_t b = 0;
+        const char* err = nullptr;
+        for (long n = 0; n <= kMulticlickMax; ++n) {
+            if (!encodeMulticlick(0, "off", n, b, &err)) return false;
+            const char* m = describeMulticlick(b, v);
+            if (!m || std::strcmp(m, "off") != 0 || v != n) return false;
+        }
+        if (std::strcmp(describeMulticlick(kSpdtGxSpeed, v), "gx-speed") != 0)
+            return false;
+        if (std::strcmp(describeMulticlick(kSpdtGxSafe, v), "gx-safe") != 0)
+            return false;
+        for (int n = kMulticlickMax + 1; n < 0xF0; ++n)
+            if (describeMulticlick(static_cast<std::uint8_t>(n), v)) return false;
+        return true;
+    }());
+
+    ok("the five bytes are the ones §7.3 maps, and miss the button actions", [] {
+        for (std::size_t k = 0; k < kMulticlickCount; ++k) {
+            const std::size_t at = kMulticlickFirst + kMulticlickStride * k;
+            if (at != kButtonBlockFirst + kButtonEntryLen * k + 6) return false;
+        }
+        return kMulticlickFirst == 0x3d
+            && kMulticlickFirst + kMulticlickStride * 4 == 0x59;
+    }());
+}
+
 int main() {
     std::printf("EGGConfigCore\n");
     testTable();
@@ -631,6 +1081,10 @@ int main() {
     testAdversarial();
     testUnknownBytePolicy();
     testVault();
+    testCpi();
+    testHandedness();
+    testMulticlick();
+    testCapabilityGate();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILURES" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

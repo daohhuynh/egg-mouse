@@ -11,6 +11,7 @@ const char* describe(Result r) {
         case Result::ReadImplausible:  return "the device answered, but not with a settings record";
         case Result::AlreadySet:       return "already set; nothing written";
         case Result::RefusedSelfCheck: return "our own frame failed its self-check; nothing written";
+        case Result::RefusedCapability: return "this device reports a variant in which the field means something else; nothing written";
         case Result::WriteRejected:    return "the device did not acknowledge the write";
         case Result::VerifyReadFailed: return "written, but the read-back failed: device state UNKNOWN";
         case Result::VerifyMismatch:   return "read back, and the byte we sent is not there";
@@ -88,6 +89,15 @@ SetOutcome ConfigSession::set(const Settable& f, std::uint8_t encodedValue) {
 
     // 1. Read, and validate. §4.1: "Never write after a failed read."
     if (!read(o.before, o.result)) return o;
+
+    // 1a. CAPABILITY GATE, before anything is built. §7.25: a field whose
+    //     meaning depends on another record byte may not be written when that
+    //     byte says the meaning is not the documented one. This is off-wire --
+    //     the read already happened -- so it adds no frame (§4.2).
+    if ((o.refusal = capabilityRefusal(f, o.before.data())) != nullptr) {
+        o.result = Result::RefusedCapability;
+        return o;
+    }
 
     const std::size_t at = kPayloadOffset + f.recordOffset;
     const std::uint8_t want = composeByte(o.before[at], f, encodedValue);

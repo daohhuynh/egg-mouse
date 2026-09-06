@@ -38,7 +38,7 @@ scopes, and **nothing is ever added across the rows**:
 
 | scope | CONFIRMED | REFUTED | PARTIAL | denominator |
 | --- | --- | --- | --- | --- |
-| `wire-predictions.md` register | 3 | 0 | 2 | 271 |
+| `wire-predictions.md` register | 4 | 0 | 2 | 271 |
 | pre-registered elsewhere (bare slugs, declared below) | 2 | 1 | 1 | not enumerated |
 | device runs, own pre-registration files | 2 | 0 | 1 | 3 |
 
@@ -613,3 +613,41 @@ the menu." It was the declaration order, in all four menus, with no exceptions.
 
 **This is the cheapest correct prediction in the project** — a complete UI
 vocabulary, ordered, from a single string run and no device interaction at all.
+
+## §7.22, the multiclick / SPDT byte
+
+### CONFIRMED — `multiclick-and-spdt-byte`, **4/4**, scored 2026-09-06
+
+`wire-predictions.md` #24, written from the packer. Scored against
+`windows-run/04-buttons.pcapng`, which was captured on 2026-09-05 — **before
+the prediction was written**, so the observation could not have been shaped by
+it, and the capture was re-read structurally (a large GET is a settings record
+only when the SET before it was `A1 12`) rather than by trusting an earlier
+reading of it.
+
+The sixteen records, per button, in order:
+
+| button | record `0x3d + 7n` |
+| --- | --- |
+| left | `8 8 8 0 25 12 12 12 12 12 f0 f1 8 8 8 8` |
+| right | `8 8 8 8 8 8 25 25 25 25 25 25 25 f0 f1 8` |
+| middle | `8 8 8 8 8 8 8 25 25 25 25 25 25 25 25 25` |
+| forward | `8 8 8 8 8 8 8 8 25 25 25 25 25 25 25 25` |
+| back | `8 8 8 8 8 8 8 8 8 25 25 25 25 25 25 25` |
+
+| # | prediction | observed | outcome |
+| --- | --- | --- | --- |
+| 1 | the trailing byte of each of the first five button records is the per-button Multiclick Filter | left moves through 0, 25 and 12; each of the five moves independently and nothing else moves with it | **HIT** |
+| 2 | `GX Speed Mode` sets `0xF1`, `GX Safe Mode` sets `0xF0` | both bytes appear, on left and on right | **HIT** |
+| 3 | left is report `0x4D`, right `0x54`, then `0x5B`/`0x62`/`0x69` | record `0x3d`/`0x44`/`0x4b`/`0x52`/`0x59`, i.e. wire `0x4d`/`0x54`/`0x5b`/`0x62`/`0x69` | **HIT** |
+| 4 | **middle/forward/back have trackbars only and no SPDT combo** | those three carry `8` and `25` and never `0xf0` or `0xf1` | **HIT** |
+
+Row 4 is the one worth having. It is a **negative** prediction — that two
+specific bytes never appear at three specific offsets — and §1.2a says a
+negative needs more evidence than a positive. It got it: the same capture that
+produced `0xf0` and `0xf1` twice each on the other two buttons produced neither,
+in any of sixteen records, on these three. That is the clause
+`egg-config multiclick` refuses on, so it is load-bearing rather than
+decorative.
+
+**Reproduce:** `python3 -m unittest Tests.test_handedness`.

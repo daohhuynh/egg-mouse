@@ -95,7 +95,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t button_map citations config_replay fwfile_set golden_vendor golden_config_cmds ingest_config manifest recmap undo_loadable usbpcap)
+  foreach(t button_map citations config_replay cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -141,6 +141,16 @@ if(SWIFTC_EXECUTABLE)
                    -P ${CMAKE_SOURCE_DIR}/Tests/run_app_commands.cmake)
   set_tests_properties(app_commands PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  # ...and the views, which app_commands does not compile. See the comment in
+  # the script: green tests while the app does not build is the worst of both.
+  add_test(NAME app_typecheck
+           COMMAND ${CMAKE_COMMAND}
+                   -DSWIFTC=${SWIFTC_EXECUTABLE}
+                   -DSRC=${CMAKE_SOURCE_DIR}
+                   -P ${CMAKE_SOURCE_DIR}/Tests/typecheck_app.cmake)
+  set_tests_properties(app_typecheck PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 300)
 endif()
 
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)

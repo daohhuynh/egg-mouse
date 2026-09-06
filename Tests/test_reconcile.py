@@ -91,9 +91,16 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
     # 1. The original defect: a denominator that disagrees with the register.
+    #
+    # The plant is written as `| 271 |` -> `| 266 |` rather than as the whole
+    # tally row. The row's counts change every time a prediction is scored, and
+    # the first version hardcoded them -- so scoring #24 on 2026-09-06 made this
+    # plant stop applying, and `expect_failure` correctly refused to grade a
+    # mutation that had not happened. A plant has to be anchored to the thing it
+    # is testing (the denominator) and not to unrelated numbers beside it.
     expect_failure(
         "a quoted denominator that no longer matches the register",
-        {SCORES: [("| 3 | 0 | 2 | 271 |", "| 3 | 0 | 2 | 266 |")]},
+        {SCORES: [("| 0 | 2 | 271 |", "| 0 | 2 | 266 |")]},
         ["tally row", "271"])
 
     # 2. A verdict changed without the table following it.

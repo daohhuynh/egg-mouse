@@ -322,6 +322,85 @@ equal(Commands.confirmToken(in: "--confirm ecfc8f88\n"), "ecfc8f88",
 equal(Commands.parseVersions("nothing here").labels, [],
       "parseVersions must find nothing in unrelated text")
 
+// -------------------------------------------------------------------- CPI
+// The GUI carries its OWN copy of the CPI grid so it can grey out Apply before
+// a round trip. A second copy of a rule is a second thing to get wrong, so it
+// is scored against the CLI rather than against itself: for every value below,
+// whether Commands.cpiIsLegal says yes must match whether egg-config actually
+// encodes it. If the two ever disagree the GUI is lying to the user about what
+// the device will accept.
+equal(Commands.previewCpi(stage: 1, x: 1600, y: nil), ["cpi", "1", "1600"],
+      "a symmetric CPI must not grow a redundant Y argument")
+equal(Commands.previewCpi(stage: 1, x: 1600, y: 1600), ["cpi", "1", "1600"],
+      "Y equal to X is the same command, not a longer one")
+equal(Commands.previewCpi(stage: 4, x: 1600, y: 800),
+      ["cpi", "4", "1600", "800"], "an asymmetric CPI passes both")
+check(!Commands.previewCpi(stage: 1, x: 800, y: nil).contains("--yes"),
+      "previewCpi must never carry --yes")
+check(Commands.applyCpi(stage: 1, x: 800, y: nil).contains("--yes"),
+      "applyCpi must carry --yes")
+
+let cpiProbe = [1, 9, 10, 11, 15, 400, 405, 800, 1600, 1605, 9995, 10000,
+                10005, 10050, 12030, 29999, 30000, 30001, 100000]
+let (cpiStatus, _) = run("egg-config", ["cpi"])
+if cpiStatus == -1 {
+    print("SKIP: build/egg-config not present; CPI grid not scored against it")
+} else {
+    for v in cpiProbe {
+        let (_, text) = run("egg-config", ["cpi", "1", String(v)])
+        let cliAccepts = text.contains("would write record")
+        check(Commands.cpiIsLegal(v) == cliAccepts,
+              "CPI \(v): GUI says \(Commands.cpiIsLegal(v) ? "legal" : "illegal"), "
+              + "egg-config \(cliAccepts ? "accepted" : "refused") it")
+    }
+    // And the rounding target the GUI would show must be the one the CLI names.
+    let (_, r) = run("egg-config", ["cpi", "1", "1605"])
+    check(r.contains("would store \(Commands.normaliseCpi(1605))"),
+          "the GUI and the CLI must round 1605 to the same place", r)
+}
+
+// ------------------------------------------------ handedness and multiclick
+equal(Commands.previewHandedness("left"), ["handedness", "left"],
+      "previewHandedness must not carry --yes")
+equal(Commands.applyHandedness("left"), ["handedness", "left", "--yes"],
+      "applyHandedness must carry --yes")
+
+equal(Commands.previewMulticlick(button: "left", mode: "off", value: 12),
+      ["multiclick", "left", "off", "12"], "off carries its value")
+equal(Commands.previewMulticlick(button: "left", mode: "gx-safe", value: 12),
+      ["multiclick", "left", "gx-safe"],
+      "a GX mode must not carry a filter value the CLI would ignore")
+equal(Commands.multiclickModes(for: "left"), ["off", "gx-speed", "gx-safe"],
+      "left has an SPDT combo")
+equal(Commands.multiclickModes(for: "middle"), ["off"],
+      "middle has no SPDT combo")
+
+// Scored against the CLI, not against itself -- the GUI's copy of the rule
+// exists to grey out a button, and if it ever disagrees with the tool the user
+// is being told the wrong thing about their own mouse.
+let (mcStatus, _) = run("egg-config", ["multiclick"])
+if mcStatus == -1 {
+    print("SKIP: build/egg-config not present; multiclick rules not scored")
+} else {
+    for b in Commands.multiclickButtons {
+        for m in ["off", "gx-speed", "gx-safe", "nonsense"] {
+            for v in [-1, 0, 8, 25, 26] {
+                if m != "off" && v != 8 { continue }
+                var argv = ["multiclick", b, m]
+                if m == "off" { argv.append(String(v)) }
+                let (_, text) = run("egg-config", argv)
+                let cli = text.contains("would write 0x")
+                let gui = Commands.multiclickIsLegal(mode: m,
+                                                     value: m == "off" ? v : nil,
+                                                     button: b)
+                check(gui == cli,
+                      "multiclick \(b) \(m) \(v): GUI says \(gui ? "legal" : "illegal"), "
+                      + "egg-config \(cli ? "accepted" : "refused")")
+            }
+        }
+    }
+}
+
 // --------------------------------------------------------------------------
 print("\(checks - failures)/\(checks) checks passed")
 if failures > 0 { exit(1) }

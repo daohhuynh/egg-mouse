@@ -48,3 +48,8 @@ compile_commands.json
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Mutation-run transcripts. Reproducible by `ctest -R mutants`; the RESULT
+# belongs in a commit message, the 76-line transcript does not.
+mutants-run.log
+mut*.log

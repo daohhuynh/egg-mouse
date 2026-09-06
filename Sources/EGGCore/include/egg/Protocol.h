@@ -187,23 +187,41 @@ inline constexpr BusyPolicy kConfigBusy{0x03, 100, 100, 10};
 inline constexpr unsigned kDelaySmallQuery   = 50;
 inline constexpr unsigned kDelayReadRequest  = 80;
 inline constexpr unsigned kDelayFactoryReset = 1100;
-// A0 11 IS THE ONE WITH NO DERIVED SLEEP. The vendor takes it as a
-// caller-supplied word (`movzwl 0x8(%ebp)` at 0x404248) and the caller does not
-// push it as a literal -- `push $0x12c` appears nowhere in cfg107's code band,
-// checked exhaustively over the whole file for 300/305/310/320 in both the
-// imm32 and imm16 push forms. So this figure is [O] from the wire, not [D].
+// A0 11's SLEEP IS 300 ms AND IT IS [D]. An earlier version of this comment
+// said it was not derivable, and was wrong in a way CLAUDE.md §1.2a names in so
+// many words. It read:
 //
-// WHERE THERE IS NO DERIVED VALUE, TAKE THE MOST CONSERVATIVE READING OF THE
-// OBSERVED ONE. Waiting longer than the vendor cannot hurt -- the device simply
-// holds the reply, as it does for 3 s during the erase -- while waiting less
-// puts a read on the device inside a window no capture covers. 320 is above the
-// largest gap ever observed (317.7 ms over 73 captured writes), so we are never
-// earlier than Endgame's tool has ever been seen to be.
+//   "the caller does not push it as a literal -- `push $0x12c` appears nowhere
+//    in cfg107's code band, checked exhaustively over the whole file for
+//    300/305/310/320 in both the imm32 and imm16 push forms."
 //
-// The other three delays are [D] and are used exactly as the vendor sets them;
-// they are not padded, because inventing a number on top of a derived one would
-// be replacing a fact with a preference.
-inline constexpr unsigned kDelayWriteRecord  = 320;   // [O] 302.0-317.7 over 73
+// The scan was accurate. The conclusion was not: THE CALLER DOES NOT PUSH IT,
+// IT STORES IT.
+//
+//   0x413ed1  c7 44 24 10 2c 01 00 00   movl $0x12c, 0x10(%esp)   APPLY, 0x413ea0
+//   0x41403f  be 2c 01 00 00            movl $0x12c, %esi         live CPI, 0x414010
+//
+// 0x404180 has exactly two in-edges (config-protocol.md §7.10's call/jump
+// accounting) and both are above. §1.2a clause 1 is that a scan for `push
+// imm32` says nothing about `movl $imm32` -- stating a search space is what
+// makes the gap visible, and nobody looked through it. See §7.27.
+//
+// THE NUMBER STAYS AT 320 ANYWAY, and the reasons are now positive rather than
+// defensive:
+//   - 300 ms is the vendor's FIRST attempt. It retries at 350 and then 400
+//     (`addl $0x32` at 0x413f3b/0x414363, `cmpl $0x3` at 0x413f41/0x414366), so
+//     320 is a wait Endgame's own tool spends on this command.
+//   - The [O] window 302.0-317.7 ms over 73 writes is now EXPLAINED -- 300 ms
+//     of Sleep plus transfer -- rather than merely observed. Two independent
+//     routes agreeing beats either alone.
+//   - It is device-proven at 320 (stage 4, 21/21). Moving a working constant to
+//     match a freshly-derived one buys nothing and risks what works.
+//
+// THE VENDOR'S THREE-ATTEMPT RETRY IS NOT ADOPTED. Retrying a WRITE is policy,
+// not free verification, and §4.2 cuts against it: a silent re-send after an
+// unacknowledged write puts a second A0 11 on the wire in a state we cannot
+// characterise. egg-config refuses and reports instead.
+inline constexpr unsigned kDelayWriteRecord  = 320;   // [D] 300 + [O] 302.0-317.7
 
 // The delay for a config command, or the policy default when we have no cited
 // figure. A [G] delay is not a [G] byte -- it cannot corrupt a record -- but an

@@ -87,6 +87,14 @@ public:
         return record_[kPayloadOffset + off];
     }
 
+    // Set one record byte in what the device HOLDS. Not a fault -- a device
+    // variant. §7.25's capability gate turns on a byte no capture has ever
+    // shown in any state but one, so the only way to exercise the refusal at
+    // all is to be able to say "suppose a device reported otherwise".
+    void pokeStored(std::size_t off, std::uint8_t v) {
+        record_[kPayloadOffset + off] = v;
+    }
+
     unsigned reads() const { return reads_; }
     unsigned writes() const { return writes_; }
     unsigned acceptedWrites() const { return acceptedWrites_; }

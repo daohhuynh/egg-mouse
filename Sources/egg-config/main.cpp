@@ -106,6 +106,21 @@ void usage() {
       "                                    then read it back and verify\n"
       "  egg-config set FIELD VALUE --yes  change ONE derived field\n"
       "  egg-config set                    list the settable fields\n"
+      "  egg-config map BUTTON ACTION --yes   rebind one button\n"
+      "  egg-config map                    list the buttons and actions\n"
+      "  egg-config cpi N X [Y] --yes      set CPI stage N (1-4). Y defaults\n"
+      "                                    to X. Legal: 10..10000 by 10, then\n"
+      "                                    10050..30000 by 50 (§7.19).\n"
+      "  egg-config cpi                    list the stages and the grid\n"
+      "  egg-config handedness left|right --yes   swap the primary click.\n"
+      "                                    NOT a flag: it MOVES your mapping\n"
+      "                                    between entries 0 and 1 (§7.20), so\n"
+      "                                    it reads the record before deciding.\n"
+      "  egg-config multiclick BUTTON MODE [N] --yes\n"
+      "                                    per-button click filter. MODE is\n"
+      "                                    off (N = 0..25), gx-speed or\n"
+      "                                    gx-safe -- the last two on the LEFT\n"
+      "                                    and RIGHT buttons only (§7.22).\n"
       "  egg-config encode F V IN OUT      offline: apply one field to a saved\n"
       "                                    record and write the result. Sends\n"
       "                                    nothing and needs no device.\n"
@@ -205,7 +220,7 @@ void listSettable() {
 // text because "it failed" is not an answer a user can act on -- and because
 // the difference between "we did not write" and "we wrote and cannot confirm"
 // is the difference between a retry and a recovery.
-void explain(Result r) {
+void explain(Result r, const char* refusal = nullptr) {
     switch (r) {
         case Result::Ok:
             break;
@@ -222,6 +237,16 @@ void explain(Result r) {
             std::puts("*** internal error: the frame we built differs from what we\n"
                       "    intended. NOT WRITING. This is a bug in egg-config, not\n"
                       "    in the device -- please report it with the command used.");
+            break;
+        case Result::RefusedCapability:
+            // NOT an error in us and not a failure of the device. The device
+            // told us it is a variant this field's meaning was not derived for,
+            // and §7.25 says the write would be well formed and wrong. The
+            // reason is printed rather than summarised: a refusal a person
+            // cannot audit is one they will work around.
+            std::puts("REFUSED, and nothing was written. The read succeeded; the\n"
+                      "device is fine. This field is not safe to set on it:");
+            if (refusal) std::printf("\n    %s\n", refusal);
             break;
         case Result::WriteRejected:
             std::puts("the device did not acknowledge the write. Nothing was\n"
@@ -248,6 +273,7 @@ int rcFor(Result r) {
         case Result::ReadImplausible:  return 3;
         case Result::AlreadySet:       return 0;
         case Result::RefusedSelfCheck: return 4;
+        case Result::RefusedCapability: return 8;
         case Result::WriteRejected:    return 5;
         case Result::VerifyReadFailed: return 6;
         case Result::VerifyMismatch:   return 7;
@@ -898,11 +924,377 @@ int cmdMap(const std::string& button, const std::string& spec,
         return 0;
     }
     if (o.result != Result::Ok) {
-        explain(o.result);
+        explain(o.result, o.refusal);
         if (!o.changed.empty()) printDiff(o.changed, "before", "after");
         return rcFor(o.result);
     }
     std::printf("%s -> %s. Verified on the device.\n", slot->name, spec.c_str());
+    printDiff(o.changed, "before", "after");
+    return 0;
+}
+
+void listCpi() {
+    std::puts("egg-config cpi STAGE VALUE [Y]   -- set one CPI stage\n");
+    std::puts("  STAGE  1, 2, 3 or 4. Stage numbering matches the vendor's");
+    std::puts("         `CPI 1`..`CPI 4` boxes, which is NOT the same thing as");
+    std::puts("         `cpi-stage`: that field says which one is ACTIVE, and");
+    std::puts("         `cpi-levels` says how many of them the loop cycles.");
+    std::printf("  VALUE  %ld..%ld. Step 10 up to %ld, step 50 above it.\n",
+                kCpiMin, kCpiMax, kCpiFineLimit);
+    std::puts("  Y      optional. Omit it and Y is set equal to X, which is");
+    std::puts("         what the vendor's box does until `X/Y Settings` is");
+    std::puts("         ticked. The X!=Y flag byte is computed, never typed.\n");
+    std::puts("  derived: config-protocol.md §7.19, cfg107 0x40d880-0x40d93a");
+    std::puts("           (the vendor's own clamp-and-round), corroborated by");
+    std::puts("           the trackbar map at 0x40c2f0-0x40c312.");
+}
+
+int cmdCpi(const std::string& stageArg, const std::string& xArg,
+           const std::string& yArg, bool verbose, bool yes,
+           UnknownBytes policy, const std::string& vaultPath) {
+    char* end = nullptr;
+    const long stage = std::strtol(stageArg.c_str(), &end, 10);
+    if (!end || *end || stage < 1 ||
+        stage > static_cast<long>(kCpiStageCount)) {
+        std::printf("`%s` is not a CPI stage.\n\n", stageArg.c_str());
+        listCpi();
+        return 2;
+    }
+    end = nullptr;
+    const long x = std::strtol(xArg.c_str(), &end, 10);
+    if (!end || *end) {
+        std::printf("`%s` is not a number.\n\n", xArg.c_str());
+        listCpi();
+        return 2;
+    }
+    long y = x;
+    if (!yArg.empty()) {
+        end = nullptr;
+        y = std::strtol(yArg.c_str(), &end, 10);
+        if (!end || *end) {
+            std::printf("`%s` is not a number.\n\n", yArg.c_str());
+            listCpi();
+            return 2;
+        }
+    }
+
+    std::uint8_t entry[kCpiEntryLen];
+    const char* err = nullptr;
+    if (!encodeCpiStageEntry(x, y, entry, &err)) {
+        // Say what the vendor WOULD have stored. Refusing without that turns a
+        // one-keystroke typo into a guessing game about which nearby number is
+        // legal, and the whole point of refusing is that we will not choose for
+        // the user.
+        std::printf("%s.\n", err ? err : "cannot encode that");
+        long said = -1;
+        for (long v : {x, y}) {
+            const long n = normaliseCpi(v);
+            if (v != n && v != said) {
+                std::printf("  %ld is not on the grid; the vendor's own tool"
+                            " would store %ld.\n", v, n);
+                said = v;
+            }
+        }
+        std::printf("  Legal values: %ld..%ld in steps of 10, then %ld..%ld in"
+                    " steps of 50.\n", kCpiMin, kCpiFineLimit,
+                    kCpiFineLimit + 50, kCpiMax);
+        return 2;
+    }
+
+    const std::size_t at =
+        kCpiBlockFirst + kCpiEntryLen * static_cast<std::size_t>(stage - 1);
+
+    if (!yes) {
+        std::printf("cpi %ld = %ld x %ld would write record 0x%02zx..0x%02zx:\n",
+                    stage, x, y, at, at + kCpiEntryLen - 1);
+        std::printf("  %02x %02x %02x %02x %02x\n", entry[0], entry[1], entry[2],
+                    entry[3], entry[4]);
+        std::printf("  [0] is the X!=Y flag, computed: %s\n",
+                    entry[0] ? "X and Y differ" : "X and Y are equal");
+        if (stage == 4 && x != y)
+            std::puts("  NOTE: for stage 4 ONLY, cfg107 computes this flag from"
+                      " stage 3's boxes\n"
+                      "  (0x40edde/0x40ede4, §7.8 -- a vendor bug). We compute it"
+                      " from stage 4,\n"
+                      "  so this byte can legitimately differ from what the"
+                      " vendor would send.");
+        std::puts("  derived: config-protocol.md §7.19, cfg107 0x40d880-0x40d93a");
+        std::puts("Re-run with --yes.");
+        return 2;
+    }
+
+    Log log(verbose);
+    auto dev = Device::open(kProductIdApplication, log);
+    if (!dev) return 1;
+    Transport t(*dev, kConfigBusy, log);
+    DeviceConfigLink link(t, log);
+    ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
+
+    std::vector<std::uint8_t> before;
+    Result rr = Result::Ok;
+    if (!s.read(before, rr)) { reportVault(s, vault); explain(rr); return rcFor(rr); }
+    reportVault(s, vault);
+
+    SetOutcome o = s.setRun(at, entry, kCpiEntryLen);
+    if (o.result == Result::AlreadySet) {
+        std::printf("CPI %ld is already %ld x %ld. Nothing to write.\n",
+                    stage, x, y);
+        return 0;
+    }
+    if (o.result != Result::Ok) {
+        explain(o.result, o.refusal);
+        if (!o.changed.empty()) printDiff(o.changed, "before", "after");
+        return rcFor(o.result);
+    }
+    std::printf("CPI %ld -> %ld x %ld. Verified on the device.\n", stage, x, y);
+    printDiff(o.changed, "before", "after");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// handedness -- config-protocol.md §7.20
+// ---------------------------------------------------------------------------
+// The ONE verb here whose dry run has to talk to the device, and the reason is
+// worth stating rather than hiding: left-handed mode is a MOVE, not a flag, so
+// what it would write depends on which entry currently holds the user's
+// assignment. There is no plan to print without reading first.
+//
+// §4.2a's gate, answered: (1) it answers "which state is the record in, and
+// what would change" -- without it the dry run can only describe a rule, not a
+// plan; (2) it cannot be answered off-device for the LIVE record, and
+// `--from FILE` is provided for when a saved one will do; (3) no hardware
+// alternative exists; (4) nothing is written, and an `A1 12` read is the exact
+// round trip `egg-config read` already performs and that the write path would
+// perform first regardless. **The dry run adds no frame the apply would not
+// already have sent.**
+// Seven bytes as hex, for showing a button entry either side of a change.
+static std::string hex7(const std::uint8_t* e) {
+    char buf[3 * kButtonEntryLen + 1];
+    for (std::size_t i = 0; i < kButtonEntryLen; ++i)
+        std::snprintf(buf + 3 * i, 4, "%02x ", e[i]);
+    buf[3 * kButtonEntryLen - 1] = '\0';
+    return std::string(buf);
+}
+
+void listHandedness() {
+    std::puts("egg-config handedness left|right   -- swap the primary click\n");
+    std::puts("  Left-handed mode is NOT a flag byte. cfg107 moves your button\n"
+              "  assignment between record entries 0 and 1 and hard-sets\n"
+              "  whichever one is now the primary click to left-click.\n");
+    std::puts("  Because it is a move, this tool reads the record first and\n"
+              "  refuses if it is in neither state -- that would mean guessing\n"
+              "  which entry holds your mapping, and guessing wrong moves it.\n");
+    std::puts("  --from FILE   decide against a saved record instead of the\n"
+              "                device. Sends nothing at all.\n");
+    std::puts("  derived: config-protocol.md §7.20, cfg107 0x408b00");
+}
+
+static const char* handednessName(Handedness h) {
+    switch (h) {
+        case Handedness::Right: return "right";
+        case Handedness::Left:  return "left";
+        default:                return "neither";
+    }
+}
+
+int cmdHandedness(const std::string& want, const std::string& fromFile,
+                  bool verbose, bool yes, UnknownBytes policy,
+                  const std::string& vaultPath) {
+    Handedness target = Handedness::Unknown;
+    if (want == "left")  target = Handedness::Left;
+    if (want == "right") target = Handedness::Right;
+    if (target == Handedness::Unknown) {
+        std::printf("`%s` is not a handedness.\n\n", want.c_str());
+        listHandedness();
+        return 2;
+    }
+
+    std::vector<std::uint8_t> before;
+    Log log(verbose);
+    std::unique_ptr<Device> dev;
+    std::unique_ptr<Transport> t;
+    std::unique_ptr<DeviceConfigLink> link;
+    std::unique_ptr<ConfigSession> s;
+    FileRecordVault vault(vaultPath);
+
+    if (!fromFile.empty()) {
+        if (!loadRecord(fromFile, before)) return 2;
+    } else {
+        dev = Device::open(kProductIdApplication, log);
+        if (!dev) return 1;
+        t = std::make_unique<Transport>(*dev, kConfigBusy, log);
+        link = std::make_unique<DeviceConfigLink>(*t, log);
+        s = std::make_unique<ConfigSession>(*link, policy, &log);
+        s->setVault(&vault);
+        Result rr = Result::Ok;
+        if (!s->read(before, rr)) {
+            reportVault(*s, vault); explain(rr); return rcFor(rr);
+        }
+        reportVault(*s, vault);
+    }
+
+    const std::uint8_t* rec = before.data() + kPayloadOffset;
+    const Handedness now = readHandedness(rec);
+    std::uint8_t out[2 * kButtonEntryLen];
+    bool changed = false;
+    const char* err = nullptr;
+    if (!applyHandedness(rec, target, out, changed, &err)) {
+        std::printf("%s.\n", err ? err : "cannot do that");
+        std::printf("  entry 0 (left)  is %s\n", hex7(rec + kButtonBlockFirst).c_str());
+        std::printf("  entry 1 (right) is %s\n",
+                    hex7(rec + kButtonBlockFirst + kButtonEntryLen).c_str());
+        std::puts("  One of them has to be 00 01 00 00 00 00 (left-click).\n"
+                  "  `egg-config map` can put a button back, or `factory-reset`.");
+        return 2;
+    }
+    if (!changed) {
+        std::printf("Already %s-handed. Nothing to write.\n", want.c_str());
+        return 0;
+    }
+
+    if (!yes) {
+        std::printf("handedness %s -> %s would write record 0x%02zx..0x%02zx:\n",
+                    handednessName(now), want.c_str(), kButtonBlockFirst,
+                    kButtonBlockFirst + 2 * kButtonEntryLen - 1);
+        std::printf("  entry 0 (left)   %s  ->  %s\n",
+                    hex7(rec + kButtonBlockFirst).c_str(), hex7(out).c_str());
+        std::printf("  entry 1 (right)  %s  ->  %s\n",
+                    hex7(rec + kButtonBlockFirst + kButtonEntryLen).c_str(),
+                    hex7(out + kButtonEntryLen).c_str());
+        std::puts("  Byte +6 is the multiclick filter (§7.22) and travels with\n"
+                  "  its own button. cfg107's OFF path copies it in one\n"
+                  "  direction instead; we swap both ways so a filter you set\n"
+                  "  deliberately is not silently overwritten.");
+        std::puts("  derived: config-protocol.md §7.20, cfg107 0x408b00");
+        std::puts(fromFile.empty() ? "Re-run with --yes."
+                                   : "This was decided offline; re-run without"
+                                     " --from and with --yes to apply it.");
+        return 2;
+    }
+    if (!fromFile.empty()) {
+        std::puts("--from is offline only. Re-run without it to write.");
+        return 2;
+    }
+
+    SetOutcome o = s->setRun(kButtonBlockFirst, out, 2 * kButtonEntryLen);
+    if (o.result == Result::AlreadySet) {
+        std::printf("Already %s-handed. Nothing to write.\n", want.c_str());
+        return 0;
+    }
+    if (o.result != Result::Ok) {
+        explain(o.result, o.refusal);
+        if (!o.changed.empty()) printDiff(o.changed, "before", "after");
+        return rcFor(o.result);
+    }
+    std::printf("Handedness -> %s. Verified on the device.\n", want.c_str());
+    printDiff(o.changed, "before", "after");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// multiclick -- config-protocol.md §7.22
+// ---------------------------------------------------------------------------
+static const char* kMulticlickButtons[kMulticlickCount] = {
+    "left", "right", "middle", "forward", "back"};
+
+void listMulticlick() {
+    std::puts("egg-config multiclick BUTTON MODE [VALUE]\n");
+    std::puts("  BUTTON   left, right, middle, forward or back");
+    std::puts("  MODE     off       VALUE is the filter, 0..25 (default 8)");
+    std::puts("           gx-speed  LEFT and RIGHT only -- stores 0xf1");
+    std::puts("           gx-safe   LEFT and RIGHT only -- stores 0xf0\n");
+    std::puts("  One byte, two meanings, and the legal set is NOT the same for\n"
+              "  every button: only left and right have an SPDT combo on the\n"
+              "  vendor's page, so a GX mode on the other three would be a byte\n"
+              "  its own software cannot produce (§1.3).\n");
+    std::puts("  Record bytes:");
+    for (std::size_t i = 0; i < kMulticlickCount; ++i)
+        std::printf("    %-8s 0x%02zx%s\n", kMulticlickButtons[i],
+                    kMulticlickFirst + kMulticlickStride * i,
+                    i < 2 ? "   (has an SPDT combo)" : "");
+    std::puts("\n  derived: config-protocol.md §7.22, cfg107 0x405f84 (range),\n"
+              "           0x406645/0x406653 and 0x406705/0x406713 (the GX bytes)");
+}
+
+int cmdMulticlick(const std::string& buttonArg, const std::string& mode,
+                  const std::string& valueArg, bool verbose, bool yes,
+                  UnknownBytes policy, const std::string& vaultPath) {
+    std::size_t button = kMulticlickCount;
+    for (std::size_t i = 0; i < kMulticlickCount; ++i)
+        if (buttonArg == kMulticlickButtons[i]) button = i;
+    if (button == kMulticlickCount) {
+        std::printf("`%s` has no multiclick filter.\n\n", buttonArg.c_str());
+        listMulticlick();
+        return 2;
+    }
+    long value = kMulticlickDefault;
+    if (!valueArg.empty()) {
+        char* end = nullptr;
+        value = std::strtol(valueArg.c_str(), &end, 10);
+        if (!end || *end) {
+            std::printf("`%s` is not a number.\n\n", valueArg.c_str());
+            listMulticlick();
+            return 2;
+        }
+    }
+    std::uint8_t byte = 0;
+    const char* err = nullptr;
+    if (!encodeMulticlick(button, mode.c_str(), value, byte, &err)) {
+        std::printf("%s.\n\n", err ? err : "cannot encode that");
+        listMulticlick();
+        return 2;
+    }
+    const std::size_t at = kMulticlickFirst + kMulticlickStride * button;
+
+    if (!yes) {
+        // The suffix is built into a NAMED string first. Writing
+        // `(" " + std::to_string(v)).c_str()` inline dangles: the temporary is
+        // destroyed at the end of the full expression, before printf reads it.
+        // It printed the right thing anyway on this build, which is exactly why
+        // CMakeLists turns format mistakes into errors and why this one has to
+        // be fixed on sight rather than when it misbehaves.
+        const std::string suffix =
+            (mode == "off") ? (" " + std::to_string(value)) : std::string();
+        std::printf("multiclick %s %s%s would write 0x%02x to record 0x%02zx"
+                    " (wire 0x%03zx).\n", kMulticlickButtons[button],
+                    mode.c_str(), suffix.c_str(), byte, at, kPayloadOffset + at);
+        std::puts("  This byte is SHARED: 0..25 is a filter value, 0xf1 is GX\n"
+                  "  Speed and 0xf0 is GX Safe. Writing one erases the other.");
+        std::puts("  derived: config-protocol.md §7.22, cfg107 0x405f84 /"
+                  " 0x406645 / 0x406653");
+        std::puts("Re-run with --yes.");
+        return 2;
+    }
+
+    Log log(verbose);
+    auto dev = Device::open(kProductIdApplication, log);
+    if (!dev) return 1;
+    Transport t(*dev, kConfigBusy, log);
+    DeviceConfigLink link(t, log);
+    ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
+
+    std::vector<std::uint8_t> before;
+    Result rr = Result::Ok;
+    if (!s.read(before, rr)) { reportVault(s, vault); explain(rr); return rcFor(rr); }
+    reportVault(s, vault);
+
+    SetOutcome o = s.setRun(at, &byte, 1);
+    if (o.result == Result::AlreadySet) {
+        std::printf("%s multiclick is already that. Nothing to write.\n",
+                    kMulticlickButtons[button]);
+        return 0;
+    }
+    if (o.result != Result::Ok) {
+        explain(o.result, o.refusal);
+        if (!o.changed.empty()) printDiff(o.changed, "before", "after");
+        return rcFor(o.result);
+    }
+    std::printf("%s multiclick -> %s. Verified on the device.\n",
+                kMulticlickButtons[button], mode.c_str());
     printDiff(o.changed, "before", "after");
     return 0;
 }
@@ -961,7 +1353,7 @@ int cmdSet(const std::string& field, const std::string& value,
         return 0;
     }
     if (o.result != Result::Ok) {
-        explain(o.result);
+        explain(o.result, o.refusal);
         if (o.result == Result::VerifyMismatch && !o.after.empty()) {
             const std::size_t at = kPayloadOffset + f->recordOffset;
             std::printf("    record 0x%02zx is 0x%02x, not the 0x%02x we sent.\n",
@@ -1047,6 +1439,7 @@ int main(int argc, char** argv) {
     std::string save;
     UnknownBytes policy = kDefaultUnknownBytes;
     std::string vaultPath = defaultVaultPath();
+    std::string fromFile;
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -1054,6 +1447,9 @@ int main(int argc, char** argv) {
         else if (a == "--yes") yes = true;
         else if (a == "--save" && i + 1 < argc) save = argv[++i];
         else if (a == "--vault" && i + 1 < argc) vaultPath = argv[++i];
+        // `handedness` only. It decides from a SAVED record instead of the
+        // device, so the plan can be inspected with nothing on the wire.
+        else if (a == "--from" && i + 1 < argc) fromFile = argv[++i];
         else if (a.rfind("--unknown-bytes=", 0) == 0) {
             // No silent fallback. A mistyped policy would otherwise choose one
             // of two different byte streams without saying so.
@@ -1086,6 +1482,18 @@ int main(int argc, char** argv) {
     if (cmd == "map" && args.size() > 2)
         return cmdMap(args[1], args[2], verbose, yes, policy, vaultPath);
     if (cmd == "map") { listButtons(); return 2; }
+    if (cmd == "cpi" && args.size() > 2)
+        return cmdCpi(args[1], args[2], args.size() > 3 ? args[3] : std::string(),
+                      verbose, yes, policy, vaultPath);
+    if (cmd == "cpi") { listCpi(); return 2; }
+    if (cmd == "handedness" && args.size() > 1)
+        return cmdHandedness(args[1], fromFile, verbose, yes, policy, vaultPath);
+    if (cmd == "handedness") { listHandedness(); return 2; }
+    if (cmd == "multiclick" && args.size() > 2)
+        return cmdMulticlick(args[1], args[2],
+                             args.size() > 3 ? args[3] : std::string(),
+                             verbose, yes, policy, vaultPath);
+    if (cmd == "multiclick") { listMulticlick(); return 2; }
     if (cmd == "set") { listSettable(); return 2; }
     usage();
     return 1;

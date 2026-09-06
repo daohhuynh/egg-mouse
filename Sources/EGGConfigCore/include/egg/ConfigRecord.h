@@ -183,6 +183,29 @@ struct Settable {
 // the notes -- §1.2a's rule that absence is a claim applies to our own UI too.
 struct Withheld { const char* name; const char* why; };
 
+// ---------------------------------------------------------------------------
+// Capability gates -- a field whose MEANING depends on another record byte
+// ---------------------------------------------------------------------------
+// config-protocol.md §7.25. Record 0x6f decides what record 0x09 (`lod`) means.
+// cfg107 never writes 0x6f; it compares it to 1 at three sites and, when it is
+// 1, the Lift-off Distance combo holds two entries instead of eleven, on a
+// DIFFERENT scale -- `1` is 1.0mm there and 0.8mm otherwise -- and is greyed
+// out (cfg107 0x40ec42, 0x40eeb6, 0x40f1e5).
+//
+// All 82 captured records report 0x6f == 0, so the eleven-step scale is the one
+// this mouse uses and `set lod 0..10` is correct for it. But a value written
+// under the other reading would be well formed, would verify against read-back,
+// and would mean a different physical distance -- CLAUDE.md §2's exact failure
+// shape: "nothing downstream of us catches a wrong-but-well-formed image".
+//
+// The guard is OFF-WIRE. Read-modify-write already has the byte in hand, so
+// refusing costs no extra frame -- §4.2's rule that a safety measure changing
+// the byte stream is not free, and that one which only refuses is always
+// allowed.
+//
+// Returns nullptr when the field may be written, or the reason it may not.
+const char* capabilityRefusal(const Settable& f, const std::uint8_t* record);
+
 extern const Settable kSettable[];
 extern const std::size_t kSettableCount;
 extern const Withheld  kWithheld[];
@@ -226,6 +249,93 @@ struct ButtonSlot {
     bool         vendorExposes;
     const char*  note;
 };
+
+// ---------------------------------------------------------------------------
+// CPI stages  (config-protocol.md §7.19)
+// ---------------------------------------------------------------------------
+// Four 5-byte records from record 0x23: `flag, X lo, X hi, Y lo, Y hi`, X and Y
+// u16 little-endian, flag = (X != Y). §7.8 established the layout and the phase
+// (flag FIRST); §7.19 adds the part that was missing and that §1.3 requires
+// before a byte may be written -- WHAT VALUES ARE LEGAL.
+//
+// The vendor normalises every typed CPI through one function, cfg107
+// `0x0040d880`-`0x0040d93a`, and the trackbar handler reaches the same set by a
+// different route (`0x0040c2f0`-`0x0040c312`, and again for Y at
+// `0x0040c354`-`0x0040c395`). Two independent derivations, one answer:
+//
+//     clamp to [10, 30000]
+//     <= 10000 : round to the nearest multiple of 10   (ties up, rem >= 5)
+//     >  10000 : round to the nearest multiple of 50   (ties up, rem >= 25)
+//
+// So the legal set is exactly {10,20,...,10000} u {10050,10100,...,30000}.
+constexpr std::size_t kCpiBlockFirst = 0x23;
+constexpr std::size_t kCpiEntryLen   = 5;
+constexpr std::size_t kCpiStageCount = 4;
+constexpr long kCpiMin  = 10;
+constexpr long kCpiMax  = 30000;
+constexpr long kCpiFineLimit = 10000;   // <= this rounds by 10, above by 50
+
+// The vendor's normaliser, transcribed. Returns the value cfg107 would store
+// for `v`, including its clamps and its round-half-up.
+long normaliseCpi(long v);
+
+// Compose one stage's five bytes. Refuses a value that is not already
+// normalised rather than silently rounding it: a CPI the user did not ask for
+// is exactly the kind of quiet substitution §4.1's diff-verify exists to catch,
+// and the caller can print what normaliseCpi() would have done instead.
+bool encodeCpiStageEntry(long x, long y, std::uint8_t out[kCpiEntryLen],
+                         const char** err);
+
+// Decode one stage out of a record payload.
+struct CpiStage { long x; long y; bool flag; };
+CpiStage decodeCpiStageEntry(const std::uint8_t* entry);
+
+// ---------------------------------------------------------------------------
+// Left-handed mode (config-protocol.md §7.20)
+// ---------------------------------------------------------------------------
+// NOT a flag byte. cfg107's checkbox handler `0x408b00` MOVES the user's
+// assignment between button entries 0 and 1 and hard-sets whichever one is now
+// the primary click to left-click, `00 01 00 00 00 00`.
+//
+// The vendor's transform is not idempotent -- it runs on a checkbox TRANSITION,
+// so applying it twice would overwrite the user's assignment with the reset
+// value. A CLI has no transition, only a requested end state, so it has to read
+// the current state out of the record first. A record in neither state is one
+// the vendor's UI cannot produce, and is refused rather than guessed at.
+enum class Handedness { Right, Left, Unknown };
+
+Handedness readHandedness(const std::uint8_t* record);
+
+// Writes the 14 bytes of entries 0 and 1 as they should be after the change.
+// `changed` comes back false when the record is already in the requested state,
+// in which case nothing needs to be written at all.
+bool applyHandedness(const std::uint8_t* record, Handedness want,
+                     std::uint8_t out[2 * kButtonEntryLen], bool& changed,
+                     const char** err);
+
+// ---------------------------------------------------------------------------
+// Multiclick filter and SPDT mode (config-protocol.md §7.22)
+// ---------------------------------------------------------------------------
+// One byte, two meanings, and NOT the same domain for every button. All five of
+// left/right/middle/forward/back take a number 0..25 (CSliderCtrl::SetRange(0,
+// 0x19) at cfg107 0x405f84, default 8 by TBM_SETPOS at 0x405f9f). Only left and
+// right also take GX Speed (0xf1) or GX Safe (0xf0) -- the other three have no
+// SPDT combo on the vendor's page, so those bytes there would be [G] (§1.3).
+constexpr std::size_t  kMulticlickFirst  = 0x3d;   // = kButtonBlockFirst + 6
+constexpr std::size_t  kMulticlickStride = kButtonEntryLen;
+constexpr std::size_t  kMulticlickCount  = 5;
+constexpr long         kMulticlickMax    = 25;
+constexpr long         kMulticlickDefault = 8;
+constexpr std::uint8_t kSpdtGxSpeed = 0xF1;
+constexpr std::uint8_t kSpdtGxSafe  = 0xF0;
+
+// `button` is 0..4 in the block's own order. `mode` is "off", "gx-speed" or
+// "gx-safe"; `value` is used only for "off".
+bool encodeMulticlick(std::size_t button, const char* mode, long value,
+                      std::uint8_t& out, const char** err);
+
+// The inverse, for printing a record back to a person.
+const char* describeMulticlick(std::uint8_t byte, long& value);
 
 extern const ButtonAction kButtonActions[];
 extern const std::size_t  kButtonActionCount;

@@ -129,6 +129,16 @@ objdir_for() {
   esac
 }
 
+# THE DECLARED SIZE OF THIS SUITE. Checked at the end against what actually
+# ran. Bump it deliberately when adding a mutant; never to make a run go green.
+#
+# Why it exists: on 2026-09-06 an apostrophe inside a single-quoted mutant
+# pattern closed the quote, bash aborted at that line, and the 9 mutants below
+# it -- including every equivalent -- never ran. The script printed nothing
+# about it because the summary lives below the error too. A count fixed at the
+# TOP is the only version of this check that a truncated script cannot skip.
+DECLARED_KILL=74
+DECLARED_EQUIV=7
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
 # The clean binary's hash. Any mutant build equal to this did not take effect.
@@ -633,6 +643,155 @@ mutate kill "sub-byte writes clobber the rest of the byte" "$CR" \
 '    return static_cast<std::uint8_t>((old & ~f.mask) |
                                      ((value << f.shift) & f.mask));|||    return static_cast<std::uint8_t>((value << f.shift) & f.mask);  // MUTANT'
 
+# --------------------------------------------------------------------------
+# The CPI encoder. config-protocol.md §7.19 derives the grid from cfg107
+# `0x40d880`; these ask whether the C++ that implements it is actually graded.
+# Every one of them produces a CPI the vendor's own tool would never store, and
+# CLAUDE.md §1.3 makes an ungrounded value a byte we may not write.
+# --------------------------------------------------------------------------
+
+# The clamp stops protecting the low end: `cpi 1 0` would encode 0, and a mouse
+# reporting zero counts per inch does not move.
+mutate kill "cpi: the low clamp is dropped" "$CR" \
+'    if (v < kCpiMin) v = kCpiMin;|||    // MUTANT: no low clamp'
+
+# 30000 is the vendor's ceiling. Past it the u16 store at 0x57f220 still fits
+# (65535), so nothing downstream would catch it -- which is the whole point.
+mutate kill "cpi: the high clamp is dropped" "$CR" \
+'    if (v > kCpiMax) v = kCpiMax;|||    // MUTANT: no high clamp'
+
+# Half-up becomes half-down. `cmpl $5` / `jb` at 0x40d8c7 says up.
+mutate kill "cpi: rounding goes half DOWN" "$CR" \
+'    return (rem * 2 >= step ? q + 1 : q) * step;|||    return (rem * 2 > step ? q + 1 : q) * step;  // MUTANT'
+
+# The coarse step above 10000 becomes fine. 10010 would be accepted; the vendor
+# stores only multiples of 50 up there (`imull $0x32` at 0x40d92c).
+mutate kill "cpi: one step size everywhere" "$CR" \
+'    const long step = (v <= kCpiFineLimit) ? 10 : 50;|||    const long step = 10;  // MUTANT'
+
+# EQUIVALENT, and it took a run to establish it. `<` and `<=` choose a
+# different step ONLY at v == 10000 exactly -- everything else is clamped into
+# [10,30000] and then falls on the same side of both tests. At 10000 the fine
+# arm gives 1000*10 and the coarse arm gives 200*50, and those are the same
+# number, so no input can tell the two apart.
+#
+# The code keeps `<=` anyway, because cfg107 encodes `jbe 0x40d8b6` at
+# 0x40d91e and a faithful transcription of a derived rule is worth more than a
+# provably-indistinguishable one (§1.3's spirit: we do not "tidy" the vendor).
+# Listed here so the next person to notice the surviving mutant finds the proof
+# instead of re-deriving it, or worse, "fixing" the test.
+mutate equiv "cpi: the changeover comparison is strict (10000 is on both grids)" "$CR" \
+'    const long step = (v <= kCpiFineLimit) ? 10 : 50;|||    const long step = (v < kCpiFineLimit) ? 10 : 50;  // MUTANT'
+
+# Y stops being checked, so `cpi 1 1600 1605` writes an off-grid Y.
+mutate kill "cpi: only X is validated" "$CR" \
+'    for (long v : {x, y}) {|||    for (long v : {x}) {  // MUTANT'
+
+# The flag inverts. §7.8 derives it as X != Y; the device is then told the two
+# axes match when they do not.
+mutate kill "cpi: the X!=Y flag is inverted" "$CR" \
+'    out[0] = static_cast<std::uint8_t>(x != y ? 1 : 0);|||    out[0] = static_cast<std::uint8_t>(x == y ? 1 : 0);  // MUTANT'
+
+# Byte order flips. 1600 becomes 0x0640 = 16000 on the device.
+mutate kill "cpi: the u16 is stored big-endian" "$CR" \
+'    out[1] = static_cast<std::uint8_t>(x & 0xFF);
+    out[2] = static_cast<std::uint8_t>((x >> 8) & 0xFF);|||    out[1] = static_cast<std::uint8_t>((x >> 8) & 0xFF);  // MUTANT
+    out[2] = static_cast<std::uint8_t>(x & 0xFF);'
+
+# X and Y swap. Invisible on every capture but `02-basic`'s two asymmetric
+# records, which is exactly why those two are worth having.
+mutate kill "cpi: X and Y are swapped in the payload" "$CR" \
+'    out[3] = static_cast<std::uint8_t>(y & 0xFF);
+    out[4] = static_cast<std::uint8_t>((y >> 8) & 0xFF);|||    out[3] = static_cast<std::uint8_t>(x & 0xFF);  // MUTANT
+    out[4] = static_cast<std::uint8_t>((x >> 8) & 0xFF);'
+
+# Decode stops inverting encode, so the diff a person reads before approving a
+# write would describe bytes other than the ones being sent.
+mutate kill "cpi: decode reads the flag from the wrong byte" "$CR" \
+'    s.flag = e[0] != 0;|||    s.flag = e[1] != 0;  // MUTANT'
+
+# --------------------------------------------------------------------------
+# Handedness (§7.20) and the multiclick/SPDT byte (§7.22). Both write button
+# entries, and both have a refusal that is the whole point of the feature.
+# --------------------------------------------------------------------------
+
+# The state test stops ignoring byte +6, so a record whose multiclick filter is
+# not 8 reads as Unknown and the verb refuses work it should do.
+mutate kill "handedness: the state test includes the multiclick byte" "$CR" \
+'    return std::memcmp(entry, kLeftClickEntry, sizeof kLeftClickEntry) == 0;|||    return std::memcmp(entry, kLeftClickEntry, kButtonEntryLen) == 0;  // MUTANT'
+
+# Unknown stops being refused and is treated as right-handed. This is the
+# guess that moves a mapping the user did not ask to move.
+mutate kill "handedness: an unrecognisable record is assumed right-handed" "$CR" \
+'    if (a == b) return Handedness::Unknown;   // neither, or ambiguously both|||    if (a == b) return Handedness::Right;  // MUTANT'
+
+# The already-in-that-state short circuit goes away, so applying twice runs the
+# vendor's non-idempotent transform twice and destroys the assignment.
+mutate kill "handedness: applying twice is no longer a no-op" "$CR" \
+'    if (now == want) return true;             // nothing to write|||    // MUTANT: always transform'
+
+# +6 is copied instead of swapped -- cfg107 arm A's behaviour, which silently
+# overwrites one button multiclick filter with the other one.
+mutate kill "handedness: byte +6 is copied, not swapped" "$CR" \
+'    vac[6] = vacPlus6;|||    vac[6] = keepPlus6;  // MUTANT'
+
+# The vacated slot keeps the old action instead of becoming left-click, so both
+# entries end up bound to the same thing and there is no primary click.
+mutate kill "handedness: the vacated entry is not reset to left-click" "$CR" \
+'    std::memcpy(vac, kLeftClickEntry, sizeof kLeftClickEntry);|||    // MUTANT: leave the vacated entry alone'
+
+# GX modes become legal on middle/forward/back -- bytes the vendor page cannot
+# produce there, i.e. a [G] write (1.3).
+mutate kill "multiclick: every button is allowed a GX mode" "$CR" \
+'    const bool hasSpdt = (button < 2);        // left and right only (§7.22.3)|||    const bool hasSpdt = true;  // MUTANT'
+
+# The two GX bytes swap, so asking for Safe stores Speed.
+mutate kill "multiclick: GX Safe and GX Speed are swapped" "$CR" \
+'        out = kSpdtGxSpeed;
+        return true;|||        out = kSpdtGxSafe;  // MUTANT
+        return true;'
+
+# The range opens past 25, into the bytes the vendor uses for GX.
+mutate kill "multiclick: the filter range is unbounded above" "$CR" \
+'    if (value < 0 || value > kMulticlickMax) {|||    if (value < 0) {  // MUTANT'
+
+# An unknown mode silently becomes `off`, so a typo writes a filter value.
+mutate kill "multiclick: an unknown mode falls through to off" "$CR" \
+'    if (!mode || std::strcmp(mode, "off") != 0) {|||    if (false) {  // MUTANT'
+
+# describe() stops rejecting bytes the page cannot produce, so a record in an
+# unexplained state would be reported as a valid setting.
+mutate kill "multiclick: describe accepts any byte" "$CR" \
+'    if (byte <= kMulticlickMax) return "off";
+    return nullptr;             // a value the vendor'\''s page cannot produce|||    return "off";  // MUTANT'
+
+# §7.25's capability gate, removed. `set lod` would then be accepted on a device
+# whose record 0x6f says the value means a different lift-off distance -- a
+# write that is well formed, verifies, and is wrong.
+mutate kill "the lod capability gate never fires" "$CR" \
+'        if (record[kPayloadOffset + g.governedBy] != g.onlyWhen) return g.why;|||        (void)g;  // MUTANT'
+
+# The gate fires on the wrong byte, so it neither protects lod nor stays quiet.
+mutate kill "the capability gate reads the byte next door" "$CR" \
+'        if (record[kPayloadOffset + g.governedBy] != g.onlyWhen) return g.why;|||        if (record[kPayloadOffset + g.governedBy + 1] != g.onlyWhen) return g.why;  // MUTANT'
+
+# The gate compares the wrong way round: it would refuse exactly the devices it
+# was derived on and permit the ones it was not.
+mutate kill "the capability gate is inverted" "$CR" \
+'        if (record[kPayloadOffset + g.governedBy] != g.onlyWhen) return g.why;|||        if (record[kPayloadOffset + g.governedBy] == g.onlyWhen) return g.why;  // MUTANT'
+
+# The gate stops matching by name, so it applies to every field or to none.
+mutate kill "the capability gate ignores which field is being set" "$CR" \
+'        if (std::strcmp(f.name, g.field) != 0) continue;|||        (void)f;  // MUTANT'
+
+# The refusal happens, but AFTER the frame is on the wire -- which is not a
+# refusal at all. §4.2: an off-wire guard is only free while it stays off-wire.
+mutate kill "the capability gate runs after the write" "$CS" \
+'    if ((o.refusal = capabilityRefusal(f, o.before.data())) != nullptr) {
+        o.result = Result::RefusedCapability;
+        return o;
+    }|||    // MUTANT: gate moved after the send'
+
 # The known-good blob stops being known-good: every read overwrites it, so the
 # undo becomes a mirror of whatever state the device is in now.
 mutate kill "the vault overwrites the first record it saved" "$CV" \
@@ -695,5 +854,13 @@ FAIL=0
 [ "$EQUIV_BAD" -gt 0 ] && { echo "$EQUIV_BAD equivalent mutant(s) were killed -- the label is wrong."; FAIL=1; }
 [ "$BROKEN" -gt 0 ] && FAIL=1
 [ "$KILLED" -eq 0 ] && { echo "ZERO real defects killed. §6.2: a red flag, not a pass."; FAIL=1; }
+
+# Did the whole script actually run? See DECLARED_KILL above.
+RAN_KILL=$((KILLED+HOLES)); RAN_EQUIV=$((EQUIV_OK+EQUIV_BAD))
+if [ $((RAN_KILL+RAN_EQUIV+BROKEN)) -ne $((DECLARED_KILL+DECLARED_EQUIV)) ]; then
+  echo "MUTANT COUNT MISMATCH: declared $((DECLARED_KILL+DECLARED_EQUIV)), ran $((RAN_KILL+RAN_EQUIV+BROKEN))."
+  echo "Something above did not execute. A short run is not a clean run."
+  FAIL=1
+fi
 [ "$FAIL" -eq 0 ] && echo "The suite can produce a bad result, which is what makes its passes mean anything."
 exit $FAIL
