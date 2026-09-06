@@ -3,6 +3,8 @@
 #include "egg/BootloaderEntry.h"
 #include "egg/Device.h"
 #include "egg/FlashCommands.h"
+#include "egg/FlashPlan.h"
+#include "egg/HidBootloaderLink.h"
 #include "egg/Firmware.h"
 #include "egg/RecordVault.h"
 #include "egg/Transport.h"
@@ -12,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <thread>
 
@@ -94,8 +97,21 @@ static int usage() {
         "an image whose SHA-256 is not the pinned value is refused before any\n"
         "byte goes out.\n"
         "\n"
-        "There is deliberately no 'flash' verb yet. Staged bring-up (§4.4) puts a\n"
-        "real flash last, after a read-back against the device.\n"
+        "  egg-flash read-firmware [out.bin]   read the device's CURRENT image\n"
+        "                                      back with A0 07 and save it.\n"
+        "                                      Read-only. --check just reports\n"
+        "                                      whether the bootloader is there.\n"
+        "  egg-flash flash <updater.exe>       the real thing. Prints the plan\n"
+        "                                      and a token; needs --confirm.\n"
+        "\n"
+        "ENTRY IS BY BUTTON (§4.2b). This tool will not send A1 3A: a software\n"
+        "entry LATCHES -- observed 2026-09-05, and a power cycle does not undo it\n"
+        "-- while a button entry is one unplug from normal. `flash` refuses\n"
+        "unless the device is already in a bootloader you put it in.\n"
+        "\n"
+        "`flash` reads the current image back and saves it BEFORE erasing, and\n"
+        "abandons the flash if that fails (§4.2). It never sends A1 13, so your\n"
+        "settings are not part of the operation.\n"
         "\n"
         "  --vault F   where egg-config keeps the known-good settings record.\n"
         "              Default ~/.egg-mouse-known-good.bin. This tool's last\n"
@@ -337,15 +353,379 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
     return 0;
 }
 
+
+// ---------------------------------------------------------------------------
+// §4.4 stage 3, and now also CLAUDE.md §4.2's precondition for ANY erase:
+// "Never erase without a saved copy of what is being erased."
+//
+// Read-only. A0 07 carries a block index and nothing else -- no payload, no
+// length. Before erase, so §4.2's first regime applies without qualification:
+// every failure aborts, because a partial read is not a backup.
+// ---------------------------------------------------------------------------
+static bool bootloaderIsPresent(std::size_t* bootColl, std::size_t* appColl) {
+    const auto seen = seeAll();
+    const std::size_t b = countVendorCollections(seen, egg::kProductIdBootloader);
+    const std::size_t a = countVendorCollections(seen, egg::kProductIdApplication);
+    if (bootColl) *bootColl = b;
+    if (appColl)  *appColl  = a;
+    return b == 1 && a == 0;
+}
+
+// The instruction, in one place, so every caller says the same thing. §4.2b
+// makes this the ONLY way in: A1 3A latches and is not to be sent.
+static const char* const kButtonEntry =
+    "Get into the bootloader BY BUTTON (§4.2b: read-only work enters by button,\n"
+    "because abort is free there and a button entry is one unplug from normal):\n"
+    "  1. Unplug the mouse.\n"
+    "  2. Hold LEFT and RIGHT mouse buttons together. Keep holding.\n"
+    "  3. Plug the cable in. Keep holding a few more seconds, then release.\n"
+    "  4. Check with: ./build/egg-flash read-firmware --check\n"
+    "A button-entered bootloader EXITS ON A POWER CYCLE (bootloader-observed.md\n"
+    "§5a), so if you change your mind at any point, just unplug it.\n";
+
+static int saveAndVerify(const std::vector<std::uint8_t>& image,
+                         const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) { std::printf("REFUSED: cannot open %s for writing\n", path.c_str()); return 1; }
+    const std::size_t wrote = std::fwrite(image.data(), 1, image.size(), f);
+    const bool closed = std::fclose(f) == 0;
+    if (wrote != image.size() || !closed) {
+        std::printf("REFUSED: wrote %zu of %zu bytes to %s\n",
+                    wrote, image.size(), path.c_str());
+        return 1;
+    }
+    // §4.2 says "and the file re-read and checked". Re-reading is the whole
+    // point: a backup that was never read back is a belief, not a backup.
+    std::FILE* g = std::fopen(path.c_str(), "rb");
+    if (!g) { std::printf("REFUSED: cannot re-open %s to verify it\n", path.c_str()); return 1; }
+    std::vector<std::uint8_t> back(image.size());
+    const std::size_t got = std::fread(back.data(), 1, back.size(), g);
+    std::fclose(g);
+    if (got != image.size() || back != image) {
+        std::printf("REFUSED: %s does not read back as written\n", path.c_str());
+        return 1;
+    }
+    return 0;
+}
+
+static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verbose) {
+    std::size_t boot = 0, app = 0;
+    const bool ready = bootloaderIsPresent(&boot, &app);
+    std::printf("preflight, right now:\n"
+                "  %zu bootloader  vendor collection(s)  (PID 0x%04x)\n"
+                "  %zu application vendor collection(s)  (PID 0x%04x)\n",
+                boot, egg::kProductIdBootloader, app, egg::kProductIdApplication);
+    if (!ready) {
+        std::printf("  -> NOT ready. Nothing was sent.\n\n%s", kButtonEntry);
+        return 1;
+    }
+    std::printf("  -> ready.\n");
+    if (checkOnly) return 0;
+
+    egg::Log log(verbose);
+    auto link = HidBootloaderLink::open(log);
+    if (!link) { std::printf("REFUSED: could not open the bootloader.\n"); return 1; }
+
+    std::printf("\nreading blocks 0x%02x..0x%02x with A0 07 (read-only)...\n",
+                kBlockFirst, kBlockLast);
+    const ReadBack rb = readApplicationRegion(*link);
+    if (!rb.ok) {
+        std::printf("\nFAILED after %zu of %zu blocks: %s\n",
+                    rb.blocksRead, kBlockCount, rb.error.c_str());
+        std::printf(
+          "\nIf the status was a value other than 0x01, the bootloader may only\n"
+          "accept A0 07 inside a flash session it started with A0 03. That is a\n"
+          "FINDING, not a bug to work around: A0 03 erases, and §4.2 forbids\n"
+          "erasing without the backup this command exists to make.\n");
+        return 1;
+    }
+    std::printf("read       %zu blocks, %zu bytes\n", rb.blocksRead, rb.image.size());
+    std::printf("sha256     %s\n", sha256Hex(rb.image.data(), rb.image.size()).c_str());
+    std::printf("checksum   0x%08x  (32-bit sum, the value A0 03 declares)\n",
+                wholeImageChecksum(rb.image));
+    if (saveAndVerify(rb.image, outPath) != 0) return 1;
+    std::printf("saved      %s, re-read and byte-identical\n", outPath.c_str());
+    std::printf(
+      "\nCompare it against the image the updater would write:\n"
+      "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
+      "  cmp %s /tmp/fw140.bin\n"
+      "A match proves the block arithmetic of §3.8 AND that the application is\n"
+      "intact. A mismatch is worth understanding BEFORE anything is written.\n",
+      outPath.c_str());
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// §4.4 stage 4. The real thing.
+// ---------------------------------------------------------------------------
+static int cmdFlash(const Image& img, const std::string& vaultPath,
+                    const std::string& confirmArg, const std::string& backupPath,
+                    bool verbose) {
+    const std::string token = confirmToken(img);
+
+    // THE PLAN IS PRINTED FIRST, AND UNCONDITIONALLY.
+    //
+    // The first version of this checked device readiness before showing the
+    // plan, so the only way to read what the tool would do was to already have
+    // the mouse in the bootloader. That is backwards: reviewing the plan is
+    // read-only and should happen calmly, BEFORE the device is put into a state
+    // anyone is nervous about. The token depends only on the image, so there is
+    // nothing about the device it needs in order to be correct.
+    if (confirmArg.empty()) {
+        std::printf(
+          "\nWHAT WOULD HAPPEN, in order:\n"
+          "  A1 3A  enter the bootloader, the vendor's own way (§4.2b)\n"
+          "  A0 07  read all 65 blocks back and save them  <-- your undo\n"
+          "  A0 03  erase and declare %zu blocks, checksum 0x%08x  <-- POINT OF NO RETURN\n"
+          "  A0 06  write block, then A0 07 read it back and compare, x%zu\n"
+          "  A1 08  whole-image checksum, compared against the host's\n"
+          "  A1 09  complete, then the device re-enumerates as the application\n"
+          "  A1 13  factory reset -- the vendor's last step. YOUR SETTINGS GO.\n"
+          "         Restore them afterwards with `egg-config restore`; that path\n"
+          "         is verified 21/21. This command refuses to run at all if no\n"
+          "         settings undo exists.\n"
+          "\nA1 3A LATCHES. Once it is sent, a power cycle will NOT return the\n"
+          "mouse to normal -- only a completed flash will. Everything that can\n"
+          "fail is checked BEFORE it is sent, so the latched window is the flash\n"
+          "itself. If the flash aborts anyway, re-run this command; Endgame's\n"
+          "Windows updater also recovers a 0x1977 device (updater-protocol.md\n"
+          "§5.1a). It is not a brick.\n"
+          "\nAfter A0 03 this tool DOES NOT STOP. No cancel, no timeout that gives\n"
+          "up: with the application erased, exiting cleanly guarantees the bad\n"
+          "outcome. It retries, reconnects, and keeps driving to a verified image.\n"
+          "\nBefore any of it, the current application region is read back with\n"
+          "A0 07 and saved, and the flash is abandoned if that fails (§4.2).\n"
+          "\nTo proceed:\n"
+          "  ./build/egg-flash flash <updater.exe> --confirm %s\n"
+          "\nThat token is SHA-256 over the exact frames listed above. Change the\n"
+          "image and it changes, so an approval cannot outlive what it approved.\n",
+          img.blockCount(), img.checksum(), img.blockCount(), token.c_str());
+        reportSettingsUndo(vaultPath);
+    }
+
+    // EVERYTHING THAT CAN FAIL HAPPENS BEFORE A1 3A IS SENT. §4.2b: the entry
+    // latches, so the window in which an abort leaves the mouse in the
+    // bootloader must contain nothing but the flash itself.
+    std::size_t boot = 0, app = 0;
+    const auto seen0 = seeAll();
+    boot = countVendorCollections(seen0, egg::kProductIdBootloader);
+    app  = countVendorCollections(seen0, egg::kProductIdApplication);
+    std::printf("\npreflight, right now:\n"
+                "  %zu application vendor collection(s)  (PID 0x%04x)\n"
+                "  %zu bootloader  vendor collection(s)  (PID 0x%04x)\n",
+                app, egg::kProductIdApplication, boot, egg::kProductIdBootloader);
+
+    const bool fromApp  = (app == 1 && boot == 0);
+    const bool fromBoot = (app == 0 && boot == 1);
+    if (!fromApp && !fromBoot) {
+        std::printf("  -> NOT ready: need exactly one mouse, in exactly one mode.\n"
+                    "     NOTHING WAS SENT.\n");
+        return 1;
+    }
+    std::printf(fromApp ? "  -> ready. Will enter the bootloader with A1 3A.\n"
+                        : "  -> ready. Already in the bootloader; no entry needed.\n");
+
+    // A1 13 is in the plan, so this flash WILL reset settings. §4.2's "never
+    // erase without a saved copy" is not specific to firmware: refuse rather
+    // than warn. reportSettingsUndo already prints where to get one.
+    if (!reportSettingsUndo(vaultPath)) {
+        std::printf("\nREFUSED: this flash ends with A1 13 (factory reset) and\n"
+                    "there is no settings undo. Run `egg-config read` first.\n"
+                    "NOTHING WAS SENT.\n");
+        return 1;
+    }
+
+    if (confirmArg.empty()) return 2;
+
+    if (confirmArg != token) {
+        std::printf("\nREFUSED: --confirm %s does not match this plan's token %s.\n"
+                    "NOTHING WAS SENT. Re-run without --confirm to see the plan.\n",
+                    confirmArg.c_str(), token.c_str());
+        return 1;
+    }
+
+    egg::Log log(verbose);
+
+    // ---- The entry. The vendor's own, and the plan's first frame. ---------
+    if (fromApp) {
+        std::printf("\n[1/5] entering the bootloader (A1 3A)\n");
+        auto appDev = egg::Device::open(egg::kProductIdApplication, log);
+        if (!appDev) {
+            std::printf("REFUSED: could not open the application device.\n"
+                        "NOTHING WAS SENT.\n");
+            return 1;
+        }
+        egg::Transport t(*appDev, egg::kUpdaterBusy, log);
+        const auto t0 = std::chrono::steady_clock::now();
+        EntryEnv env;
+        env.nowMs = [t0] {
+            return static_cast<unsigned>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - t0).count());
+        };
+        env.sleepMs = [](unsigned ms) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        };
+        env.enumerate = seeAll;
+        env.exchange = [&t](const std::vector<std::uint8_t>& frame,
+                            std::vector<std::uint8_t>& reply, bool& readOk) {
+            const egg::Reply r = t.exchange(frame, egg::kReportSmall,
+                                            "A1 3A enter bootloader", 2);
+            readOk = !r.buf.empty();
+            reply  = r.buf;
+            return r.outcome != egg::Outcome::TransportFail;
+        };
+        const EntryOutcome o = enterBootloaderAndConfirm(env);
+        if (o.result != EntryResult::EnteredAndConfirmed) {
+            std::printf("\nABORTED: %s\n",
+                        describe(o.result, egg::kProductIdBootloader).c_str());
+            std::printf("NOTHING HAS BEEN ERASED OR WRITTEN.\n");
+            if (o.sawBootloaderPid)
+                std::printf("The mouse MAY be in the bootloader. Check with:\n"
+                            "  ./build/egg-flash read-firmware --check\n");
+            return 1;
+        }
+        // appDev is closed here, before the bootloader link opens: the
+        // application handle refers to a device that no longer exists.
+        std::printf("      in the bootloader after %u ms  (PID 0x%04x, \"%s\")\n",
+                    o.reenumerateMs, o.seen.productId, o.seen.product.c_str());
+    }
+
+    auto link = HidBootloaderLink::open(log);
+    if (!link) {
+        std::printf("REFUSED: could not open the bootloader.\n"
+                    "Nothing has been erased or written. If the mouse is latched\n"
+                    "in the bootloader, re-running this command is the way out.\n");
+        return 1;
+    }
+
+    // ---- The backup. §4.2: no A0 03 until this has succeeded. -------------
+    std::printf("\n[2/5] reading the current application region back (A0 07, read-only)\n");
+    const ReadBack rb = readApplicationRegion(*link);
+    if (!rb.ok) {
+        std::printf("\nABORTED after %zu of %zu blocks: %s\n"
+                    "NOTHING HAS BEEN ERASED OR WRITTEN. §4.2 forbids erasing\n"
+                    "without a saved copy, and there is no saved copy.\n",
+                    rb.blocksRead, kBlockCount, rb.error.c_str());
+        return 1;
+    }
+    if (saveAndVerify(rb.image, backupPath) != 0) {
+        std::printf("NOTHING HAS BEEN ERASED OR WRITTEN.\n");
+        return 1;
+    }
+    std::printf("      saved %s (%zu bytes), re-read and byte-identical\n",
+                backupPath.c_str(), rb.image.size());
+    const std::string beforeSha = sha256Hex(rb.image.data(), rb.image.size());
+    std::printf("      sha256 %s\n", beforeSha.c_str());
+    if (beforeSha == img.sha256()) {
+        std::printf("      NOTE: the device already holds this exact image.\n"
+                    "      Re-flashing it is a no-op the vendor also performs\n"
+                    "      (capture 09-flash-again is exactly that, and it worked).\n");
+    }
+
+    // ---- Preflight proper. Any failure aborts and nothing has changed. ----
+    std::printf("\n[3/5] preflight\n");
+    std::string err;
+    if (!preflight(*link, img, err)) {
+        std::printf("\nABORTED: %s\nNOTHING HAS BEEN ERASED OR WRITTEN.\n", err.c_str());
+        return 1;
+    }
+    std::printf("      image, block range and a benign round trip all pass\n");
+
+    // ---- The point of no return. ------------------------------------------
+    std::printf("\n[4/5] writing. FROM HERE THIS TOOL DOES NOT STOP.\n");
+    std::fflush(stdout);
+    const Progress p = driveToVerifiedImage(*link, img);
+
+    std::printf("\nDONE. The image is verified resident on the device.\n"
+                "  blocks written   %zu\n  blocks verified  %zu\n"
+                "  rewrites         %zu\n  reconnects       %zu\n"
+                "  send failures    %zu\n  whole-image sum  %s\n  A1 09 acked      %s\n",
+                p.blocksWritten, p.blocksVerified, p.rewrites, p.reconnects,
+                p.sendFailures, p.imageVerified ? "MATCHED" : "not matched",
+                p.completeAcked ? "yes" : "no");
+    // ---- [5/5] The vendor's own tail: wait for 0x1978, then A1 13. --------
+    //
+    // §5.4 steps 6-7. The bootloader link is finished with; A1 13 goes to the
+    // APPLICATION device, which does not exist yet at this point. The vendor
+    // waits with Sleep(800..16000) summing to 168 s; we poll, for the same
+    // reason and with a comparable budget.
+    std::printf("\n[5/5] waiting for the application to come back\n");
+    SeenDevice appAgain{};
+    bool back = false;
+    for (unsigned waited = 0; waited <= kPostFlashWaitMs; waited += 100) {
+        for (const auto& d : seeAll())
+            if (d.productId == egg::kProductIdApplication &&
+                d.usagePage == egg::kUsagePageVendor && d.usage == egg::kUsageVendor) {
+                appAgain = d; back = true; break;
+            }
+        if (back) { std::printf("      back after ~%u ms  (PID 0x%04x, bcdDevice 0x%04x, \"%s\")\n",
+                                waited, appAgain.productId, appAgain.releaseNumber,
+                                appAgain.product.c_str());
+                    break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if (!back) {
+        // The image is verified resident, so this is not a failure of the
+        // flash. It is the vendor's own gate (c) at 0x403cc3 not being met,
+        // and their code takes a path that reports success without sending
+        // A1 13 (§5.4a). Say so precisely rather than alarmingly.
+        std::printf(
+          "      it did not. THE IMAGE IS VERIFIED RESIDENT -- this is not a\n"
+          "      failed flash. Unplug and replug. A1 13 was NOT sent, so your\n"
+          "      settings are untouched; the vendor's tool reaches the same\n"
+          "      state via 0x403e6f and also reports success (§5.4a).\n");
+        std::printf("\nThe pre-flash image is in %s.\n", backupPath.c_str());
+        return 0;
+    }
+
+    std::printf("\n      sending A1 13 (factory reset), the vendor's last step\n");
+    {
+        auto appDev = egg::Device::open(egg::kProductIdApplication, log);
+        if (!appDev) {
+            std::printf("      could not open it. A1 13 NOT sent; settings are\n"
+                        "      untouched. The flash itself is complete.\n");
+        } else {
+            egg::Transport t(*appDev, egg::kConfigBusy, log);
+            // The vendor sleeps 900 ms and then reads one 64-byte report which
+            // it never inspects (§5.4a). The config tool sleeps 1100 and DOES
+            // require resp[1]==0x01. We use the config tool's timing and report
+            // what came back without gating on it -- the updater does not gate,
+            // and a status gate on a command whose effect we can verify
+            // directly would only manufacture false failures.
+            const egg::Reply r = t.exchange(postSuccess(), egg::kReportSmall,
+                                            "A1 13 factory reset", 1100);
+            std::printf("      resp[1]=0x%02x (%s)\n", r.status,
+                        r.ok() ? "acknowledged" : egg::describe(r.outcome));
+        }
+    }
+
+    std::printf(
+      "\nSETTINGS ARE NOW AT FACTORY DEFAULTS. To put yours back:\n"
+      "  ./build/egg-config restore %s\n"
+      "\nAnd to confirm the reset landed where the vendor's does:\n"
+      "  ./build/egg-config read --save after-flash.bin\n"
+      "  ./build/egg-config diff %s after-flash.bin\n"
+      "Expect exactly the 21 bytes of notes/prediction-factory-reset.md.\n"
+      "\nThe pre-flash image is in %s if anything needs putting back.\n",
+      vaultPath.c_str(), vaultPath.c_str(), backupPath.c_str());
+    return 0;
+}
+
 int main(int argc, char** argv) {
     std::string vaultPath = defaultVaultPath();
     std::string args[3];
-    bool yes = false, verbose = false;
+    std::string confirmArg, backupPath;
+    bool yes = false, verbose = false, checkOnly = false;
     int n = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--vault" && i + 1 < argc) { vaultPath = argv[++i]; continue; }
         if (a == "--yes") { yes = true; continue; }
+        if (a == "--confirm" && i + 1 < argc) { confirmArg = argv[++i]; continue; }
+        if (a == "--backup" && i + 1 < argc) { backupPath = argv[++i]; continue; }
+        if (a == "--check") { checkOnly = true; continue; }
         if (a == "-v" || a == "--verbose") { verbose = true; continue; }
         if (n < 3) args[n++] = a;
     }
@@ -358,6 +738,12 @@ int main(int argc, char** argv) {
     // acquire one by accident.
     if (verb == "enter-bootloader") return cmdEnterBootloader(yes, verbose);
     if (verb == "leave-bootloader") return cmdLeaveBootloader(yes, verbose);
+    // Takes an OUTPUT path, not a vendor .exe, so it must be dispatched before
+    // the image load below -- and it must never load an image, because reading
+    // the device back has nothing to do with what we might later write.
+    if (verb == "read-firmware")
+        return cmdReadFirmware(n >= 2 ? args[1] : std::string("device-firmware.bin"),
+                               checkOnly, verbose);
 
     if (n < 2) return usage();
     const std::string exePath = args[1];
@@ -380,29 +766,55 @@ int main(int argc, char** argv) {
 
     if (verb == "image") return 0;
 
+    if (verb == "flash") {
+        std::string bp = backupPath;
+        if (bp.empty()) {
+            // Timestamped by default so a second run cannot silently overwrite
+            // the first run's backup -- which is the one taken when the device
+            // still held a working image.
+            char stamp[64];
+            const std::time_t t = std::time(nullptr);
+            std::strftime(stamp, sizeof stamp, "device-firmware-%Y%m%d-%H%M%S.bin",
+                          std::localtime(&t));
+            bp = stamp;
+        }
+        return cmdFlash(img, vaultPath, confirmArg, bp, verbose);
+    }
+
     // "stream" prints every frame in full, one per line, so the whole outbound
     // byte sequence can be diffed against a capture of the vendor's tool doing
     // the same flash. That comparison is worth more than the frozen golden file
     // §4.3 asks for, because the reference is not something we produced -- it is
     // what Endgame's own updater actually sent to this exact mouse.
     if (verb == "stream") {
-        auto emit = [](const char* what, const Frame& f) {
+        // STREAMS plannedFrames(), NOT a second copy of the sequence.
+        //
+        // This used to build the list inline, which meant the golden vendor
+        // diff -- the strongest check in the project, because its reference is
+        // Endgame's own capture of THIS mouse being flashed -- was validating a
+        // list that nothing else sent. The flash sends plannedFrames(). Two
+        // independently-written copies of "the byte stream" is the drift this
+        // repo has already been bitten by twice (MUTABLE's two lists, and the
+        // FWFILE-selection duplicate). Now the capture diff covers the bytes
+        // that actually go out.
+        //
+        // They became identical when A1 13 went back into the plan on
+        // 2026-09-05. Before that the plan was deliberately a subset, and this
+        // unification would have been wrong.
+        const auto frames = plannedFrames(img);
+        for (std::size_t i = 0; i < frames.size(); ++i) {
+            const char* what;
+            if (i == 0)                       what = "enter";
+            else if (i == 1)                  what = "start";
+            else if (i + 3 == frames.size())  what = "wholesum";
+            else if (i + 2 == frames.size())  what = "complete";
+            else if (i + 1 == frames.size())  what = "postsuccess";
+            else                              what = ((i - 2) & 1) ? "verify" : "write";
             std::printf("%s ", what);
-            for (std::size_t i = 0; i < f.size(); ++i) std::printf("%02x", f[i]);
+            for (std::size_t j = 0; j < frames[i].size(); ++j)
+                std::printf("%02x", frames[i][j]);
             std::printf("\n");
-        };
-        emit("enter", enterBootloader());
-        emit("start", bootloaderStart(
-            static_cast<std::uint8_t>(img.blockCount()), img.checksum()));
-        for (std::size_t i = 0; i < img.blockCount(); ++i) {
-            const std::uint8_t idx = img.deviceIndex(i);
-            emit("write", writeBlock(idx, img.block(i), kBlockSize));
-            emit("verify", readBlock(idx));
         }
-        emit("wholesum",
-             wholeImageChecksumQuery(img.deviceIndex(img.blockCount() - 1)));
-        emit("complete", bootloaderComplete());
-        emit("postsuccess", postSuccess());
         return 0;
     }
 

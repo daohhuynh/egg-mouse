@@ -11,6 +11,7 @@
 // nothing.
 #include "egg/BootloaderEntry.h"
 #include "egg/FlashCommands.h"
+#include "egg/FlashPlan.h"
 #include "egg/Firmware.h"
 #include "egg/MockBootloader.h"
 #include "egg/Protocol.h"
@@ -736,6 +737,147 @@ static void testStage2Exit() {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// §4.4 stage 3 -- the read-back -- and §4.2c's approval token.
+// ---------------------------------------------------------------------------
+static void testReadBackAndToken() {
+    std::printf("\nread-back (A0 07) and the approval token\n");
+
+    const auto img = synthetic();
+
+    // (a) A device that serves its resident image. Read-back must return it
+    //     byte-exactly, from the right blocks, in the right order.
+    {
+        MockBootloader dev;
+        dev.preload(img);
+        const ReadBack rb = readApplicationRegion(dev);
+        ok("reads a resident image back", rb.ok, rb.error);
+        ok("all 65 blocks", rb.blocksRead == kBlockCount,
+           std::to_string(rb.blocksRead));
+        ok("byte-identical to what the device holds", rb.image == img);
+        ok("NOTHING was written", dev.writtenIndices().empty() && !dev.started());
+    }
+
+    // (b) A device that refuses A0 07 outside a flash session -- the OTHER
+    //     hypothesis. The read must ABORT, promptly, and say what it saw.
+    //     Before erase, abort is always correct (§4.2); the failure this
+    //     guards against is a read-back that spins forever the way the
+    //     post-erase phase deliberately does.
+    {
+        MockBootloader dev;                    // nothing preloaded
+        const ReadBack rb = readApplicationRegion(dev);
+        ok("a device that refuses A0 07 -> aborts, does not hang", !rb.ok);
+        ok("and reports the block it stopped on", rb.error.find("0x34") != std::string::npos,
+           rb.error);
+        ok("and still writes NOTHING", dev.writtenIndices().empty() && !dev.started());
+    }
+
+    // (c) A flaky device inside the retry budget still yields a good backup.
+    {
+        Faults f; f.rejectRate = 0.25; f.seed = 7;
+        MockBootloader dev(f);
+        dev.preload(img);
+        const ReadBack rb = readApplicationRegion(dev);
+        // Not asserting success -- with rejections it may legitimately give up.
+        // Asserting the SAFE property: whatever happens, nothing was written.
+        ok("under rejections, still no writes and no erase",
+           dev.writtenIndices().empty() && !dev.started());
+        if (rb.ok) ok("and any image it does return is correct", rb.image == img);
+    }
+
+    // ---- The token. §4.2c. -------------------------------------------------
+    Image real;
+    std::string err;
+    if (real.loadFromExecutable(kExe, err)) {
+        const std::string t1 = confirmToken(real);
+        const std::string t2 = confirmToken(real);
+        ok("the token is deterministic", t1 == t2, t1);
+        ok("and is 8 hex characters", t1.size() == kConfirmTokenChars);
+
+        // The property that makes it worth having: a DIFFERENT plan must not
+        // be approvable with this plan's token.
+        const auto frames = plannedFrames(real);
+
+        ok("the plan is enter + start + 2/block + wholesum + complete + reset",
+           frames.size() == 5 + real.blockCount() * 2,
+           std::to_string(frames.size()));
+
+        // §4.2b: entry is by button, so A1 3A must NOT be in the plan.
+        // A1 13 must not be either -- wiping settings is not part of a flash.
+        bool hasEnter = false, hasReset = false, allInRange = true;
+        for (const auto& f : frames) {
+            if (f.size() >= 2 && f[0] == kReportSmall && f[1] == 0x3A) hasEnter = true;
+            if (f.size() >= 2 && f[0] == kReportSmall && f[1] == 0x13) hasReset = true;
+            if (f.size() >= 3 && f[0] == kReportLarge &&
+                (f[1] == 0x06 || f[1] == 0x07)) {
+                const unsigned bi = (f[1] == 0x06)
+                    ? static_cast<unsigned>(f[2] | (f[3] << 8))
+                    : static_cast<unsigned>(f[2]);
+                if (bi < kBlockFirst || bi > kBlockLast) allInRange = false;
+            }
+        }
+        // THE property that makes the token worth having: it must be a
+        // function of the IMAGE, not just of the command sequence. If
+        // plannedFrames ever stopped carrying payloads, every image would
+        // produce the same token and --confirm would be theatre. Checked by
+        // requiring each block's 1024 bytes to appear, at the right offset, in
+        // the frames the token is computed over.
+        bool payloadsPresent = true;
+        for (std::size_t i = 0; i < real.blockCount() && payloadsPresent; ++i) {
+            const Frame& w = frames[2 + i * 2];          // enter, start, then (write,read)*
+            if (w.size() != kLargeLen || w[1] != 0x06 ||
+                std::memcmp(w.data() + kPayloadOffset, real.block(i), kBlockSize) != 0)
+                payloadsPresent = false;
+        }
+        ok("the plan carries the image bytes at all", payloadsPresent);
+
+        // THE test that matters, and the reason this one exists at all: the
+        // version above passed while a mutant that made confirmToken() hash
+        // only the FIRST frame SURVIVED. Asserting a property of plannedFrames
+        // says nothing about the function that consumes it. §6.2 -- the hole
+        // was found by mutation testing, not by review.
+        ok("token(all frames) != token(first frame only)",
+           confirmTokenForFrames(frames) !=
+           confirmTokenForFrames({frames.front()}));
+
+        // And it must move when the IMAGE moves, not merely when the command
+        // list does. One flipped payload byte, everything else identical.
+        {
+            std::vector<Frame> tweaked = frames;
+            Frame& firstWrite = tweaked[2];   // enter, start, FIRST WRITE
+            firstWrite[kPayloadOffset] =
+                static_cast<std::uint8_t>(firstWrite[kPayloadOffset] ^ 0x01);
+            ok("one flipped payload byte changes the token",
+               confirmTokenForFrames(tweaked) != confirmTokenForFrames(frames));
+        }
+
+        ok("confirmToken(img) == confirmTokenForFrames(plannedFrames(img))",
+           confirmToken(real) == confirmTokenForFrames(frames));
+
+        // §4.2b as REVISED 2026-09-05: a flash takes the vendor's entry, because
+        // their proven sequence begins with it and nothing has ever flashed a
+        // button-entered bootloader. The earlier version of this test asserted
+        // the opposite; it is inverted rather than deleted so the change of
+        // decision is visible in the diff.
+        ok("the plan BEGINS with A1 3A, as the vendor's does", hasEnter);
+        ok("and A1 3A is literally frame 0",
+           frames.front() == enterBootloader());
+        // Reversed 2026-09-05 by the owner. My reason for omitting A1 13 was
+        // aesthetic; the reasons for keeping it are not. It is [D] in two
+        // binaries and [O] at 21/21 on this mouse, the undo is verified, and
+        // leaving stale settings under new firmware invents a state the
+        // vendor's tool never produces (payload +0x71 differs between 1.07 and
+        // 1.10). Inverted rather than deleted, so the reversal shows in a diff.
+        ok("the plan ENDS with A1 13, as the vendor's does", hasReset);
+        ok("and A1 13 is literally the last frame",
+           frames.back() == postSuccess());
+        ok("every block index in the plan is inside [0x34,0x74]", allInRange);
+    } else {
+        std::printf("  SKIP  token tests -- %s\n", err.c_str());
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -746,6 +888,7 @@ int main() {
     testDeterminismAndIdentity();
     testStage2Entry();
     testStage2Exit();
+    testReadBackAndToken();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

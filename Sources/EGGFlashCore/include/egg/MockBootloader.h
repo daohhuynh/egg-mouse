@@ -17,6 +17,7 @@
 #include "egg/BootloaderLink.h"
 #include "egg/Firmware.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -78,6 +79,33 @@ public:
     // What the device actually holds, keyed by device block index.
     const std::map<std::uint8_t, std::vector<std::uint8_t>>& flash() const {
         return flash_;
+    }
+
+    // Give the device a RESIDENT image, as though it had been flashed before
+    // this process started.
+    //
+    // This exists because the mock's default -- rejecting A0 07 for any block
+    // it has not seen written this session -- is itself a HYPOTHESIS about the
+    // device, not a fact. Whether the bootloader serves reads outside a flash
+    // session it started with A0 03 is [G] (notes/bootloader-observed.md), and
+    // a mock that can only express one of the two answers would quietly make
+    // the read-back path untestable against the other. So both are modelled:
+    // preload() for "the device serves its resident image", the default for
+    // "reads only work inside a session".
+    //
+    // §4.3's whole point is that a mock built from our assumptions cannot catch
+    // an error in those assumptions. This is the smallest correction available:
+    // where the assumption is not known, make the mock able to be either.
+    void preload(const std::vector<std::uint8_t>& image) {
+        flash_.clear();
+        for (std::size_t i = 0; i * kBlockSize < image.size(); ++i) {
+            const std::size_t off = i * kBlockSize;
+            const std::size_t n = std::min(kBlockSize, image.size() - off);
+            std::vector<std::uint8_t> blk(kBlockSize, 0);
+            std::copy(image.begin() + static_cast<long>(off),
+                      image.begin() + static_cast<long>(off + n), blk.begin());
+            flash_[static_cast<std::uint8_t>(kBlockFirst + i)] = std::move(blk);
+        }
     }
     // Every block index this link was ever ASKED to write, in order, including
     // rejected and repeated ones. The out-of-range guard is tested against

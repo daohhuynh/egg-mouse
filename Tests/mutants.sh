@@ -73,6 +73,13 @@ FWH=Sources/EGGFlashCore/include/egg/Firmware.h
 CS=Sources/EGGConfigCore/src/ConfigSession.cpp
 CR=Sources/EGGConfigCore/src/ConfigRecord.cpp
 CV=Sources/EGGConfigCore/src/RecordVault.cpp
+# Added 2026-09-05 with the read-back and the approval token. It was NOT here
+# when those were written, so the first mutation run after they landed said
+# nothing about them -- recorded as a gap in working-memory.md before it was
+# fixed, per §1.7. FlashPlan.cpp holds a property §4.2 depends on: the read-back
+# runs BEFORE erase, where abort is always correct, so it must give up rather
+# than spin the way driveToVerifiedImage deliberately does.
+FP=Sources/EGGFlashCore/src/FlashPlan.cpp
 
 # ONE list. Backup and restore are both derived from it, because they used to be
 # two hardcoded lists and the second one drifted the moment a fourth file was
@@ -80,7 +87,7 @@ CV=Sources/EGGConfigCore/src/RecordVault.cpp
 # existed, and the mutation survived into every LATER mutant -- which then made
 # two correctly-labelled equivalent mutants look wrongly labelled. The harness
 # accused itself of a bug it did not have. Add a file here and nowhere else.
-MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV")
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -285,6 +292,41 @@ mutate kill "extracts FWFILE 142 instead of 140" "$FWH" \
 # Tests/test_flash.cpp now pins the layout against the bytes the vendor sent.
 mutate kill "block count moved to frame [15]" "$FC" \
 '    f[16] = blockCount;|||    f[15] = blockCount;  // MUTANT'
+
+# ---- FlashPlan.cpp: the read-back, which is what makes an erase reversible ---
+
+# THE property. readApplicationRegion runs before A0 03, where §4.2 says abort
+# is always correct. Removing the attempt cap turns it into an infinite loop
+# against a device that refuses A0 07 -- and the test that catches this is the
+# one driving a mock with nothing preloaded, i.e. the OTHER answer to the open
+# question about whether the bootloader serves reads outside a flash session.
+mutate kill "read-back retries forever instead of giving up" "$FP" \
+'    for (unsigned attempt = 0; attempt < kReadBlockTries; ++attempt) {|||    for (unsigned attempt = 0; ; ++attempt) {  // MUTANT'
+
+# A backup assembled from rejected responses is not a backup. Dropping the
+# status check makes every refusal look like a good block, and the file written
+# afterwards would be 66560 bytes of whatever the reject path returned.
+mutate kill "read-back accepts any status, not just ready" "$FP" \
+'            if (st == egg::kStatusReady && back.size() == kLargeLen) { got = true; break; }|||            if (back.size() == kLargeLen) { got = true; break; }  // MUTANT'
+
+# The payload is at +0x10 in the 1041-byte response, the same place the write
+# command puts it. Reading from 0 would silently shift every block by 16 bytes
+# and produce a plausible-looking, useless backup.
+mutate kill "read-back copies from the frame start, not the payload offset" "$FP" \
+'        rb.image.insert(rb.image.end(), back.begin() + kPayloadOffset,|||        rb.image.insert(rb.image.end(), back.begin(),  // MUTANT'
+
+# §4.2c: the token must be a function of the IMAGE. Hashing only the first
+# frame makes every image produce the same token, so --confirm would check
+# nothing while still looking like it checked something.
+mutate kill "approval token ignores the image bytes" "$FP" \
+'    for (const auto& f : frames)
+        all.insert(all.end(), f.begin(), f.end());|||    all = frames.front();  // MUTANT'
+
+# §4.2b: A1 3A latches and is not to be sent. If it ever reappears in the plan,
+# the token changes AND a test asserts its absence directly.
+mutate kill "the plan re-introduces the A1 3A entry command" "$FP" \
+'    out.push_back(bootloaderStart(|||    out.push_back(enterBootloader());  // MUTANT
+    out.push_back(bootloaderStart('
 
 mutate kill "whole-image sum shifted down two bytes" "$FC" \
 '    f[17] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);|||    f[15] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);  // MUTANT'

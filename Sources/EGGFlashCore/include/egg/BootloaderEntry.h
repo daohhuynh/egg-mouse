@@ -125,6 +125,14 @@ inline constexpr unsigned kEntryPollCeilMs = 10000;
 // re-enumeration was ~860-900 ms.
 inline constexpr unsigned kExitPollCeilMs = 30000;
 
+// How long to wait for the APPLICATION to reappear after a completed flash,
+// before A1 13. The vendor allows Sleep(800..16000) summing to 168 s
+// (updater-protocol.md §5.4 step 6); observed re-enumeration was ~880 ms. We
+// budget 60 s: far past the observation, well short of theirs, and giving up
+// here costs nothing because the image is already verified resident -- the
+// vendor's own code reports success on this path too (§5.4a).
+inline constexpr unsigned kPostFlashWaitMs = 60000;
+
 // Sends A1 3A once and watches. Does NOT retry the send: the vendor's
 // nine-attempt loop (updater-protocol.md §5.3a) has never been exercised on the
 // wire -- both captures succeeded first try -- so retrying here would be
