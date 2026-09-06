@@ -163,6 +163,73 @@ std::vector<std::uint8_t> ConfigSession::buildRestoreFrame(
     return frame;
 }
 
+std::vector<std::uint8_t> ConfigSession::buildRunFrame(
+        const std::vector<std::uint8_t>& before, std::size_t recordOffset,
+        const std::uint8_t* bytes, std::size_t n, UnknownBytes policy) {
+    if (!plausible(before)) return {};
+    if (!bytes || n == 0 || recordOffset + n > kPayloadLen) return {};
+
+    std::vector<std::uint8_t> frame = Transport::frame(kReportLarge, kWriteSettings);
+    if (frame.size() != kLargeLen) return {};
+    std::memcpy(frame.data() + kPayloadOffset,
+                before.data() + kPayloadOffset, kPayloadLen);
+    std::memcpy(frame.data() + kPayloadOffset + recordOffset, bytes, n);
+    applyUnknownPolicy(frame, policy);
+    return frame;
+}
+
+SetOutcome ConfigSession::setRun(std::size_t recordOffset,
+                                 const std::uint8_t* bytes, std::size_t n) {
+    SetOutcome o;
+    o.intendedOffset = recordOffset;
+
+    if (!read(o.before, o.result)) return o;
+
+    std::vector<std::uint8_t> frame =
+        buildRunFrame(o.before, recordOffset, bytes, n, policy_);
+    if (frame.size() != kLargeLen) { o.result = Result::RefusedSelfCheck; return o; }
+
+    // Self-check: every byte we moved must be inside the run, or permitted by
+    // the unknown-byte policy. A byte outside the run is a bug in us, and §2
+    // says the risk is bugs in our own code.
+    o.weChanged = diff(o.before, frame);
+    for (const ByteChange& c : o.weChanged) {
+        const bool inRun = c.recordOffset >= recordOffset &&
+                           c.recordOffset <  recordOffset + n;
+        if (inRun || policyPermits(c, policy_)) continue;
+        o.result = Result::RefusedSelfCheck;
+        return o;
+    }
+
+    // Nothing to do? Send nothing -- and test the RUN, not the frame, for the
+    // same reason `set` tests the field: under MatchVendor the frame differs at
+    // record 0x01..0x04 even when the run is already what was asked for, and
+    // writing on that basis would put a frame on the wire to normalise four
+    // bytes whose meaning we do not know.
+    if (std::memcmp(o.before.data() + kPayloadOffset + recordOffset,
+                    bytes, n) == 0) { o.result = Result::AlreadySet; return o; }
+
+    o.sent = frame;
+    o.wrote = true;
+    Reply w = link_.writeRecord(frame);
+    if (!w.ok()) { o.result = Result::WriteRejected; return o; }
+
+    Result rr = Result::Ok;
+    if (!read(o.after, rr)) {
+        o.result = (rr == Result::ReadImplausible) ? Result::VerifyMismatch
+                                                   : Result::VerifyReadFailed;
+        return o;
+    }
+    o.changed = diff(o.before, o.after);
+
+    // Verify the DATA, never the ack (§4.1). Every byte of the run must be on
+    // the device exactly as sent.
+    if (std::memcmp(o.after.data() + kPayloadOffset + recordOffset,
+                    bytes, n) != 0) { o.result = Result::VerifyMismatch; return o; }
+    o.result = Result::Ok;
+    return o;
+}
+
 RestoreOutcome ConfigSession::restore(const std::vector<std::uint8_t>& want) {
     RestoreOutcome o;
 

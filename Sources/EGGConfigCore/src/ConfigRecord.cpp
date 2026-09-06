@@ -2,7 +2,9 @@
 
 #include <string>
 
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace egg::cfg {
@@ -263,6 +265,199 @@ std::uint8_t composeByte(std::uint8_t old, const Settable& f, std::uint8_t value
     if (f.mask == 0xFF && f.shift == 0) return value;
     return static_cast<std::uint8_t>((old & ~f.mask) |
                                      ((value << f.shift) & f.mask));
+}
+
+}  // namespace egg::cfg
+
+// ---------------------------------------------------------------------------
+// Button mapping. Every byte below is [D] from cfg107; see config-protocol.md
+// §7.17 for the derivation and the address of each handler.
+// ---------------------------------------------------------------------------
+namespace egg::cfg {
+
+const ButtonAction kButtonActions[] = {
+    // MOUSE -- +1 is the button mask.
+    {"left-click",   "mouse", 0x00, 0x01, ButtonPayload::None, "cfg107 0x40774e"},
+    {"right-click",  "mouse", 0x00, 0x02, ButtonPayload::None, "cfg107 0x4077f4"},
+    {"middle-click", "mouse", 0x00, 0x04, ButtonPayload::None, "cfg107 0x40789a"},
+    {"forward",      "mouse", 0x00, 0x10, ButtonPayload::None, "cfg107 0x407940"},
+    {"back",         "mouse", 0x00, 0x08, ButtonPayload::None, "cfg107 0x4079e6"},
+    // MOUSE -- scroll is a separate action type, +1 a signed step.
+    {"scroll-up",    "mouse", 0x01, 0x01, ButtonPayload::None, "cfg107 0x407a8c"},
+    {"scroll-down",  "mouse", 0x01, 0xFF, ButtonPayload::None, "cfg107 0x407b33"},
+    // CPI.
+    {"fixed-cpi",    "cpi",   0x0C, 0x00, ButtonPayload::FixedCpi, "cfg107 0x407c6f"},
+    {"cpi-loop",     "cpi",   0x09, 0xF1, ButtonPayload::None, "cfg107 0x407ccf"},
+    // MEDIA -- +1 is the low byte of a HID Consumer Page usage. The two AL
+    // usages are 0x01xx and carry a different action type; that is the whole
+    // reason they fit in one byte (§7.17).
+    {"play-pause",   "media", 0x20, 0xCD, ButtonPayload::None, "cfg107 0x407d76"},
+    {"next",         "media", 0x20, 0xB5, ButtonPayload::None, "cfg107 0x407e1d"},
+    {"previous",     "media", 0x20, 0xB6, ButtonPayload::None, "cfg107 0x407ec4"},
+    {"mute",         "media", 0x20, 0xE2, ButtonPayload::None, "cfg107 0x407f6b"},
+    {"volume-up",    "media", 0x20, 0xE9, ButtonPayload::None, "cfg107 0x408012"},
+    {"volume-down",  "media", 0x20, 0xEA, ButtonPayload::None, "cfg107 0x4080b9"},
+    {"browser",      "media", 0x18, 0x96, ButtonPayload::None, "cfg107 0x408160"},
+    {"explorer",     "media", 0x18, 0x94, ButtonPayload::None, "cfg107 0x40820a"},
+    // KEYBOARD and DISABLE.
+    {"key",          "keyboard", 0x02, 0x00, ButtonPayload::Key, "cfg107 0x408690"},
+    {"disable",      "disable",  0xFF, 0x00, ButtonPayload::None, "cfg107 0x4082b4"},
+};
+const std::size_t kButtonActionCount =
+    sizeof(kButtonActions) / sizeof(kButtonActions[0]);
+
+const ButtonSlot kButtonSlots[] = {
+    {"left",       0, false,
+     "the vendor's Button Mapping page has no Left Button row (§7.15). Remapping "
+     "left-click away leaves no way to click OK in any dialog, including ours"},
+    {"right",      1, true,  nullptr},
+    {"middle",     2, true,  nullptr},
+    {"forward",    3, true,  nullptr},
+    {"back",       4, true,  nullptr},
+    {"cpi-button", 5, false,
+     "entry 5, default 09 f1 = CPI LOOP, so it is the underside CPI button "
+     "(§7.17). The vendor exposes no row for it and no capture has ever moved "
+     "it, so how the firmware reacts to a change is untested"},
+    {"wheel-up",   6, true,  nullptr},
+    {"wheel-down", 7, true,  nullptr},
+};
+const std::size_t kButtonSlotCount =
+    sizeof(kButtonSlots) / sizeof(kButtonSlots[0]);
+
+const ButtonAction* findButtonAction(const char* name) {
+    if (!name) return nullptr;
+    for (std::size_t i = 0; i < kButtonActionCount; ++i)
+        if (std::strcmp(kButtonActions[i].name, name) == 0) return &kButtonActions[i];
+    return nullptr;
+}
+
+const ButtonSlot* findButtonSlot(const char* name) {
+    if (!name) return nullptr;
+    for (std::size_t i = 0; i < kButtonSlotCount; ++i)
+        if (std::strcmp(kButtonSlots[i].name, name) == 0) return &kButtonSlots[i];
+    return nullptr;
+}
+
+namespace {
+// cfg107 0x40a120 translates a Windows virtual-key code to a HID usage. Four
+// arithmetic ranges plus a jump table, and every value it produces is the
+// standard HID Keyboard/Keypad Page usage -- checked for all 27 jump-table
+// entries and all four ranges (§7.17). Reproduced here by HID usage directly,
+// because we have no virtual-key codes to translate.
+struct NamedKey { const char* name; std::uint8_t usage; };
+const NamedKey kNamedKeys[] = {
+    {"enter", 0x28}, {"escape", 0x29}, {"esc", 0x29}, {"backspace", 0x2A},
+    {"tab", 0x2B}, {"space", 0x2C}, {"minus", 0x2D}, {"equal", 0x2E},
+    {"leftbracket", 0x2F}, {"rightbracket", 0x30}, {"backslash", 0x31},
+    {"semicolon", 0x33}, {"quote", 0x34}, {"grave", 0x35}, {"comma", 0x36},
+    {"period", 0x37}, {"slash", 0x38}, {"capslock", 0x39},
+    {"insert", 0x49}, {"home", 0x4A}, {"pageup", 0x4B}, {"delete", 0x4C},
+    {"end", 0x4D}, {"pagedown", 0x4E},
+    {"right", 0x4F}, {"left", 0x50}, {"down", 0x51}, {"up", 0x52},
+};
+}  // namespace
+
+bool hidKeycode(const char* name, std::uint8_t& out) {
+    if (!name || !*name) return false;
+    std::string s(name);
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // a..z -> 0x04..0x1D. cfg107 0x40a130: VK-0x3d, and VK_A is 0x41.
+    if (s.size() == 1 && s[0] >= 'a' && s[0] <= 'z') {
+        out = static_cast<std::uint8_t>(0x04 + (s[0] - 'a'));
+        return true;
+    }
+    // 1..9 -> 0x1E..0x26, 0 -> 0x27. cfg107 0x40a149 and 0x40a13a.
+    if (s.size() == 1 && s[0] >= '1' && s[0] <= '9') {
+        out = static_cast<std::uint8_t>(0x1E + (s[0] - '1'));
+        return true;
+    }
+    if (s == "0") { out = 0x27; return true; }
+    // f1..f12 -> 0x3A..0x45. cfg107 0x40a156: VK-0x36, VK_F1 is 0x70.
+    if (s.size() >= 2 && s[0] == 'f') {
+        char* end = nullptr;
+        long n = std::strtol(s.c_str() + 1, &end, 10);
+        if (end && !*end && n >= 1 && n <= 12) {
+            out = static_cast<std::uint8_t>(0x3A + (n - 1));
+            return true;
+        }
+    }
+    // kp0..kp9. cfg107 0x40a163: VK-8 for 1..9, and 0x40a16d maps 0 to 0x62.
+    if (s.size() == 3 && s[0] == 'k' && s[1] == 'p' && s[2] >= '0' && s[2] <= '9') {
+        out = s[2] == '0' ? 0x62 : static_cast<std::uint8_t>(0x59 + (s[2] - '1'));
+        return true;
+    }
+    for (const NamedKey& k : kNamedKeys)
+        if (s == k.name) { out = k.usage; return true; }
+    return false;
+}
+
+bool hidModifiers(const char* spec, std::uint8_t& out) {
+    out = 0;
+    if (!spec || !*spec) return true;
+    std::string s(spec), tok;
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::size_t i = 0;
+    while (i <= s.size()) {
+        if (i == s.size() || s[i] == '+') {
+            if (!tok.empty()) {
+                // §7.12: the standard USB HID modifier byte, low nibble only.
+                if      (tok == "ctrl"  || tok == "control") out |= 0x01;
+                else if (tok == "shift")                     out |= 0x02;
+                else if (tok == "alt")                       out |= 0x04;
+                else if (tok == "win"   || tok == "gui")     out |= 0x08;
+                else return false;
+            }
+            tok.clear();
+        } else {
+            tok += s[i];
+        }
+        ++i;
+    }
+    return true;
+}
+
+bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,
+                       std::uint8_t keepPlus6, std::uint8_t out[kButtonEntryLen],
+                       const char** err) {
+    const char* dummy = nullptr;
+    if (!err) err = &dummy;
+    *err = nullptr;
+    for (std::size_t i = 0; i < kButtonEntryLen; ++i) out[i] = 0;
+    out[0] = a.b0;
+    out[1] = a.b1;
+    // +6 is the multiclick filter and is NOT ours. It comes back from the read
+    // and goes out unchanged; the vendor's handlers never write it either.
+    out[6] = keepPlus6;
+
+    switch (a.payload) {
+    case ButtonPayload::None:
+        if (mods) { *err = "this action takes no modifiers"; return false; }
+        return true;
+    case ButtonPayload::FixedCpi: {
+        if (mods) { *err = "fixed-cpi takes no modifiers"; return false; }
+        // The vendor writes X and Y as two 16-bit LE words and this path sets
+        // them equal: the Button Mapping dialog has one CPI box, not two.
+        if (arg < 50 || arg > 26000) {
+            *err = "fixed-cpi wants a CPI value between 50 and 26000";
+            return false;
+        }
+        const std::uint16_t v = static_cast<std::uint16_t>(arg);
+        out[2] = static_cast<std::uint8_t>(v & 0xFF);
+        out[3] = static_cast<std::uint8_t>(v >> 8);
+        out[4] = out[2];
+        out[5] = out[3];
+        return true;
+    }
+    case ButtonPayload::Key:
+        if (arg <= 0 || arg > 0xFF) { *err = "no such key"; return false; }
+        if (mods & 0xF0) { *err = "only ctrl/shift/alt/win are offered"; return false; }
+        out[1] = mods;                                   // §7.12 modifier byte
+        out[2] = static_cast<std::uint8_t>(arg);         // HID keycode
+        return true;
+    }
+    *err = "unknown payload kind";
+    return false;
 }
 
 }  // namespace egg::cfg

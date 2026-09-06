@@ -104,6 +104,24 @@ public:
     // Read, modify one field, self-check, write, read back, verify.
     SetOutcome set(const Settable& f, std::uint8_t encodedValue);
 
+    // The same discipline for a CONTIGUOUS RUN of record bytes, which is what a
+    // button-mapping entry is (seven bytes at record 0x37 + 7k, §7.17). Kept as
+    // its own entry point rather than by generalising `set`, because `set` is
+    // the mutation-tested path that every existing safety test drives and
+    // widening it to n bytes would weaken the "exactly one byte moved"
+    // self-check that catches our own bugs.
+    //
+    // The self-check here is the same shape, one size up: after building the
+    // frame, the ONLY bytes differing from the read must lie inside
+    // [offset, offset+n) -- plus record 0x01..0x04 under MatchVendor. A byte
+    // that moves outside the run is a bug in us and the frame never goes out.
+    SetOutcome setRun(std::size_t recordOffset,
+                      const std::uint8_t* bytes, std::size_t n);
+
+    static std::vector<std::uint8_t> buildRunFrame(
+        const std::vector<std::uint8_t>& before, std::size_t recordOffset,
+        const std::uint8_t* bytes, std::size_t n, UnknownBytes policy);
+
     // Build the frame that `set` would send, without a device. This is the
     // dry-run seam (§4.3) and the thing Tests/test_config_replay.py scores
     // against the vendor's own captured writes.

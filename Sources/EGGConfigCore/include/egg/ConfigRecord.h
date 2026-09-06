@@ -188,6 +188,67 @@ extern const std::size_t kSettableCount;
 extern const Withheld  kWithheld[];
 extern const std::size_t kWithheldCount;
 
+// ---------------------------------------------------------------------------
+// Button mapping  (config-protocol.md §7.14-§7.17)
+// ---------------------------------------------------------------------------
+// Eight seven-byte entries from record 0x37. Entry k is
+//     +0 action type, +1 discriminated on +0, +2..+5 payload,
+//     +6 the multiclick filter, which belongs to the Buttons page and MUST be
+//        preserved -- the vendor's own handlers never touch it.
+constexpr std::size_t kButtonBlockFirst = 0x37;
+constexpr std::size_t kButtonEntryLen   = 7;
+constexpr std::size_t kButtonEntryCount = 8;
+
+enum class ButtonPayload : std::uint8_t {
+    None,       // +2..+5 are zero
+    FixedCpi,   // +2..+3 = X, +4..+5 = Y, u16 LE
+    Key,        // +1 = HID modifier bitfield, +2 = HID keycode
+};
+
+// One item from the vendor's Button Mapping menu. b1 is ignored for Key, where
+// the modifier is supplied at apply time.
+struct ButtonAction {
+    const char*   name;
+    const char*   group;
+    std::uint8_t  b0;
+    std::uint8_t  b1;
+    ButtonPayload payload;
+    const char*   cite;
+};
+
+// One of the eight entries. `vendorExposes` records whether the vendor's own
+// Button Mapping page offers a row for it -- it shows SIX (§7.15). We do not
+// offer the other two either: LEFT because losing left-click is unrecoverable
+// from software, and entry 5 because it is a control no capture ever moved.
+struct ButtonSlot {
+    const char*  name;
+    std::uint8_t index;
+    bool         vendorExposes;
+    const char*  note;
+};
+
+extern const ButtonAction kButtonActions[];
+extern const std::size_t  kButtonActionCount;
+extern const ButtonSlot   kButtonSlots[];
+extern const std::size_t  kButtonSlotCount;
+
+const ButtonAction* findButtonAction(const char* name);
+const ButtonSlot*   findButtonSlot(const char* name);
+
+// "a", "f1", "enter", "kp0", ... -> HID Keyboard/Keypad usage. Returns false
+// for anything not in the vendor's own translator (cfg107 0x40a120).
+bool hidKeycode(const char* name, std::uint8_t& out);
+// "ctrl+shift" -> 0x03. Empty string is 0. Returns false on an unknown name.
+bool hidModifiers(const char* spec, std::uint8_t& out);
+
+// Compose one entry's seven bytes. `keepPlus6` is the multiclick byte read back
+// from the device and is copied through untouched (§1.3, read-modify-write).
+// `arg` is the CPI value for FixedCpi and the keycode for Key; `mods` is the
+// modifier bitfield for Key and must be 0 otherwise.
+bool encodeButtonEntry(const ButtonAction& a, long arg, std::uint8_t mods,
+                       std::uint8_t keepPlus6, std::uint8_t out[kButtonEntryLen],
+                       const char** err);
+
 // Look a field up by name, or nullptr.
 const Settable* findSettable(const char* name);
 

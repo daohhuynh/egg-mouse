@@ -733,6 +733,180 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
     return 0;
 }
 
+void listButtons() {
+    std::puts("Buttons (egg-config map <button> <action>):");
+    for (std::size_t i = 0; i < kButtonSlotCount; ++i) {
+        const ButtonSlot& b = kButtonSlots[i];
+        std::printf("  %-12s entry %u, record 0x%02zx%s\n", b.name, b.index,
+                    kButtonBlockFirst + kButtonEntryLen * b.index,
+                    b.vendorExposes ? "" : "   [not offered -- see below]");
+    }
+    std::puts("\nActions:");
+    const char* group = "";
+    for (std::size_t i = 0; i < kButtonActionCount; ++i) {
+        const ButtonAction& a = kButtonActions[i];
+        if (std::strcmp(group, a.group) != 0) {
+            group = a.group;
+            std::printf("  %s:\n", group);
+        }
+        if (a.payload == ButtonPayload::FixedCpi)
+            std::printf("    %-14s takes a CPI value, e.g. fixed-cpi:1600\n", a.name);
+        else if (a.payload == ButtonPayload::Key)
+            std::printf("    %-14s takes a key, e.g. key:a  key:ctrl+shift+a  key:f5\n", a.name);
+        else
+            std::printf("    %-14s %02x %02x\n", a.name, a.b0, a.b1);
+    }
+    std::puts("\nKeys: a-z, 0-9, f1-f12, kp0-kp9, enter escape backspace tab space");
+    std::puts("      minus equal leftbracket rightbracket backslash semicolon quote");
+    std::puts("      grave comma period slash capslock insert home pageup delete end");
+    std::puts("      pagedown left right up down.  Modifiers: ctrl shift alt win.");
+    for (std::size_t i = 0; i < kButtonSlotCount; ++i)
+        if (!kButtonSlots[i].vendorExposes)
+            std::printf("\n%s is NOT offered: %s.\n",
+                        kButtonSlots[i].name, kButtonSlots[i].note);
+}
+
+// Parse "<action>" or "<action>:<arg>" into the pieces encodeButtonEntry wants.
+bool parseAction(const std::string& spec, const ButtonAction*& act,
+                 long& arg, std::uint8_t& mods) {
+    act = nullptr; arg = 0; mods = 0;
+    const std::size_t colon = spec.find(':');
+    const std::string name = spec.substr(0, colon);
+    const std::string rest = colon == std::string::npos ? "" : spec.substr(colon + 1);
+
+    act = findButtonAction(name.c_str());
+    if (!act) {
+        std::printf("`%s` is not an action.\n\n", name.c_str());
+        listButtons();
+        return false;
+    }
+    if (act->payload == ButtonPayload::None) {
+        if (!rest.empty()) {
+            std::printf("%s takes no argument.\n", act->name);
+            return false;
+        }
+        return true;
+    }
+    if (rest.empty()) {
+        std::printf("%s needs an argument, e.g. %s\n", act->name,
+                    act->payload == ButtonPayload::FixedCpi ? "fixed-cpi:1600"
+                                                            : "key:ctrl+a");
+        return false;
+    }
+    if (act->payload == ButtonPayload::FixedCpi) {
+        char* end = nullptr;
+        arg = std::strtol(rest.c_str(), &end, 10);
+        if (end == rest.c_str() || (end && *end)) {
+            std::printf("`%s` is not a number.\n", rest.c_str());
+            return false;
+        }
+        return true;
+    }
+    // key:[mods+]name -- the last '+'-separated token is the key itself.
+    const std::size_t plus = rest.rfind('+');
+    const std::string keyName = plus == std::string::npos ? rest : rest.substr(plus + 1);
+    const std::string modSpec = plus == std::string::npos ? "" : rest.substr(0, plus);
+    if (!hidModifiers(modSpec.c_str(), mods)) {
+        std::printf("`%s` is not a modifier. Use ctrl, shift, alt, win.\n",
+                    modSpec.c_str());
+        return false;
+    }
+    std::uint8_t usage = 0;
+    if (!hidKeycode(keyName.c_str(), usage)) {
+        std::printf("`%s` is not a key this tool knows.\n\n", keyName.c_str());
+        listButtons();
+        return false;
+    }
+    arg = usage;
+    return true;
+}
+
+int cmdMap(const std::string& button, const std::string& spec,
+           bool verbose, bool yes, UnknownBytes policy,
+           const std::string& vaultPath) {
+    const ButtonSlot* slot = findButtonSlot(button.c_str());
+    if (!slot) {
+        std::printf("`%s` is not a button.\n\n", button.c_str());
+        listButtons();
+        return 2;
+    }
+    if (!slot->vendorExposes) {
+        // Not a [G] byte -- §7.17 gives every action type. This is the OTHER
+        // half of §1.3: knowing what a byte means is not the same as knowing
+        // how the firmware reacts to it, and neither the vendor's own tool nor
+        // any capture has ever moved these two entries.
+        std::printf("egg-config will not remap `%s`.\n  %s.\n",
+                    slot->name, slot->note);
+        std::puts("The bytes are understood; what the firmware does with a change"
+                  " here is not.");
+        return 2;
+    }
+
+    const ButtonAction* act = nullptr;
+    long arg = 0;
+    std::uint8_t mods = 0;
+    if (!parseAction(spec, act, arg, mods)) return 2;
+
+    const std::size_t at = kButtonBlockFirst + kButtonEntryLen * slot->index;
+
+    if (!yes) {
+        std::uint8_t preview[kButtonEntryLen];
+        const char* err = nullptr;
+        // +6 shown as ?? because it is read from the device and copied through.
+        if (!encodeButtonEntry(*act, arg, mods, 0x00, preview, &err)) {
+            std::printf("%s\n", err ? err : "cannot encode that");
+            return 2;
+        }
+        std::printf("map %s = %s would write record 0x%02zx..0x%02zx:\n",
+                    slot->name, spec.c_str(), at, at + kButtonEntryLen - 1);
+        std::printf("  %02x %02x %02x %02x %02x %02x ??\n", preview[0], preview[1],
+                    preview[2], preview[3], preview[4], preview[5]);
+        std::printf("  +6 is the multiclick filter and is preserved exactly as read.\n");
+        std::printf("  derived: %s\n", act->cite);
+        std::puts("Re-run with --yes.");
+        return 2;
+    }
+
+    Log log(verbose);
+    auto dev = Device::open(kProductIdApplication, log);
+    if (!dev) return 1;
+    Transport t(*dev, kConfigBusy, log);
+    DeviceConfigLink link(t, log);
+    ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
+
+    // Read first, because +6 belongs to the device and we are only borrowing
+    // the other six bytes.
+    std::vector<std::uint8_t> before;
+    Result rr = Result::Ok;
+    if (!s.read(before, rr)) { reportVault(s, vault); explain(rr); return rcFor(rr); }
+    reportVault(s, vault);
+
+    std::uint8_t entry[kButtonEntryLen];
+    const char* err = nullptr;
+    if (!encodeButtonEntry(*act, arg, mods,
+                           before[kPayloadOffset + at + 6], entry, &err)) {
+        std::printf("%s\n", err ? err : "cannot encode that");
+        return 2;
+    }
+
+    SetOutcome o = s.setRun(at, entry, kButtonEntryLen);
+    if (o.result == Result::AlreadySet) {
+        std::printf("%s is already mapped to %s. Nothing to write.\n",
+                    slot->name, spec.c_str());
+        return 0;
+    }
+    if (o.result != Result::Ok) {
+        explain(o.result);
+        if (!o.changed.empty()) printDiff(o.changed, "before", "after");
+        return rcFor(o.result);
+    }
+    std::printf("%s -> %s. Verified on the device.\n", slot->name, spec.c_str());
+    printDiff(o.changed, "before", "after");
+    return 0;
+}
+
 int cmdSet(const std::string& field, const std::string& value,
            bool verbose, bool yes, UnknownBytes policy,
            const std::string& vaultPath) {
@@ -909,6 +1083,9 @@ int main(int argc, char** argv) {
         return cmdDryRun(args[1], "", "", policy);
     if (cmd == "encode" && args.size() == 5)
         return cmdEncode(args[1], args[2], args[3], args[4], policy);
+    if (cmd == "map" && args.size() > 2)
+        return cmdMap(args[1], args[2], verbose, yes, policy, vaultPath);
+    if (cmd == "map") { listButtons(); return 2; }
     if (cmd == "set") { listSettable(); return 2; }
     usage();
     return 1;
