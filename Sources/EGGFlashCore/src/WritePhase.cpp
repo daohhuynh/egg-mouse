@@ -80,7 +80,7 @@ int roundTrip(BootloaderLink& link, const std::vector<std::uint8_t>& frame,
 
 }  // namespace
 
-bool preflight(BootloaderLink& link, const Image& img, std::string& error) {
+bool preflight(const Image& img, std::string& error) {
     if (!img.valid()) { error = "no validated image"; return false; }
     if (img.blockCount() != kExpectedBlockCount) {
         error = "image is " + std::to_string(img.blockCount()) +
@@ -99,15 +99,15 @@ bool preflight(BootloaderLink& link, const Image& img, std::string& error) {
             return false;
         }
     }
-    // A benign round trip, so we learn the link works before it matters (§4.2).
-    std::vector<std::uint8_t> r;
-    const int st = roundTrip(link, wholeImageChecksumQuery(kBlockLast), 100,
-                             kReportSmall, kSmallLen, &r);
-    if (st < 0) { error = "bootloader did not answer a benign query"; return false; }
-    if (st != kReady) {
-        error = "bootloader answered status " + hex2(static_cast<unsigned>(st)) +
-                ", expected 0x01"; return false;
-    }
+    // NO ROUND TRIP. §4.2's "round-trip a benign query" was written before the
+    // vendor's sequence was known, and today's amendment to the same section --
+    // "a safety measure that changes the byte stream is not free" -- settles the
+    // conflict against it. Their flash opens at A0 03; anything we send first is
+    // our invention, sent to a device that is already latched, one frame before
+    // the point of no return, and with no evidence of how it answers outside a
+    // session. §4.2a gate 2 also applies: "does the link work" is answerable
+    // without touching the device, by the enumeration and the successful open
+    // that got us here.
     return true;
 }
 
@@ -151,6 +151,9 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
                 }
                 continue;
             }
+            ++p.blocksWritten;   // the device ACKED a write. Not the same event
+                                 // as verifying one, and on a lying device the
+                                 // two diverge -- which is the point.
             // Verify, correctly. Read the block back and check BOTH the 1024
             // bytes and the device's own 16-bit checksum at resp[6..7] (§5.5
             // step 5). Never the source pointer (§5.6).
@@ -172,8 +175,11 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
                       (sumMatch ? "sum ok" : "sum differs") + "); rewriting.");
             link.sleepMs(100);
         }
-        ++p.blocksWritten;
-        ++p.blocksVerified;      // only reached once the block verified
+        // TWO COUNTERS, TWO EVENTS. They used to be incremented side by side
+        // here, so they were equal by construction and the summary printed two
+        // numbers that looked like a cross-check and were one number twice.
+        // A statistic that cannot disagree with itself is not evidence.
+        ++p.blocksVerified;      // reached only once the read-back matched
     }
 
     // ---- Whole-image checksum. ---------------------------------------------

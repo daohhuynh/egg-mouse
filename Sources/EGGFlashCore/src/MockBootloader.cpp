@@ -125,6 +125,23 @@ Io MockBootloader::recv(std::uint8_t reportId, std::size_t len,
     if (silence_) { --silence_; return Io::RecvFailed; }
     if (pending_.empty()) return Io::RecvFailed;
 
+    // THE REPORT ID IS PART OF THE REQUEST, and until 2026-09-05 this ignored
+    // it. A caller asking for 64 bytes of 0xA1 while the device held a
+    // 1041-byte 0xA0 answer got the first 64 bytes and Io::Ok, so "reads the
+    // wrong report after a command" was a whole defect class the mock could not
+    // catch -- on the very path where the vendor's own code gets it wrong
+    // (§5.6: their repair loop passes 0xA0 to a fixed 64-byte read). A real
+    // device cannot serve an 0xA1 report out of an 0xA0 answer.
+    //
+    // Found by audit, 2026-09-05, not by a failing test: nothing was asking for
+    // the wrong id, so this was a gap in what the mock could measure rather
+    // than a bug it was hiding.
+    if (len != egg::wireLength(reportId) || pending_.size() != len ||
+        pending_[0] != reportId) {
+        pending_.clear();
+        return Io::ShortRead;
+    }
+
     out = pending_;
     pending_.clear();
     // MALFORMED: truncate, so anything indexing resp[6] or resp[16..19]

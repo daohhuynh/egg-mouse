@@ -160,8 +160,8 @@ static void testInvariants() {
     // appear in strict order, each only after the previous verified.
     MockBootloader dev;
     std::string e2;
-    ok("preflight passes against a cooperative device",
-       preflight(dev, img, e2), e2);
+    ok("preflight passes on a good image", preflight(img, e2), e2);
+    ok("preflight sent NOTHING to do it", dev.sent().empty());
     Progress p = driveToVerifiedImage(dev, img);
     ok("inv 7: returns only with a verified image", p.imageVerified);
     ok("completion was acknowledged", p.completeAcked);
@@ -190,16 +190,16 @@ static void testInvariants() {
     }
     ok("the bytes actually resident on the device equal the image", resident);
 
-    // 6: no write is emitted unless preflight passed.
-    Faults never;                       // a device that answers nothing useful
-    never.rejectRate = 1.0;
-    MockBootloader bad(never);
+    // 6: no write is emitted unless preflight passed. It used to be checked by
+    // failing a device and looking for write frames; preflight has no link now,
+    // so the property is structural and the test says so directly -- a failing
+    // preflight is a decision taken with an untouched device.
+    Image empty;                        // never loaded: not a valid image
     std::string e3;
-    const bool pf = preflight(bad, img, e3);
-    ok("inv 6: preflight FAILS against a device that rejects everything", !pf);
-    bool anyWrite = false;
-    for (const auto& fr : bad.sent()) if (fr.size() > 1 && fr[1] == 0x06) anyWrite = true;
-    ok("inv 6: and no write frame was emitted", !anyWrite);
+    MockBootloader bad;
+    ok("inv 6: preflight FAILS on an image that was never loaded",
+       !preflight(empty, e3));
+    ok("inv 6: and it reached that verdict having sent nothing", bad.sent().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,6 +1009,87 @@ static void testBackupGate() {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 11. WHAT THE CODE ACTUALLY SENDS == WHAT THE PLAN SAYS IT WILL.
+//
+// The gap this closes, found 2026-09-05 by driving the real path and counting.
+// Tests/test_golden_vendor.py proves plannedFrames() == Endgame's capture, and
+// `egg-flash stream` prints plannedFrames(), so the PLAN was well guarded. But
+// nothing checked that preflight() + driveToVerifiedImage() -- the code that
+// actually reaches the mouse -- emit those frames. They did not: preflight sent
+// a "benign" A1 08 round trip before A0 03, so the wire carried 134 frames
+// where the plan had 133, and every existing test passed.
+//
+// The plan was therefore a SECOND DESCRIPTION of the sequence, and second
+// descriptions drift. This test makes the plan and the execution path check
+// each other, so the chain is complete:
+//
+//     what we send  ==  plannedFrames()  ==  the vendor's capture
+//        (here)          (golden_vendor, against windows-run/08-flash.pcapng)
+//
+// Two frames in the plan do not belong to this link and are excluded by name,
+// not by position: A1 3A goes to the APPLICATION device before the bootloader
+// exists, and A1 13 goes to it again after it comes back (§5.4 steps 1 and 7).
+// ---------------------------------------------------------------------------
+static void testWireEqualsPlan() {
+    std::printf("\n11. the frames sent == the frames planned\n");
+    Image img;
+    std::string err;
+    if (!img.loadFromExecutable(kExe, err)) {
+        std::printf("  SKIP  %s\n", err.c_str());
+        return;
+    }
+
+    const auto plan = plannedFrames(img);
+    std::vector<Frame> expected;
+    for (const auto& f : plan) {
+        const bool entry = f.size() > 1 && f[0] == kReportSmall && f[1] == 0x3A;
+        const bool reset = f.size() > 1 && f[0] == kReportSmall && f[1] == 0x13;
+        if (!entry && !reset) expected.push_back(f);
+    }
+    ok("the plan has exactly one A1 3A and one A1 13, sent elsewhere",
+       plan.size() == expected.size() + 2);
+
+    // A cooperative device with no faults: any retry would add frames and the
+    // comparison is for the happy path, which is the one the capture shows.
+    // NOT preloaded. Handing the mock the very image about to be written would
+    // let a run that wrote nothing still read back correctly, and this test
+    // would pass on a flasher that sends the right frames and stores nothing.
+    MockBootloader dev;
+    std::string e;
+    ok("preflight passes", preflight(img, e), e);
+    const Progress p = driveToVerifiedImage(dev, img);
+    ok("the run completed", p.imageVerified && p.completeAcked);
+
+    const auto& sent = dev.sent();
+    ok("the number of frames sent equals the number planned",
+       sent.size() == expected.size(),
+       std::to_string(sent.size()) + " sent vs " + std::to_string(expected.size()));
+
+    std::size_t firstBad = expected.size() + 1;
+    for (std::size_t i = 0; i < sent.size() && i < expected.size(); ++i)
+        if (sent[i] != expected[i]) { firstBad = i; break; }
+    std::string detail;
+    if (firstBad <= expected.size() && firstBad < sent.size()) {
+        detail = "frame " + std::to_string(firstBad) + ": sent " +
+                 hex2(sent[firstBad][0]) + " " + hex2(sent[firstBad][1]) +
+                 ", planned " + hex2(expected[firstBad][0]) + " " +
+                 hex2(expected[firstBad][1]);
+    }
+    ok("EVERY frame sent is byte-identical to the frame planned, in order",
+       sent.size() == expected.size() && firstBad > expected.size(), detail);
+
+    // Said separately, because it is the specific defect this test was written
+    // for and a count check alone would not name it.
+    bool readBeforeErase = false, sawErase = false;
+    for (const auto& f : sent) {
+        if (f.size() > 1 && f[0] == kReportLarge && f[1] == 0x03) { sawErase = true; break; }
+        readBeforeErase = true;   // ANY frame before A0 03 is one too many
+    }
+    ok("A0 03 is the FIRST frame this link ever sees", sawErase && !readBeforeErase);
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -1021,6 +1102,7 @@ int main() {
     testStage2Exit();
     testReadBackAndToken();
     testBackupGate();
+    testWireEqualsPlan();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

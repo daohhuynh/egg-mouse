@@ -127,11 +127,22 @@ inline constexpr unsigned kExitPollCeilMs = 30000;
 
 // How long to wait for the APPLICATION to reappear after a completed flash,
 // before A1 13. The vendor allows Sleep(800..16000) summing to 168 s
-// (updater-protocol.md §5.4 step 6); observed re-enumeration was ~880 ms. We
-// budget 60 s: far past the observation, well short of theirs, and giving up
-// here costs nothing because the image is already verified resident -- the
-// vendor's own code reports success on this path too (§5.4a).
-inline constexpr unsigned kPostFlashWaitMs = 60000;
+// (updater-protocol.md §5.4 step 6: Sleep(800), 1600 ... 16000, 800*20*21/2);
+// observed re-enumeration was ~880 ms.
+//
+// RAISED FROM 60 s TO THEIRS, 2026-09-05, by audit. The old comment said
+// "giving up here costs nothing because the image is already verified
+// resident". That was wrong, and wrong in the direction the owner had already
+// corrected once the same day: giving up SKIPS A1 13, which leaves the user's
+// old settings under newly written firmware -- a state the vendor's tool never
+// produces, and the exact reason A1 13 was put back in the plan. So impatience
+// here does have a cost.
+//
+// And patience has none. A wait emits no frame, so §4.2's "a safety measure
+// that changes the byte stream is not free" does not bite: this is the free
+// kind. There is no argument for being less patient than the vendor about a
+// device we are waiting for.
+inline constexpr unsigned kPostFlashWaitMs = 168000;
 
 // Sends A1 3A once and watches. Does NOT retry the send: the vendor's
 // nine-attempt loop (updater-protocol.md §5.3a) has never been exercised on the

@@ -331,6 +331,43 @@ mutate kill "the plan sends A1 3A twice" "$FP" \
 '    out.push_back(bootloaderStart(|||    out.push_back(enterBootloader());  // MUTANT
     out.push_back(bootloaderStart('
 
+# ---- What reaches the wire. ------------------------------------------------
+#
+# THE DEFECT THIS PAIR EXISTS FOR was real and shipped: preflight() sent a
+# "benign" A1 08 round trip before A0 03, so the wire carried 134 frames where
+# plannedFrames() had 133. Every test passed, because test_golden_vendor.py
+# checks the PLAN against the capture and nothing checked the plan against the
+# code. Found by driving the real path against the mock and counting.
+#
+# preflight takes no link now, so the defect cannot be written there again. It
+# can still be written one function later, which is what this plants.
+mutate kill "an extra frame is sent before the erase" "$WP" \
+'Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
+    Progress p;|||Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
+    Progress p;
+    roundTrip(link, wholeImageChecksumQuery(kBlockLast), 100,  // MUTANT
+              kReportSmall, kSmallLen);'
+
+# The other direction: a frame the vendor DOES send going missing. The per-block
+# read-back is the verification, so dropping it also drops a frame -- and a
+# count that matches the vendor is only meaningful if both directions are caught.
+mutate kill "the per-block read-back frame is never sent" "$WP" \
+'            std::vector<std::uint8_t> back;
+            const int st = roundTrip(link, readBlock(idx), 50, kReportLarge,
+                                     kLargeLen, &back);|||            std::vector<std::uint8_t> back(kLargeLen, 0);  // MUTANT
+            back[1] = kReady;
+            const int st = kReady;'
+
+# The report id is part of the request. §5.6: the vendor's own repair loop
+# passes 0xA0 to a fixed 64-byte read, so this is not a hypothetical slip --
+# it is a mistake that shipped in the code we derived this from. The mock could
+# not catch it until 2026-09-05 (it ignored the id and truncated), so this
+# mutant is also the check that the mock fix actually measures something.
+mutate kill "the write status is read as the large report" "$WP" \
+'            if (roundTrip(link, writeBlock(idx, src, kBlockSize), 50,
+                          kReportSmall, kSmallLen) != kReady) {|||            if (roundTrip(link, writeBlock(idx, src, kBlockSize), 50,
+                          kReportLarge, kLargeLen) != kReady) {  // MUTANT'
+
 # ---- The backup gate. -----------------------------------------------------
 #
 # These matter more than their size suggests. `flash` used to guarantee §4.2 by

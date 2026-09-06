@@ -696,11 +696,12 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     // ---- Preflight proper. Any failure aborts and nothing has changed. ----
     std::printf("\n[2/4] preflight\n");
     std::string err;
-    if (!preflight(*link, img, err)) {
+    if (!preflight(img, err)) {
         std::printf("\nABORTED: %s\nNOTHING HAS BEEN ERASED OR WRITTEN.\n", err.c_str());
         return 1;
     }
-    std::printf("      image, block range and a benign round trip all pass\n");
+    std::printf("      image and block range pass. NOTHING WAS SENT to check\n"
+                "      this -- preflight has no link and cannot send (§4.2).\n");
 
     // ---- The point of no return. ------------------------------------------
     std::printf("\n[3/4] writing. FROM HERE THIS TOOL DOES NOT STOP.\n");
@@ -708,7 +709,8 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     const Progress p = driveToVerifiedImage(*link, img);
 
     std::printf("\nDONE. The image is verified resident on the device.\n"
-                "  blocks written   %zu\n  blocks verified  %zu\n"
+                "  write acks       %zu   (>65 means blocks were rewritten)\n"
+                "  blocks verified  %zu\n"
                 "  rewrites         %zu\n  reconnects       %zu\n"
                 "  send failures    %zu\n  whole-image sum  %s\n  A1 09 acked      %s\n",
                 p.blocksWritten, p.blocksVerified, p.rewrites, p.reconnects,
@@ -718,9 +720,12 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     //
     // §5.4 steps 6-7. The bootloader link is finished with; A1 13 goes to the
     // APPLICATION device, which does not exist yet at this point. The vendor
-    // waits with Sleep(800..16000) summing to 168 s; we poll, for the same
-    // reason and with a comparable budget.
-    std::printf("\n[4/4] waiting for the application to come back\n");
+    // waits with Sleep(800..16000) summing to 168 s; we poll for the same
+    // 168 s. Matched rather than shortened (audit, 2026-09-05): giving up here
+    // skips A1 13 and leaves stale settings under new firmware, and a wait
+    // costs nothing on the wire.
+    std::printf("\n[4/4] waiting for the application to come back "
+                "(up to %u s, the vendor's own budget)\n", kPostFlashWaitMs / 1000);
     SeenDevice appAgain{};
     bool back = false;
     for (unsigned waited = 0; waited <= kPostFlashWaitMs; waited += 100) {
