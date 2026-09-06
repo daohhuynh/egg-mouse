@@ -417,3 +417,35 @@ the vendor's own procedure overwrites it and the device rebuilds it.
 `0x74` is this device's runtime state as of 23:03 on 2026-09-05. As a recovery
 artefact that is what the device actually had, which is the right thing to be
 able to put back — but do not describe it as "the same as the `.exe`".
+
+---
+
+## `prediction-factory-reset.md` re-scored after OUR flash, 2026-09-05. **21/21**
+
+Not a duplicate of the earlier 21/21. That one scored a standalone
+`egg-config factory-reset`. This scores the `A1 13` that `egg-flash flash`
+sends as the vendor's last step, on a device our own tool had just written.
+
+Mechanically checked, table parsed from `prediction-factory-reset.md` itself
+rather than read by eye:
+
+```
+predicted 21 bytes, observed 21 bytes
+21/21 predicted byte transitions confirmed EXACTLY (offset and both values)
+bytes that moved but were NOT predicted: none
+```
+
+**Why this is the strongest end-to-end result in the project.** The "expected
+after reset" column was never derived from the owner's device — it came from
+`windows-run/10-postflash-baseline.pcapng`, Endgame's own capture of this mouse
+immediately after *their* updater flashed it. So after a flash performed
+entirely by our tool, the settings record is byte-identical to the state
+Endgame's software leaves behind. The firmware write, the completion, the
+re-enumeration and the reset all land where the vendor's do.
+
+Reproduce:
+
+```
+./build/egg-config read --save after-flash.bin
+./build/egg-config diff ~/.egg-mouse-known-good.bin after-flash.bin
+```
