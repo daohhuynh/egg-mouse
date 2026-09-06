@@ -109,6 +109,25 @@ if(Python3_FOUND)
   endforeach()
 endif()
 
+# The SwiftUI front end's command builders, driven against the real CLIs.
+#
+# COMPILED, not run through `swift` in script mode. Swift only executes
+# top-level code from a file named main.swift, so `swift Commands.swift
+# test.swift` compiles both, runs nothing, and exits 0 -- a test that passes by
+# doing nothing at all, which is the exact failure this file's other comments
+# warn about. It was written that way first and caught by running it by hand.
+find_program(SWIFTC_EXECUTABLE swiftc)
+if(SWIFTC_EXECUTABLE)
+  add_test(NAME app_commands
+           COMMAND ${CMAKE_COMMAND}
+                   -DSWIFTC=${SWIFTC_EXECUTABLE}
+                   -DSRC=${CMAKE_SOURCE_DIR}
+                   -DBIN=${CMAKE_BINARY_DIR}
+                   -P ${CMAKE_SOURCE_DIR}/Tests/run_app_commands.cmake)
+  set_tests_properties(app_commands PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
+
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)
 set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 

@@ -317,9 +317,11 @@ const Withheld kWithheld[] = {
      "cannot express both, and picking the wrong encoding silently changes the "
      "switch mode. Observed but not yet given a safe interface"},
     {"button-mapping",
-     "records 0x37..0x6e, eight seven-byte entries. Five action types observed "
-     "(mouse mask, keyboard, media, fixed CPI, disable) but entries 5 and 7 were "
-     "never exercised, so the block is not fully known (§1.2a)"},
+     "not withheld any more -- use `egg-config map`. Kept in this list only to "
+     "say so, because the reason it WAS withheld is worth not forgetting: five "
+     "action types had been observed on the wire and the rest were [G]. What "
+     "changed is that all 19 became [D] from cfg107 (§7.17), not that the "
+     "capture covered more"},
 };
 const std::size_t kWithheldCount = sizeof(kWithheld) / sizeof(kWithheld[0]);
 
