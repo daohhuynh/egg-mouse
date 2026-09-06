@@ -2576,3 +2576,105 @@ The last row is the real loss, and it is narrower than it sounds, because the
 **order** of writes in each capture matches the order of the plan's numbered
 lines in all five config captures. That is mechanical corroboration that the
 script was followed, and it does not depend on any annotation in the file.
+
+## 7.17 The complete button-action table, from cfg107  [D]
+
+Closes the two gaps §7.14 and §7.15 left open, and it needed no capture. Every
+value below is an immediate in the vendor's own menu handlers, cited by address.
+
+### Where it lives
+The Button Mapping menu is **built at runtime**, not a `MENU` resource, which is
+why `rsrc.py` shows none. `0x40713e`/`0x40716d` load `CreatePopupMenu` and
+`AppendMenuW` into `%ebx`/`%edi`, and `0x407130`–`0x40745x` appends every item
+with its command id and caption. Resolving those captions from `.rdata` gives
+the whole menu:
+
+| group | items (command id) |
+| --- | --- |
+| MOUSE | LEFT CLICK `0x1f41`, RIGHT CLICK `0x1f42`, MIDDLE CLICK `0x1f43`, FORWARD `0x1f44`, BACK `0x1f45`, SCROLL UP `0x1f46`, SCROLL DOWN `0x1f47` |
+| KEYBOARD KEY | `0x1f68` |
+| CPI `0x1f72` | CPI LOOP `0x1f73`, FIXED CPI `0x1f74` |
+| MEDIA | PLAY/PAUSE `0x1f55`, NEXT `0x1f56`, PREVIOUS `0x1f57`, MUTE `0x1f58`, VOLUME UP `0x1f59`, VOLUME DOWN `0x1f5a`, BROWSER `0x1f5b`, EXPLORER `0x1f5c` |
+| DISABLE | `0x1f7c` |
+
+This is §7.13's prediction a third time, now from the menu construction itself
+rather than from string order. It agrees exactly.
+
+### The array the handlers write
+Each handler stores through **`0x57f23e(,%index,8)`** — an 8-byte-per-entry
+array indexed by the button being edited (`0x380(%esi)`). Since the settings
+object's button block starts at object offset `0x2e`, the object base is
+`0x57f23e − 0x2e` = **`0x57f210`**, which is exactly the pointer loaded at
+`0x403bfd`. The record cache is a separate buffer at **`0x57f340`**, filled by
+the `rep movsl` of 0x100 dwords at `0x403c02` straight from the device read.
+
+So the chain is: menu handler → object `0x57f210` → serializer `0x4042d0` →
+record → `A0 11`. §7.14's "no absolute write to `0x57f377` exists" was correct
+and was looking at the wrong buffer: `0x57f377` is in the record *cache*, which
+only the device read writes.
+
+### The table  — every value `[D]`
+
+| action | `+0` | `+1` | at |
+| --- | --- | --- | --- |
+| MOUSE → LEFT CLICK | `00` | `01` | `0x40774e` |
+| MOUSE → RIGHT CLICK | `00` | `02` | `0x4077f4` |
+| MOUSE → MIDDLE CLICK | `00` | `04` | `0x40789a` |
+| MOUSE → FORWARD | `00` | `10` | `0x407940` |
+| MOUSE → BACK | `00` | `08` | `0x4079e6` |
+| MOUSE → SCROLL UP | `01` | `01` | `0x407a8c` |
+| MOUSE → SCROLL DOWN | `01` | `ff` | `0x407b33` |
+| CPI → FIXED CPI | `0c` | `00` | `0x407c6f` |
+| **CPI → CPI LOOP** | **`09`** | **`f1`** | `0x407ccf` |
+| MEDIA → PLAY/PAUSE | `20` | `cd` | `0x407d76` |
+| MEDIA → NEXT | `20` | `b5` | `0x407e1d` |
+| MEDIA → PREVIOUS | `20` | `b6` | `0x407ec4` |
+| MEDIA → MUTE | `20` | `e2` | `0x407f6b` |
+| MEDIA → VOLUME UP | `20` | `e9` | `0x408012` |
+| MEDIA → VOLUME DOWN | `20` | `ea` | `0x4080b9` |
+| **MEDIA → BROWSER** | **`18`** | **`96`** | `0x408160` |
+| **MEDIA → EXPLORER** | **`18`** | **`94`** | `0x40820a` |
+| DISABLE | `ff` | `00` | `0x4082b4` |
+| KEYBOARD KEY | `02` | HID modifier | `0x408690`–`0x4086cb` |
+
+`+2`/`+4` are written as 16-bit words in every handler. For FIXED CPI they carry
+X and Y; for KEYBOARD KEY `+2` is the keycode returned by `0x40a120` and `+4` is
+explicitly zeroed at `0x4086c9`; for the rest both are zero.
+
+### Three things this settles
+
+**1. `0x09 0xf1` is CPI LOOP, and entry 5 is the CPI button.** §7.15 recorded
+`09 f1` as entry 5's unexplained default and refused to call it CPI LOOP on the
+grounds that "the only unexplained value and the only unexplained item must be
+each other" is bad reasoning (§1.2a). It was right to refuse and the answer is
+the same: the handler for command `0x1f73` writes exactly `09 f1`. The
+difference is that this is now `[D]` from an immediate, not a guess from a
+coincidence — and it identifies entry 5 as a control whose default action is
+CPI LOOP, i.e. the underside CPI button.
+
+**2. BROWSER and EXPLORER use a DIFFERENT action type, and that dissolves the
+>8-bit problem.** §7.14 and §7.15 flagged that their HID Consumer usages
+(`0x0196`, `0x0194`) cannot fit the single byte `+1` that VOLUME UP occupies,
+and warned that `+1` might therefore be a vendor index rather than a raw usage.
+Neither. They use type **`0x18`** where the other six use `0x20`, and their `+1`
+bytes are the LOW bytes of those usages. `+1` is a raw usage low byte
+throughout; the action type carries the rest.
+
+**3. All eight MEDIA values are standard HID Consumer Page usages.** Like
+§7.12's modifier byte, this is corroboration from an external published
+standard rather than from the vendor's own bytes:
+
+    cd  Play/Pause          b5  Scan Next Track     b6  Scan Previous Track
+    e2  Mute                e9  Volume Increment    ea  Volume Decrement
+    18/96  AL Internet Browser (0x0196)
+    18/94  AL Local Machine Browser (0x0194)
+
+Eight for eight, with the two `0x01xx` usages accounted for by the one action
+type that differs. `0xe9` is the single value the capture also observed, and it
+agrees.
+
+**Consequence:** every item on the Button Mapping menu now has a `[D]` byte
+pair. Nothing in the button-mapping path is `[G]` any more, so §1.3 no longer
+blocks exposing the whole menu — subject to the usual read-modify-write and
+diff-verify, and noting `+2`/`+4` must be zeroed for the non-payload actions
+because the vendor zeroes them.
