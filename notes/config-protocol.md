@@ -2508,3 +2508,71 @@ items are real, so the encoding question is real: either those two spill into
 `+2`–`+3`, or `+1` is an index into a vendor table rather than a raw usage, and
 VOLUME UP matching HID exactly is then a coincidence worth doubting. **No MEDIA
 value other than `0xe9` may be written until this is settled.**
+
+## 7.16 Two findings re-derived from cfg107 after `./log.txt` was quarantined  [D]
+
+The owner, 2026-09-06: **"you cannot trust anything in the root log.txt. so much is
+wrong."** Taken at face value. `./log.txt` is quarantined as evidence — see
+`working-memory.md`. This section re-establishes, from the binary alone, the two
+config findings that most visibly rested on it.
+
+### Sensor angle is two's complement, range −127…+127  — `[D]`, not `[O]`
+`0x411f62`–`0x411f8a`:
+
+    411f62  cmpl $-0x7f, %eax               ; SIGNED compare against -127
+    411f65  jge  0x411f71                   ; jge, not jae
+    411f67  movl $0xffffff81, 0x374(%esi)   ; clamp low to -127
+    411f71  movl $0x7f, %eax
+    411f76  cmpl %eax, 0x374(%esi)
+    411f7c  jle  0x411f84                   ; jle, not jbe
+    411f7e  movl %eax, 0x374(%esi)          ; clamp high to +127
+    411f84  movb 0x374(%esi), %dl           ; truncate to one byte
+    411f8a  movb %dl, 0x57f23c              ; -> staging global
+
+A signed clamp to a symmetric ±127 range followed by a byte truncation **is**
+two's complement. The signed jumps (`jge`/`jle` rather than `jae`/`jbe`) are the
+load-bearing detail; an unsigned field would use the unsigned forms and could not
+clamp at a negative bound at all.
+
+This also scores the half-prediction `./log.txt` line 190 described as "currently
+unscored" — the range **is** symmetric −127…+127 — and it scores it without
+needing the file that raised it.
+
+Previously this rested on a capture datapoint (`0x70` → `0xd3`) whose meaning
+came from a log line saying the tester typed `-45`. `0xd3` is `-45` in two's
+complement and `211` unsigned, and **nothing in the capture distinguishes them**.
+The binary does.
+
+### The "Disable LED on Lift-Off" inversion  — `[D]`, and never depended on the log
+`0x40ecc6`–`0x40ecd7`:
+
+    40ecc6  pushl $0xf0                     ; BM_GETCHECK
+    40eccc  calll *%ebx
+    40ecd0  testl %eax, %eax
+    40ecd2  sete  %cl                       ; 1 when the box is UNCHECKED
+    40ecd7  movb  %cl, 0x26(%edi)
+
+`sete` after `testl` yields 1 on zero, so the stored byte is 1 when the checkbox
+is **clear**. The record byte is therefore "LED stays lit on lift-off", the
+inverse of the vendor's caption — which is why `egg-config` exposes it as
+`led-on-liftoff` rather than the caption. `./log.txt` also carried a physical
+observation ("lifting the mouse puts the indicator out, CONFIRMED"); that was
+corroboration on top of the derivation, and the naming survives without it.
+
+### Why the config work as a whole survives the quarantine
+The captures are **bytes**, and bytes do not depend on the log. What the log
+supplied was **labels**. Most labels have a second, independent source:
+
+| label source | independent of `./log.txt`? |
+| --- | --- |
+| record layout, field offsets, encodings | **yes** — `[D]`, cited to cfg107 addresses throughout §7 |
+| LOD is eleven steps, index 0…10 | **yes** — `wire-predictions.md` derives it from the cfg107 jump table at `0x40f6c0` and the eleven `CB_ADDSTRING` pushes |
+| polling option names | **yes** — strings at `0x557ea8`, `'125Hz'`…`'8000Hz'` |
+| the whole button-action menu | **yes** — §7.13, one UTF-16 run, scored 4/4 against screenshots |
+| page control inventories | **yes** — `windows-run/screenshots/*.png` |
+| which physical action produced which write | **NO** — this is the part the log carried alone |
+
+The last row is the real loss, and it is narrower than it sounds, because the
+**order** of writes in each capture matches the order of the plan's numbered
+lines in all five config captures. That is mechanical corroboration that the
+script was followed, and it does not depend on any annotation in the file.

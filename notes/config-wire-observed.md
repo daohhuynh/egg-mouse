@@ -451,3 +451,78 @@ untested**, and no amount of re-reading the captures will test it.
 It is also the one thing that does not need the owner's memory: it needs one more
 capture, or — since config writes are reversible and factory reset is proven —
 it can be settled on the device with our own tool.
+
+## 7. The factory-default record, verified against the screenshots  [O]
+
+Supersedes §6's method. §6 reconciled the captures against the repo-root
+`./log.txt`; the owner quarantined that file on 2026-09-06 (CLAUDE.md §1.1a), so §6's
+*labelling* is void. **Its byte-level observations stand** — they never depended
+on the log — and this section replaces the anchor with one that cannot lie.
+
+The owner's point, 2026-09-06: *"you have all of the defaults in the screenshots.
+theyre guaranteed defaults, you can trace what changed from what starting from
+the values in the screenshots."* That is checkable, and it checks out.
+
+### The check
+`01-baseline`, **both** reads in `07-factory-reset` (pre- and post-reset), and
+`10-postflash-baseline` are compared against the visible state of `basic.png`,
+`advanced-sensor.png`, `buttons.png` and `button-mapping.png`.
+
+| setting (screenshot) | record | value | agrees |
+| --- | --- | --- | --- |
+| Polling Rate `8000Hz` | `0x05` | `01` | yes |
+| LOD `1.0mm` | `0x09` | `03` | yes — 4th of `0.7`…`1.7` |
+| CPI Levels `4` | `0x0e` | `04` | yes |
+| CPI 2 radio selected | `0x0d` | `01` | yes — zero-based |
+| Angle Snapping unticked | `0x0a` | `00` | yes |
+| **Disable LED on Lift-Off unticked** | `0x08` | **`01`** | yes — **inverted**, and this is the independent confirmation of the `sete` at cfg107 `0x40ecd2` (§7.16) |
+| X/Y Settings unticked | `0x23` | `00` | yes |
+| Downshift `Default` + Smoothing `Ripple Control Off` | `0x0b` | `00` | yes — both nibbles zero |
+| Motion Sync unticked | `0x0c` | `00` | yes |
+| Force max Sensor fps **ticked** | `0x71` | `01` | yes |
+| Sensor Angle `0` | `0x70` | `00` | yes |
+| Slamclick Filter ticked | `0x06` bit 0 | `1` | yes |
+| "I understand…" unticked | `0x72` | `00` | yes |
+| CPI 1–4 = 400/800/1600/3200, X=Y | `0x23`–`0x36` | flags `00`, values match | yes |
+| five multiclick sliders at `8` | `0x3d`+7n | `08` ×5 | yes |
+| RIGHT/MIDDLE/FORWARD/BACK/SCROLL UP/SCROLL DOWN | `0x37`–`0x6e` | `0001 0002 0004 0010 0008 09f1 0101 01ff` | yes |
+
+**Sixteen of sixteen.** The screenshots are the factory-default state, and the
+default record is now a known 1024-byte vector anchored to something other than
+a log file.
+
+### Three whole-record diffs, and they are all zero
+    01-baseline            vs 07 pre-reset    0 differing bytes
+    07 pre-reset           vs 07 post-reset   0 differing bytes
+    01-baseline            vs 07 post-reset   0 differing bytes
+
+So the mouse was at factory defaults at the start of the run **and** immediately
+before the factory reset in 07 — the reset changed nothing because there was
+nothing to change. That independently corroborates §5.1 (the tester reset
+between capture sections) without needing anyone's recollection, and it is why
+sections 02–06 each start from defaults.
+
+### The one byte firmware 1.10 changed  [O]
+    07 post-reset (fw 1.07)  vs  10-postflash (fw 1.10)
+      1 differing byte:  0x71  01 -> 00
+
+`0x71` is **Force max Sensor fps**. Its factory default is `1` on firmware 1.07
+and `0` on 1.10. Every other byte of the 1024 is identical, across a firmware
+upgrade and two factory resets.
+
+Two consequences:
+
+1. **The settings record layout is stable across 1.07 → 1.10.** One default
+   changed; nothing moved. That is the strongest evidence yet that the config
+   work derived from a 1.07-era capture set is valid on the owner's 1.10 device — and
+   it is now evidence rather than an assumption.
+2. **Never hardcode a default vector.** CLAUDE.md §5's "anything a new firmware
+   version changes" is no longer hypothetical: it has exactly one known
+   instance, and a tool that shipped 1.07's defaults would silently re-enable a
+   sensor setting on 1.10 that the vendor now ships off.
+
+This also fixes an error in an earlier pass of this analysis, recorded so it is
+not repeated: a first attempt read "baselines" by filtering transfers on
+`len(data) > 100`, which matched a **727-byte USB configuration descriptor**
+rather than the 1041-byte feature report, and produced nonsense values for
+`0x0b` and `0x06`. Filter on `is_get_report and len > 1000`.
