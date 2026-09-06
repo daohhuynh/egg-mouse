@@ -73,6 +73,57 @@ Timings are from 08; 09 matches to within jitter.
 in the strings and was nearly written off as absent. Here it is, on the wire,
 last thing the updater does.
 
+### 2.1 CORRECTION — "~2.6 s" and "~2.4 s" are the vendor's sleeps, not the device's
+
+Measured 2026-09-05 from the **enumeration** traffic rather than the feature
+traffic. The numbers above are the gap to the vendor's *next command*, which is
+dominated by two hardcoded `Sleep(1000)` calls. The device is ready long before.
+
+Taking the first `GET_DESCRIPTOR device` on the newly-addressed device as the
+moment it is back on the bus:
+
+| transition | capture | command ack | device back | **gap** |
+| --- | --- | --- | --- | --- |
+| app → bootloader (`a1 3a`) | 08 | 0.0144 s | 0.5033 s (dev5) | **489 ms** |
+| app → bootloader (`a1 3a`) | 09 | 0.0057 s | 0.4540 s (dev7) | **448 ms** |
+| bootloader → app (`a1 09`) | 08 | 23.2013 s | 24.0971 s (dev6) | **896 ms** |
+| bootloader → app (`a1 09`) | 09 | 23.2954 s | 24.1520 s (dev8) | **857 ms** |
+
+**Entry re-enumerates in ~450–500 ms; exit in ~860–900 ms.** Use these to size a
+*timeout*; do not copy 2.6 s and call it the device's latency. In `09` the old
+application device's last packet is at 0.2167 s, so the detach happens ~210 ms
+after the ack and the bus is quiet for only ~240 ms.
+
+### 2.2 Response byte 0 is mode-dependent, and in application mode it is NOT stable [O]
+
+Histogram over every inbound feature transfer in both flash captures:
+
+| mode | length | byte 0 |
+| --- | --- | --- |
+| bootloader (dev 5 / 7) | 63 | `0x50` — **68 of 68** |
+| bootloader (dev 5 / 7) | 1040 | `0x51` — **65 of 65** |
+| application (dev 4 / 6 / 8) | 63 | `0xa1` once, `0x00` three times |
+
+Two things follow.
+
+1. **Endgame's own captures show byte 0 varying for the same command.** The
+   `a1 3a` reply is `a1 01 …` in `08` and `00 01 …` in `09` — same tool, same
+   device, same command, different byte 0. This is independent Windows-side
+   confirmation of what was observed on macOS (`wire-observed.md` §2.3), and it
+   means the two checks that once demanded `buf[0] == 0xA0` would have failed
+   intermittently on **every** platform, not just ours.
+2. **`0x50` in byte 0 of a 63-byte reply is a positive bootloader signature**,
+   68 for 68, with no counter-example in either capture. It is not proof — two
+   clean runs of one firmware — but it is a *second* identity check that costs
+   nothing beyond a reply we already have to read.
+
+### 2.3 The entry command was sent exactly once in each capture [O]
+
+The vendor's builder has a nine-attempt retry loop (`updater-protocol.md` §5.3).
+Neither capture exercised it: one `a1 3a` out, one reply back, both times. So
+the retry path is **[D] and untested on the wire** — our own retry logic cannot
+be validated against these captures and must be exercised against the mock.
+
 ## 3. Block format
 
 Both are given in **transferred-buffer offsets** — the bytes as they appear in
@@ -277,5 +328,15 @@ the whole 1.10 set by hash so a swapped file is loud rather than silent.
   mock in §4.3 has to invent these, and must not pretend they are observed.
 - **Whether the bootloader validates anything.** Still `[G]`, still assumed no
   (§2). Two flashes of an image the device already had tell us nothing here.
-- `a1 09` versus `a1 13` — both plausibly "reset", sent 2.4 s apart to two
-  different enumerations. What each does separately is untested.
+- ~~`a1 09` versus `a1 13` — both plausibly "reset"~~ **`a1 09` is the exit,
+  and the binary says so explicitly.** After `a1 09` is acknowledged with
+  `resp[1] == 1`, fw110 polls for **PID 0x1978** — the application — at
+  `0x00403c7c` and again in a loop at `0x00403c92`, sleeping 800 ms, 1600 ms, …
+  up to 16000 ms, and fails to `0x403e6f` if it never appears. The capture
+  agrees: the device reappears as a new address ~880 ms later and `a1 13` is
+  then sent to *that* device. So `a1 09` = leave bootloader, run the
+  application. `[D]` for the intent, `[O]` for the re-enumeration.
+  What `a1 13` does is separately settled — it is Factory Reset — so the pair is
+  no longer ambiguous. **What remains `[G]` is what `a1 09` does to a bootloader
+  that was never flashed**, which is the one thing the captures cannot show
+  because the vendor only ever sends it after a completed write.

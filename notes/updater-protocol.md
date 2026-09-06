@@ -571,6 +571,96 @@ bootloader, with no application-mode handshake first.**
 3. On success `Sleep(1000)`, re-confirm PID `0x1977`, `Sleep(1000)`, then
    `FUN_00403960()`.
 
+#### 5.3a Re-read from raw bytes 2026-09-05 — it is TWO poll loops, not one [D]
+
+The summary above merges two distinct paths that emit two distinct error
+strings. Corrected, every address verified in `r2` disassembly of the file
+(`file_offset = VA − 0x400c00`, checked against three known prologues):
+
+**Frame construction, `0x00403780`–`0x004037a1`.** Base is `ebp-0x44`, the
+pointer handed to `memset(buf, 0, 0x40)` at `0x403788`. Then exactly two stores:
+```
+0x403793  c7 45 bc a1 3a 00 00   mov dword [ebp-0x44], 0x00003aa1   ; a1 3a 00 00
+0x40379a  c7 45 c0 00 5a a5 32   mov dword [ebp-0x40], 0x32a55a00   ; 00 5a a5 32
+0x4037a1  e8 …                   call 0x4012a0  (SetFeature), length 0x40
+```
+Bytes 8–63 come from the `memset` and are never written again. **This is the
+`movl $imm32` form §1.2a warns about** — a `push imm32` scan finds nothing here.
+The result matches the wire byte for byte (`flash-wire-observed.md` §2).
+
+**The read-back does not inspect any byte.** `0x4037d2` sets `buf2[0] = 0xa1`,
+`0x4037d9` calls the GetFeature wrapper, and `0x4037e1`/`0x4037e3` test only the
+wrapper's return. Contrast `A1 09` at `0x00403c30`, which explicitly tests
+`resp[1] == 1`. So **entry succeeds on "a read happened", not on a status byte.**
+
+**Loop A — send/read, `0x403775`–`0x4037f3`.** `ebx = 1`; each pass sends,
+`Sleep(ebx*2)` at `0x4037b3`, reads on success, and on failure `Sleep(ebx*2)`
+again at `0x4037ed`, `inc ebx`, `cmp ebx,0xa`, `jl`. Nine passes, i = 1…9.
+
+**Then the paths split, and this is what the old summary lost:**
+
+| | reached when | poll site | give-up | error string |
+| --- | --- | --- | --- | --- |
+| **A** | the read succeeded → `jne 0x4038cf` | `0x4038d1` | `0x4038eb` | `Open bldr device request failed` (`0x40392c`) |
+| **B** | all nine passes failed, falls through | `0x403800` | `0x40381a` | `send bldr request failed` (`0x403875`) |
+
+Both poll `FUN_00401000(0x1977)` with an accumulator that starts at 0, sleeps
+its current value, tests `== 0x1194` (4500), then adds `0x1f4` (500). So the
+sleeps are 0, 500, …, 4500 — **ten polls, 22 500 ms total** — and the
+`cmp esi, 0x2710` at `0x403822`/`0x4038f3` **is dead as a loop exit**, because
+the `je` at 4500 always fires first. Worth knowing before copying the bound.
+
+Path **A** on success jumps to `0x4038fb`: `Sleep(1000)`, fall through to
+`0x403902`, `Sleep(1000)`, then `call 0x403960`. Path **B** on success does
+`Sleep(1000)`, re-finds with `cmp eax, 1` (note: *equality*, where the poll used
+`test eax,eax`), then `je 0x403902` for the second `Sleep(1000)`. **Both paths
+sleep 2000 ms before the first bootloader command.**
+
+**[D] × [O] reconciliation.** Those sleeps predict the first bootloader command
+at ≈ 0.015 + 0 + 500 + 1000 + 1000 = **2.515 s** after the entry command.
+Observed in `08-flash.pcapng`: **2.610 s**. 95 ms of slack for the flash
+function's own setup. The arithmetic and the wire agree independently.
+
+#### 5.3b The software exit — `A1 09` polls for the APPLICATION [D]
+
+Built at `0x00403bd1`–`0x00403bf2`, base `ebp-0x50`: `memset(…,0,0x40)`, then
+`mov dword [ebp-0x50], 0x000009a1` and `mov dword [ebp-0x4c], 0`, length `0x40`.
+`Sleep(0x32)` = **50 ms**, then a 64-byte read; success is
+`cmp byte [ebp-0x8f], 1` at `0x00403c30` — i.e. **`resp[1] == 1`**. Retries with
+`Sleep(i)`, `i = 1…10`, then `send bldr complete request failed` at `0x403c6b`.
+
+On success, `0x00403c7c` searches for **PID 0x1978**, and if that fails,
+`0x00403c92` loops: `Sleep(ebx)` with `ebx = 800, 1600, … ≤ 16000`, succeeding
+on `cmp eax, 1`. Not found → `je 0x403e6f`, the failure path.
+
+**So the vendor's own code treats `A1 09` as "leave the bootloader and come back
+as the application".** Confirmed on the wire twice (`flash-wire-observed.md`
+§2.1). What it does to a bootloader that was **never flashed** is `[G]` — the
+vendor never sends it in that state.
+
+#### 5.3c No config tool can reach the entry command [D, with the method stated]
+
+Scanned all four config tools and all four updaters for the 4-byte immediates
+`a1 3a 00 00`, `00 5a a5 32`, the 3-byte magic `5a a5 32`, and `77 19 00 00`
+(PID 0x1977 as an imm32):
+
+- **Every updater: exactly one of each.** Every config tool: **zero** magic,
+  zero `a1 3a` immediate.
+- cfg104 has one `77 19 00 00`. It is at file `0x106445` preceded by `e8` — a
+  `call rel32` displacement, not a PID. Coincidence, and exactly the false
+  positive §1.2b exists to catch.
+- Byte-wise construction was checked too (`c6 /r imm8` stores within a 40-byte
+  window containing all of `5a`, `a5`, `32`): one hit in each of cfg107 and
+  fw110, at `0x176980` and `0x161bf8`, **byte-identical to each other** and
+  sitting in high-entropy data, not code. Noise.
+
+**Blind spots, stated because the claim is a negative (§1.2a):** this method
+cannot see a magic that is computed at runtime (XOR of two constants, a table
+lookup, a decrypted blob), one stored in a resource rather than in `.text`, or
+an entry command using a different frame shape entirely. So: **not found by an
+immediate-literal and byte-store scan, which cannot see computed or
+resource-held constants** — not "does not exist".
+
 ### 5.4 Flash — `FUN_00403960` @ `0x00403960` [D]
 1. **Start**: `FUN_00401890()` = `0xA0/0x03`, then `Sleep(3000)`. Retried with
    `Sleep(d)`, `d = 100, 200, 300, 400, 500` (`d < 0x1f5`). All fail →
