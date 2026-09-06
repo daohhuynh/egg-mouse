@@ -175,6 +175,39 @@ want_rc 0 "record 0x09" dryrun "$TMP/plain.bin" lod 5
 want_rc 8 "REFUSED"     dryrun "$TMP/gated.bin" lod 5
 want_rc 8 "0x6f"        dryrun "$TMP/gated.bin" lod 5
 
+# THE GUI'S PARSING CONTRACT, tested from the PRODUCING end for the first time.
+#
+# `reportGates` prints "  %-20s  %s" and EGGApp/Commands.swift parseGates splits
+# on the FIRST DOUBLE SPACE. `motion-jitter-filter` is exactly 20 characters, so
+# a single space would collapse the separator and the app would read the whole
+# line as a name with no reason. Until 2026-09-06 the parser was tested against
+# synthetic text and the producer against nothing, because only `read` printed
+# this and `read` needs a mouse. `dryrun` prints it from a file now, so both
+# ends are driven by the same real output.
+out=$("$BIN" dryrun "$TMP/gated.bin" 2>&1 || true)
+if printf '%s' "$out" | grep -qE '^  lod {2,}[^ ]'; then
+  echo "  PASS  the gate line separates name from reason by >= 2 spaces"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL  the gate line's separator collapsed -- EGGApp cannot parse it"
+  FAIL=$((FAIL+1))
+fi
+# The name column must be wide enough for the LONGEST field name, or the
+# separator collapses for that one field only -- which is how this would ship.
+longest_field=$("$BIN" set 2>&1 | sed -n '1,/deliberately NOT settable/p' \
+  | grep -oE '^  [a-z][a-z0-9-]+ +record' | awk '{print length($1)}' | sort -n | tail -1)
+gate_pad=$(printf '%s' "$out" | grep -E '^  lod ' | sed -E 's/^  (lod +)[^ ].*/\1/' | tr -d '\n' | wc -c)
+if [ "${gate_pad:-0}" -ge "$((longest_field + 2))" ]; then
+  echo "  PASS  the gate name column ($gate_pad) fits the longest field name ($longest_field) plus a separator"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL  gate name column $gate_pad is too narrow for a ${longest_field}-char name"
+  FAIL=$((FAIL+1))
+fi
+# An UNGATED record must print the "none" form, or the app would disable
+# every field on a perfectly good mouse.
+want_rc 0 "fields this device will NOT accept: none" dryrun "$TMP/plain.bin"
+
 # `diff` -- untested until 2026-09-06, which is worse than it sounds. It is
 # offline and read-only, so it looked harmless, but it is the command a person
 # runs to decide whether a restore is safe: a diff that under-reports makes a
@@ -205,7 +238,12 @@ if printf '%s' "$out" | grep -qF "SENSOR GLASS MODE is on" &&
 else
   echo "  FAIL  the wrapped refusal lost an end"; FAIL=$((FAIL+1))
 fi
-longest=$(printf '%s\n' "$out" | awk '{ print length }' | sort -n | tail -1)
+# Measure ONLY the refusal paragraph, not the whole output: `dryrun` also
+# prints the gate section, whose long line is deliberately unwrapped because
+# the GUI parses it. Measuring everything made this test fail for the one
+# reason it must not care about.
+longest=$(printf '%s\n' "$out" | sed -n '/^REFUSED/,$p' \
+          | awk '{ print length }' | sort -n | tail -1)
 if [ "${longest:-0}" -le 80 ]; then
   echo "  PASS  no refusal line exceeds 80 columns (longest $longest)"
   PASS=$((PASS+1))

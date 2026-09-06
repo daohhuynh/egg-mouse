@@ -784,11 +784,35 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
         return 1;
     }
 
+    // The same gate section `read` prints, from a FILE. Two reasons, and the
+    // second is why it is here rather than in the notes.
+    //
+    // For a person: a saved record can be inspected before it is restored,
+    // with no mouse present -- "what would this file mean on the device?" is
+    // exactly the question `dryrun` exists to answer, and until now it
+    // answered it for one field at a time.
+    //
+    // For the tests: `reportGates`'s output is the GUI's parsing contract
+    // (two spaces after a 20-wide name, EGGApp/Commands.swift parseGates), and
+    // it was PRODUCED only by `cmdRead`, which needs hardware. The parser was
+    // tested against synthetic text and the producer against nothing. Now both
+    // ends are driven by Tests/test_config_set.sh from a file on disk.
+    //
+    // Note for the GUI: this section is NOT consumed here. ConfigView updates
+    // its gate map only from `read`, deliberately -- see the comment there.
+    //
+    // The heading still says "this device" even though the record came from a
+    // file, and it must: EGGApp's parseGates keys on that exact prefix, and
+    // more importantly a second wording would mean the test exercises a
+    // DIFFERENT producer than `read` uses, which is the whole point of putting
+    // it here. Read it as "the device this record came off".
+    reportGates(before.data());
+
     std::vector<std::uint8_t> frame;
     const Settable* f = nullptr;
     if (field.empty()) {
         frame = ConfigSession::buildRestoreFrame(before, policy);
-        std::printf("restore %s\n", recordPath.c_str());
+        std::printf("\nrestore %s\n", recordPath.c_str());
     } else {
         long v = 0;
         std::uint8_t encoded = 0;
