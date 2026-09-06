@@ -28,6 +28,18 @@ on any firmware being valid** — it is observed behaviour on the device, not an
 inference. It is also the single fact that makes the rest of this project
 reasonable to attempt with one mouse and no spare.
 
+A power cycle also leaves bootloader mode on its own: the device sat in the
+bootloader for four hours and returned to normal on one replug, no buttons held.
+
+**And if it is stuck as `0x1977`, Endgame's own Windows updater will fix it.**
+That is not a hopeful reading of their tool — it is a dedicated path in it. The
+updater's device search returns a *mode code*, and on finding ProductID `0x1977`
+it starts a different worker that goes straight to the flash sequence and skips
+the mode-switch entirely. A mouse already in the bootloader is a supported
+starting state for their software, not an error. (Derived from the binary, not
+tested — running the vendor's tools is out of scope here — see
+`notes/updater-protocol.md` §5.1a.)
+
 ---
 
 ## Build

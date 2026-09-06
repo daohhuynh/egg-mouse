@@ -552,6 +552,66 @@ place. Nothing in either binary decides it. **Do not act on either reading.**
 Case 6 matters: **the tool will flash a device it finds already in the
 bootloader, with no application-mode handshake first.**
 
+### 5.1a THE UPDATER RECOVERS A DEVICE THAT IS ALREADY IN THE BOOTLOADER [D]
+
+Derived 2026-09-05 from raw disassembly, prompted by the owner asking whether the
+official Windows updater is a way out if a mouse gets stuck in bootloader mode.
+**It is, and it is a dedicated code path with its own thread entry point.**
+
+`FUN_00403600` does not return a boolean. It writes a **mode code** through its
+out-parameter (`[ebp+8]`):
+
+| written | at | meaning |
+| --- | --- | --- |
+| `1` | `0x004036b2` | found PID `0x1978` — application |
+| `2` | `0x00403717` | found PID `0x1977` — **bootloader** |
+| `0` | `0x0040372c` | found neither |
+
+And it hunts for the bootloader deliberately. After the initial `0x1978` search
+(`0x403603`) and a 500/1000/1500 ms retry loop (`0x403644`), it enters the loop
+at `0x403680` with `edi = 10`, `esi = 3000`, testing `edi & 0x80000001` to
+**alternate** between `0x1977` (`0x4036c4`, even passes) and `0x1978`
+(`0x403691`, odd passes), ten times, with `esi` decreasing by 300.
+
+The caller branches on that code at `0x004033b0`:
+
+```
+0x4034a6  cmp eax, 1        ; mode 1, application
+0x4034ab  call 0x4011f0     ;   read version, print "Mouse firmware current version %.2f"
+0x4034f4  push 0x402f00     ;   AfxBeginThread -> 0x402f00
+0x403500  cmp eax, 2        ; mode 2, ALREADY THE BOOTLOADER
+0x40350e  push 0x402f10     ;   AfxBeginThread -> 0x402f10   (no version read, no message)
+```
+
+And the two thread entry points are three instructions each:
+
+```
+0x00402f00:  push [ebp+8]; call 0x403750   ; FUN_00403750 = enter bootloader, then flash
+0x00402f10:  mov ecx,[ebp+8]; call 0x403960 ; FUN_00403960 = FLASH DIRECTLY, entry skipped
+```
+
+**So a mouse presenting only PID `0x1977` is not an error state for Endgame's
+updater — it is a supported starting state.** It skips `A1 3A` entirely, never
+reads a version, and goes straight to `A0 03` and the block loop.
+
+**Consequence, and it changes the risk calculus for `CLAUDE.md` §4.4 stage 2.**
+The worst plausible outcome of a software bootloader entry — the device sits in
+the bootloader and will not hand back — is recoverable with Endgame's own tool
+on any Windows machine, using a path they wrote for exactly this case. It does
+not require our flasher to be finished.
+
+Caveats, so this is not over-read:
+- It is `[D]`. Nobody has run the updater against a stuck device; §1.5 forbids
+  running these binaries at all, so this cannot be tested here.
+- It needs physical access to a Windows machine at the moment it is needed.
+  Between now and then the mouse is unusable. That is an inconvenience, not a
+  brick.
+- Updater 1.10 flashes `FWFILE` 140, which is firmware 1.10 — the version the
+  mouse already runs. Capture `09-flash-again.pcapng` is exactly that reflash
+  and it succeeded, so the no-op case is `[O]`.
+- This says nothing about a device presenting **neither** PID. For that the
+  button (`bootloader-observed.md` §1) is the answer, and it is `[O]`.
+
 ### 5.2 Find the device — `FUN_00403600` @ `0x00403600` [D]
 - Try PID `0x1978`. Found → `mode = 1`.
 - Else `CloseHandle`, clear flags, retry PID `0x1978` with `Sleep(d)`,

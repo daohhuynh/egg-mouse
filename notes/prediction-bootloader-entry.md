@@ -116,16 +116,25 @@ What bounds it:
   `a0 06`) is a 1041-byte report and carries parameters.
 - **The ack is 6–14 ms** in both captures. A flash erase is not that fast. Weak
   evidence — it could be asynchronous — but it points the same way.
-- **If the worst happens it is recoverable in principle, not by a power cycle
-  but by finishing the flasher.** The whole vendor flash protocol is derived and
-  the byte stream is already generated and diffed against Endgame's own capture;
-  what is missing is the device-backed `BootloaderLink` and the `flash` verb.
-  That is real work under pressure, which is exactly the situation §4.4 exists
-  to avoid — so it is the fallback, not the plan.
+- **ENDGAME'S OWN UPDATER RECOVERS A STUCK BOOTLOADER, ON A DEDICATED PATH.**
+  Added after the owner asked whether a Windows laptop is a way out. It is.
+  `FUN_00403600` returns a *mode code* — 1 for PID `0x1978`, **2 for PID
+  `0x1977`** (`0x00403717`) — and actively alternates its search between the two
+  PIDs ten times (`0x403680`). On mode 2 the caller starts a different thread,
+  `0x402f10`, which is three instructions: `call 0x403960`, the flash function,
+  **skipping `A1 3A` entirely**. A mouse presenting only `0x1977` is a supported
+  starting state for their tool, not an error. `updater-protocol.md` §5.1a.
+  It is `[D]` — §1.5 forbids running the binary — and it needs a Windows machine
+  to hand, so between the failure and the fix the mouse is unusable. But it does
+  not need our flasher finished, and it is a path Endgame wrote deliberately.
+- **Finishing our own flasher is the second fallback.** The protocol is fully
+  derived and the byte stream already diffs clean against Endgame's capture;
+  what is missing is a device-backed `BootloaderLink` and the `flash` verb.
 
-**The owner decides whether that is worth it.** The honest summary: small probability,
-and the bad outcome is "the mouse is unusable until we finish the flasher"
-rather than "the mouse is dead".
+**Revised honest summary:** small probability, and the bad outcome is now "the
+mouse is unusable until the owner reaches a Windows machine" rather than "until we
+finish the flasher under pressure". That is a materially smaller tail, and the
+question that produced it was the owner's, not mine.
 
 ## What this rung CANNOT establish
 
