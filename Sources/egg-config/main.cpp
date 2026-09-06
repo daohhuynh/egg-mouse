@@ -220,6 +220,45 @@ void listSettable() {
 // text because "it failed" is not an answer a user can act on -- and because
 // the difference between "we did not write" and "we wrote and cannot confirm"
 // is the difference between a retry and a recovery.
+// Wrap prose to `width` columns with a hanging indent, because a refusal is
+// the most important thing this tool prints and the reasons are paragraphs.
+// Unwrapped, `set lod 5` on a glass-mode device emitted one 430-character
+// line, which is the shape people skip.
+//
+// WHERE THIS MAY NOT BE USED, and it is not a style preference: the settable
+// list, the withheld list, and `read`'s gate section are PARSED by the GUI
+// (EGGApp/Commands.swift, parseFields and parseGates -- both line-oriented,
+// the latter splitting on the first double space). Wrapping any of those turns
+// one field into several unparseable ones. Human-only output wraps; anything
+// with a reader does not. Tests/test_app_commands.swift drives those parsers
+// against this binary, so the mistake is caught -- after it is made.
+void printWrapped(const char* text, std::size_t indent, std::size_t width = 78) {
+    if (!text) return;
+    std::string pad(indent, ' ');
+    std::size_t col = indent;
+    std::fputs(pad.c_str(), stdout);
+    const char* w = text;
+    while (*w) {
+        while (*w == ' ') ++w;
+        const char* e = w;
+        while (*e && *e != ' ') ++e;
+        const std::size_t len = static_cast<std::size_t>(e - w);
+        if (!len) break;
+        if (col > indent && col + 1 + len > width) {
+            std::fputs("\n", stdout);
+            std::fputs(pad.c_str(), stdout);
+            col = indent;
+        } else if (col > indent) {
+            std::fputc(' ', stdout);
+            ++col;
+        }
+        std::fwrite(w, 1, len, stdout);
+        col += len;
+        w = e;
+    }
+    std::fputc('\n', stdout);
+}
+
 void explain(Result r, const char* refusal = nullptr) {
     switch (r) {
         case Result::Ok:
@@ -246,7 +285,7 @@ void explain(Result r, const char* refusal = nullptr) {
             // cannot audit is one they will work around.
             std::puts("REFUSED, and nothing was written. The read succeeded; the\n"
                       "device is fine. This field is not safe to set on it:");
-            if (refusal) std::printf("\n    %s\n", refusal);
+            if (refusal) { std::fputc('\n', stdout); printWrapped(refusal, 4); }
             break;
         case Result::WriteRejected:
             std::puts("the device did not acknowledge the write. Nothing was\n"
@@ -761,8 +800,9 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
         // happen. Refuse in the same place the device path refuses.
         if (const char* why = capabilityRefusal(*f, before.data())) {
             std::printf("REFUSED. %s could not be set on a device holding this\n"
-                        "record, so no frame and no token are produced:\n\n"
-                        "    %s\n", f->name, why);
+                        "record, so no frame and no token are produced:\n\n",
+                        f->name);
+            printWrapped(why, 4);
             return 8;
         }
         warnIfActiveStageWouldBeOutOfRange(before, *f, v);

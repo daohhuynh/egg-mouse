@@ -175,6 +175,27 @@ want_rc 0 "record 0x09" dryrun "$TMP/plain.bin" lod 5
 want_rc 8 "REFUSED"     dryrun "$TMP/gated.bin" lod 5
 want_rc 8 "0x6f"        dryrun "$TMP/gated.bin" lod 5
 
+# THE REFUSAL MUST STILL SAY EVERYTHING, and must be readable while it does.
+# The reason is a paragraph, and it used to print as one 430-character line --
+# the shape people skip, which for the most important message this tool emits
+# is a real defect. It is wrapped now, so check both halves of that: nothing
+# lost off either end, and no line wider than a terminal.
+out=$("$BIN" dryrun "$TMP/gated.bin" lod 5 2>&1 || true)
+if printf '%s' "$out" | grep -qF "SENSOR GLASS MODE is on" &&
+   printf '%s' "$out" | grep -qF "config-protocol.md"; then
+  echo "  PASS  the wrapped refusal keeps its first words and its last"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL  the wrapped refusal lost an end"; FAIL=$((FAIL+1))
+fi
+longest=$(printf '%s\n' "$out" | awk '{ print length }' | sort -n | tail -1)
+if [ "${longest:-0}" -le 80 ]; then
+  echo "  PASS  no refusal line exceeds 80 columns (longest $longest)"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL  a refusal line is $longest columns wide"; FAIL=$((FAIL+1))
+fi
+
 # The gate is per FIELD. Everything else still works on the same record, or the
 # guard is a blanket refusal wearing a reason.
 want_rc 0 "record 0x05" dryrun "$TMP/gated.bin" polling 1000
