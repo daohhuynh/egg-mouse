@@ -282,9 +282,15 @@ void noteOnPersistence() {
       "gaps across which the vendor's own settings vanished, so \"the record\n"
       "decays off power\" cannot explain those four. Power loss does not do\n"
       "this.\n"
-      "What DID empty them is still unknown -- vendor software or the\n"
-      "tester's own actions are what remain, and neither is ruled out for\n"
-      "you. If it matters, unplug, replug and `egg-config read`.");
+      "What emptied the vendor's records is ANSWERED as of 2026-09-05: the\n"
+      "tester reset settings to defaults between capture sections, for a\n"
+      "clean per-section baseline. That accounts for the five that emptied,\n"
+      "and \"I may have missed one or two\" accounts for the single gap that\n"
+      "held. Stated as recollection, not a log -- but it needs no device\n"
+      "mechanism, and no device mechanism was ever found.\n"
+      "So there is no known way this record is lost while the mouse sits\n"
+      "unplugged. If it matters to you, the check is still cheap: unplug,\n"
+      "replug and `egg-config read`.");
 }
 
 // ---------------------------------------------------------------------------

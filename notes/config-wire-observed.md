@@ -331,3 +331,34 @@ nothing visible in section 07 because there was nothing to undo.
   only stage 1's flag has been seen move.
 - Records `0x02`–`0x04`, and `0x01`'s meaning.
 - Whether `a1 13` differs at all from what the flasher sends.
+
+### 5.1 ANSWERED 2026-09-05: it was the tester, not the device
+
+The owner, asked directly rather than derived: **he reset the settings to defaults
+before the capture sections**, for a clean per-section baseline — *"i did reset
+the settings before the captures... maybe i missed one or two but i remember
+doing so."*
+
+That is the whole explanation. Five sections start from defaults because he put
+them there; the single gap that **held** (`03 → 04`) is exactly what "maybe I
+missed one or two" predicts. No device mechanism is required, and after
+eliminating duration, power loss, re-enumeration and launch-time writes, none
+was ever found.
+
+**Confidence, stated rather than implied.** This is recollection and he hedged
+it. It is not a log and cannot be one — the resets happened outside every
+capture. What makes it strong is not the memory, it is that it is the only
+surviving candidate and it predicts the one anomaly (`03 → 04`) that every
+device-side hypothesis had to explain away.
+
+**This is the §1.2a case, and it went the way §1.2a says it goes.** Working
+memory carried the instruction "ASK FIRST — he ran the captures" alongside
+a growing body of mechanical elimination. The mechanical work was correct and
+necessary — it is what reduced the field to one candidate — but the answer was
+always going to come from asking the person who was there. **The subsection
+built on the reverts collapses to a methodology note.**
+
+Consequence for the tools: `egg-config`'s persistence warning no longer tells
+the user the loss is unexplained, because it is not. It now reports both
+power-cycle tests (8.6 s and 1706.8 s, both 0/1024 bytes changed) and this
+answer, and still offers the unplug-replug check for anyone who wants it.
