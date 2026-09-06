@@ -1759,7 +1759,7 @@ The serializer (§7.3) maps object `0x0a` → **record `0x0d`** and object `0x0b
 | | value | tag |
 | --- | --- | --- |
 | record `0x0e` | number of CPI stages, `1`–`4`, = combo index + 1 | `[D]` |
-| record `0x0d` | which CPI stage, `0`–`3` | range `[D]`, meaning `[G]` |
+| record `0x0d` | which CPI stage, `0`–`3` | **both `[D]`** — §7.18.4, cfg107 `0x40edf0`–`0x40ee4c` |
 
 `0x0d`'s **range** is derived; its **meaning** is not. "Selected/active stage"
 is the natural reading and the handlers are consistent with it, but they are

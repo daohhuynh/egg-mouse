@@ -17,6 +17,7 @@
 // wants preflight and write to share one notion of which image this is.
 #pragma once
 
+#include "egg/FirmwareManifest.h"
 #include "egg/Protocol.h"
 
 #include <cstdint>
@@ -78,13 +79,28 @@ std::uint16_t blockChecksum(const std::uint8_t* block, std::size_t n);
 // without checking them -- an Image only exists if it passed.
 class Image {
 public:
-    // Extracts FWFILE/140 from the PE at exePath and validates it. On any
-    // failure returns false and fills `error`; `*this` is left empty.
+    // Extracts FWFILE/140 from the PE at exePath and validates it against the
+    // pinned constants above. On any failure returns false and fills `error`;
+    // `*this` is left empty.
     //
     // Validation is all-or-nothing and happens here rather than at the call
     // site, because §4.2 says "any single preflight failure aborts. No path
     // proceeds on a partial pass."
     bool loadFromExecutable(const std::string& exePath, std::string& error);
+
+    // The same, for a release from the manifest (FirmwareManifest.h). This is
+    // the multi-version path, and its FIRST act is to hash the whole .exe and
+    // require it to equal `rel.updaterSha256`. Only then is `rel.resourceId`
+    // used -- so the id still comes from a compile-time table row that an exact
+    // file hash selected, never from anything in the file itself (§1.4).
+    //
+    // The single-argument overload above stays, unchanged, as the path for the
+    // one release this build was derived against. Two entry points rather than
+    // one generalised one, for the same reason ConfigSession keeps `set` and
+    // `setRun` apart: the narrow one is what every existing test drives, and
+    // widening it would weaken the checks that catch our own bugs.
+    bool loadFromRelease(const std::string& exePath, const Release& rel,
+                         std::string& error);
 
     const std::vector<std::uint8_t>& bytes() const { return bytes_; }
     std::size_t blockCount() const { return bytes_.size() / kBlockSize; }

@@ -265,4 +265,75 @@ bool Image::loadFromExecutable(const std::string& exePath, std::string& error) {
     return true;
 }
 
+bool Image::loadFromRelease(const std::string& exePath, const Release& rel,
+                            std::string& error) {
+    bytes_.clear();
+    checksum_ = 0;
+    sha_.clear();
+
+    // ORDER MATTERS AND IS THE WHOLE SAFETY ARGUMENT. The .exe is hashed and
+    // matched to the row BEFORE `rel.resourceId` is read, so the id can never
+    // be influenced by the file's own contents. Reversing these two steps would
+    // leave §1.4 saying the same words and meaning nothing.
+    std::vector<std::uint8_t> exe;
+    if (!readFile(exePath, exe, error)) return false;
+
+    const std::string exeSha = sha256Hex(exe.data(), exe.size());
+    if (exeSha != rel.updaterSha256) {
+        error = "this file is not the " + std::string(rel.label) +
+                " updater.\n  its SHA-256 is  " + exeSha +
+                "\n  " + std::string(rel.label) + " is       " +
+                std::string(rel.updaterSha256) +
+                "\n  Refusing. An updater whose bytes are not in the manifest "
+                "has no resource id, and guessing one is how a wrong-but-"
+                "well-formed image reaches the device (CLAUDE.md \u00a72).";
+        return false;
+    }
+
+    std::vector<std::uint8_t> raw;
+    if (!extractResource(exePath, kResourceType, rel.resourceId, raw, error))
+        return false;
+
+    if (raw.size() != rel.imageSize) {
+        error = "image is " + std::to_string(raw.size()) +
+                " bytes, manifest says " + std::to_string(rel.imageSize);
+        return false;
+    }
+    if (raw.size() % kBlockSize != 0) {
+        error = "image size is not a whole number of 1024-byte blocks";
+        return false;
+    }
+    if (raw.size() / kBlockSize != kExpectedBlockCount) {
+        error = "image is " + std::to_string(raw.size() / kBlockSize) +
+                " blocks, expected " + std::to_string(kExpectedBlockCount);
+        return false;
+    }
+    const std::string sha = sha256Hex(raw.data(), raw.size());
+    if (sha != rel.imageSha256) {
+        error = "image SHA-256 is " + sha + "\n  manifest says " +
+                std::string(rel.imageSha256) +
+                "\n  The .exe matched the manifest but its FWFILE/" +
+                std::to_string(rel.resourceId) + " did not. Refusing.";
+        return false;
+    }
+
+    const std::uint32_t sum = wholeImageChecksum(raw);
+    if (sum != rel.wholeImageChecksum) {
+        // Belt and braces: the manifest records the value A0 03 will declare,
+        // and the code computes it. If they disagree, one of them is wrong and
+        // this is not the moment to find out which.
+        char buf[128];
+        std::snprintf(buf, sizeof buf,
+                      "whole-image checksum is 0x%08x, manifest says 0x%08x",
+                      sum, rel.wholeImageChecksum);
+        error = buf;
+        return false;
+    }
+
+    bytes_ = std::move(raw);
+    sha_ = sha;
+    checksum_ = sum;
+    return true;
+}
+
 }  // namespace egg::fw

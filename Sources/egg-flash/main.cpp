@@ -6,6 +6,7 @@
 #include "egg/FlashPlan.h"
 #include "egg/HidBootloaderLink.h"
 #include "egg/Firmware.h"
+#include "egg/FirmwareManifest.h"
 #include "egg/RecordVault.h"
 #include "egg/Transport.h"
 #include "egg/WritePhase.h"
@@ -92,10 +93,20 @@ static int usage() {
         "                                  vendor's own exit. No erase, no write.\n"
         "  egg-flash help\n"
         "\n"
-        "The image is always FWFILE resource %u of the .exe you name. That is a\n"
-        "compile-time constant; there is no way to select a different one, and\n"
-        "an image whose SHA-256 is not the pinned value is refused before any\n"
-        "byte goes out.\n"
+        "The .exe you name is identified BY ITS OWN SHA-256 against a table\n"
+        "compiled into this binary, and the resource id comes from the row that\n"
+        "matched. There is no way to name a resource, and an .exe not in the\n"
+        "table is refused outright -- so the id is still a compile-time constant\n"
+        "and never anything the file itself suggests.\n"
+        "\n"
+        "  --versions        list the firmware releases this build knows\n"
+        "  --version 1.07    flash one other than the default (%s)\n"
+        "\n"
+        "Only %s has been flashed onto this mouse and verified. Any other needs\n"
+        "--i-know-this-version-is-untested, which is deliberately not --yes:\n"
+        "--yes is typed every time and would be given by reflex.\n"
+        "\n"
+        "To teach it a new release:  python3 Tools/pe/ingest.py <updater.exe>\n"
         "\n"
         "  egg-flash read-firmware [out.bin]   read the device's CURRENT image\n"
         "                                      back with A0 07 and save it.\n"
@@ -140,7 +151,8 @@ static int usage() {
         "              Default ~/.egg-mouse-known-good.bin. This tool's last\n"
         "              command is A1 13, the same byte as Factory Reset, so it\n"
         "              reports whether that undo exists before doing anything.\n"
-        "\n%s\n", kResourceName, kRecoveryProcedure);
+        "\n%s\n", primaryRelease().label, primaryRelease().label,
+        kRecoveryProcedure);
     return 2;
 }
 
@@ -901,11 +913,39 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     return 0;
 }
 
+// The manifest, rendered for a person. Prints WHAT IS KNOWN about each row and
+// what is not, because "1.04 is available" and "1.04 is safe" are different
+// claims and the difference is the whole point of the provenOnDevice column.
+int listReleases() {
+    std::printf("Firmware releases this build knows about:\n\n");
+    for (std::size_t i = 0; i < kReleaseCount; ++i) {
+        const Release& r = kReleases[i];
+        std::printf("  %-6s  version resource %u.%u.%u.%u   FWFILE/%u   %s\n",
+                    r.label, r.version[0], r.version[1], r.version[2],
+                    r.version[3], r.resourceId,
+                    r.provenOnDevice
+                        ? "FLASHED AND VERIFIED ON THIS MOUSE"
+                        : "never flashed by this tool -- needs "
+                          "--i-know-this-version-is-untested");
+        std::printf("          updater sha256 %s\n", r.updaterSha256);
+        std::printf("          image   sha256 %s\n", r.imageSha256);
+    }
+    std::printf(
+        "\nA release is selected by --version, and the .exe you name must hash "
+        "to the\nrow's updater SHA-256. An updater not in this table has no "
+        "resource id here,\nand there is no path that guesses one "
+        "(CLAUDE.md \u00a71.4).\n\n"
+        "To add a release:\n"
+        "  python3 Tools/pe/ingest.py <updater.exe> --label 1.11\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     std::string vaultPath = defaultVaultPath();
     std::string args[3];
-    std::string confirmArg, backupPath;
+    std::string confirmArg, backupPath, versionArg;
     bool yes = false, verbose = false, checkOnly = false;
+    bool acceptUnproven = false;
     int n = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -914,6 +954,11 @@ int main(int argc, char** argv) {
         if (a == "--confirm" && i + 1 < argc) { confirmArg = argv[++i]; continue; }
         if (a == "--backup" && i + 1 < argc) { backupPath = argv[++i]; continue; }
         if (a == "--check") { checkOnly = true; continue; }
+        if (a == "--version" && i + 1 < argc) { versionArg = argv[++i]; continue; }
+        if (a == "--i-know-this-version-is-untested") {
+            acceptUnproven = true; continue;
+        }
+        if (a == "--versions") return listReleases();
         if (a == "-v" || a == "--verbose") { verbose = true; continue; }
         if (n < 3) args[n++] = a;
     }
@@ -936,16 +981,72 @@ int main(int argc, char** argv) {
     if (n < 2) return usage();
     const std::string exePath = args[1];
 
+    // WHICH RELEASE. Default is the one this build was derived against and
+    // drove end to end on the device; §5 says any other version is a different
+    // device until shown otherwise, so choosing one is deliberate and typed.
+    const Release* rel = &primaryRelease();
+    if (!versionArg.empty()) {
+        rel = findRelease(versionArg.c_str());
+        if (!rel) {
+            std::printf("REFUSED: no firmware release called %s in the "
+                        "manifest.\n", versionArg.c_str());
+            listReleases();
+            std::printf("\nTo add one: python3 Tools/pe/ingest.py <updater.exe> "
+                        "--label %s\nIt prints a row for "
+                        "Sources/EGGFlashCore/src/FirmwareManifest.cpp, or "
+                        "refuses and says why.\n", versionArg.c_str());
+            return 1;
+        }
+    }
+
     Image img;
     std::string err;
-    if (!img.loadFromExecutable(exePath.c_str(), err)) {
+    if (!img.loadFromRelease(exePath.c_str(), *rel, err)) {
         std::printf("REFUSED: %s\n", err.c_str());
         return 1;
     }
-    std::printf("image      FWFILE/%u from %s\n", kResourceName, exePath.c_str());
+
+    // The gate on an unproven release, and it is deliberately NOT --yes. --yes
+    // is the flash's own approval and a person types it every time; a second
+    // meaning attached to it would be approved by reflex (§4.2c). This one has
+    // to be typed once, in full, and it says what it is agreeing to.
+    if (!rel->provenOnDevice && (verb == "flash")) {
+        if (!acceptUnproven) {
+            std::printf(
+                "REFUSED: firmware %s has never been flashed onto this mouse "
+                "by this tool.\n\n"
+                "  Every [O] in this project -- every timing, every settings "
+                "byte, every\n"
+                "  bootloader observation -- came from %s. CLAUDE.md \u00a75: a "
+                "different\n"
+                "  firmware version is a different device until shown "
+                "otherwise.\n\n"
+                "  What is known about %s: its image is %zu bytes in 65 blocks, "
+                "its\n"
+                "  SHA-256 matches the manifest, and the vendor's own code "
+                "loads FWFILE/%u\n"
+                "  (recovered from its FindResourceW call site). That is "
+                "everything.\n"
+                "  How the DEVICE reacts to it is [G].\n\n"
+                "  If you mean it, add --i-know-this-version-is-untested.\n",
+                rel->label, primaryRelease().label, rel->label,
+                img.bytes().size(), rel->resourceId);
+            return 1;
+        }
+        std::printf("WARNING    firmware %s is NOT proven on this device. "
+                    "Proceeding because\n"
+                    "           --i-know-this-version-is-untested was given.\n",
+                    rel->label);
+    }
+
+    std::printf("release    %s  (version resource %u.%u.%u.%u)%s\n",
+                rel->label, rel->version[0], rel->version[1], rel->version[2],
+                rel->version[3],
+                rel->provenOnDevice ? "" : "   NOT PROVEN ON THIS DEVICE");
+    std::printf("image      FWFILE/%u from %s\n", rel->resourceId, exePath.c_str());
     std::printf("size       %zu bytes, %zu blocks of %zu\n",
                 img.bytes().size(), img.blockCount(), kBlockSize);
-    std::printf("sha256     %s  (matches the pinned constant)\n", img.sha256().c_str());
+    std::printf("sha256     %s  (matches the manifest row)\n", img.sha256().c_str());
     std::printf("checksum   0x%08x  (FUN_00403580, 32-bit sum of every byte)\n",
                 img.checksum());
     std::printf("blocks     device indices 0x%02x..0x%02x\n",

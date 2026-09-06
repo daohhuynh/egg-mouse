@@ -49,6 +49,7 @@ target_link_libraries(egg-config PRIVATE EGGConfigCore)
 
 add_library(EGGFlashCore STATIC
   Sources/EGGFlashCore/src/Firmware.cpp
+  Sources/EGGFlashCore/src/FirmwareManifest.cpp
   Sources/EGGFlashCore/src/FlashCommands.cpp
   Sources/EGGFlashCore/src/WritePhase.cpp
   Sources/EGGFlashCore/src/MockBootloader.cpp
@@ -94,7 +95,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t button_map citations config_replay fwfile_set golden_vendor golden_config_cmds recmap undo_loadable usbpcap)
+  foreach(t button_map citations config_replay fwfile_set golden_vendor golden_config_cmds manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
