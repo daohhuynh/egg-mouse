@@ -109,12 +109,19 @@ MAX_PAIR_GAP = 16
 
 
 def extract(tag, verbose=False):
-    """Recover one binary's record map. Returns a dict; check ['ok'] first."""
-    path = TAGS[tag]
-    if not os.path.exists(os.path.join(ROOT, path)):
+    """Recover one binary's record map. Returns a dict; check ['ok'] first.
+
+    `tag` is one of TAGS, or a PATH to any config executable. The path form is
+    what the update pipeline uses: a version nobody has read is not in TAGS by
+    definition, and requiring it to be added first would mean editing this file
+    before the tool that decides whether the file is safe has run.
+    """
+    path = TAGS.get(tag, tag)
+    full = path if os.path.isabs(path) else os.path.join(ROOT, path)
+    if not os.path.exists(full):
         return {"tag": tag, "ok": False, "why": "binary not present: " + path}
 
-    lines = disassemble(path)
+    lines = disassemble(full)
     ps = pairs_in(lines)
     if not ps:
         return {"tag": tag, "ok": False, "why": "no load/store pairs found at all"}
