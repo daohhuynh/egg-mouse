@@ -12,7 +12,7 @@ Holding a button while plugging the mouse in re-enumerates it as **PID
 `updater-protocol.md`, `FUN_00401000(0x1977)`).
 
 ```
-[23:18:00]  PID 0x1978 APPLICATION  ver=0x0107 (fw 1.07)
+[23:18:00]  PID 0x1978 APPLICATION  ver=0x0107 (fw 1.07)   <- 2026-09-04
 [23:18:06]  (no VID 0x3367 device present)          <- unplugged
 [23:18:19]  PID 0x1977 BOOTLOADER   ver=0x0006
 ```
@@ -67,7 +67,9 @@ application image** means:
 CLAUDE.md §4.2 requires: *"if the bootloader reports a version or an identity of
 any kind, refuse anything unrecognised."* We now have that identity and it is
 unambiguous — a product string that literally reads `Bootloader`, and a version
-field distinct from the application's `0x0107`. Preflight must check all of it.
+field distinct from the application's (`0x0107` on the 1.07 firmware this was
+read under; `0x0110` since — see §5b.2, and note that the point is that the
+bootloader's `0x0006` differs from BOTH). Preflight must check all of it.
 
 `VersionNumber` `0x0006` decoded by the updater's own BCD round trip
 (`updater-protocol.md` §1) displays as `0.06`. Whether the bootloader version is
@@ -146,7 +148,8 @@ it on the next replug.
 Observed 2026-09-05. The device sat in the bootloader for **about four hours**,
 continuously powered, and stayed there — so the mode does not time out. Unplug
 and replug with no button held, and it returns to `PID 0x1978`, ver `0x0107`,
-application mode, first try.
+application mode, first try. (`0x0107` because this predates the vendor's flash
+to 1.10 by four hours — §5b.2.)
 
 ```
 [03:21:28]  PID 0x1977 BOOTLOADER   ver=0x0006      <- 4 hours after entry
@@ -317,13 +320,50 @@ before the terminal appeared to hang), but "better fit" is not evidence.
 bootloader accepts a command once per boot" would be a real property of the
 device and would change how retry loops must be written.
 
-### 5b.2 GAP: §5a records `ver=0x0107`, today's log says `0110` [unresolved]
+### 5b.2 RESOLVED 2026-09-06: both numbers are right, at different times
 
-§5a's transcript reads `PID 0x1978 APPLICATION ver=0x0107`. Today's kernel log
-reads `0x3367/1978/0110`, and `egg-config info` reports 1.10. Nothing has ever
-been flashed by us, so the firmware cannot have changed. One of the two numbers
-was mis-transcribed, most likely §5a's. **Do not quote either until the device
-is back in application mode and `bcdDevice` is read directly.**
+The gap as written was *"§5a records `ver=0x0107`, today's log says `0110`; one
+of them was mis-transcribed, most likely §5a's."* Neither was. The premise was
+the error: **"nothing has ever been flashed"** counted only *our* flashes and
+missed the vendor's.
+
+Dated forward from the capture files' own internal timestamps, not from prose:
+
+| when (local) | what | firmware |
+| --- | --- | --- |
+| 2026-09-04 23:18 | `pidwatch.py`, §5a's transcript | `0x0107` |
+| 2026-09-05 03:23 | four-hour bootloader sit, §5b | `0x0107` |
+| 2026-09-05 04:16 – 07:29 | `windows-run` 00–07, the config captures | 1.07 |
+| **2026-09-05 07:53** | **`windows-run/08-flash`: Endgame's own updater flashes 1.10** | 1.07 → **1.10** |
+| 2026-09-05 08:07 | `windows-run/10-postflash-baseline` | 1.10 |
+| 2026-09-05 (later) | our own `egg-flash` run, §4.4 stage 4 | 1.10 → 1.10 |
+
+`08-flash.pcapng`'s first packet is `2026-09-05T14:53:01Z`, over eight hours
+after §5a's 23:18 reading. So `0x0107` is `[O]` and correct for 2026-09-04, and
+`0x0110` is `[O]` and correct for today. Nothing needs re-reading off the
+device.
+
+**Two things this leaves behind.**
+
+1. Every `[O]` taken before 2026-09-05 07:53 is a **firmware 1.07** observation,
+   including §1, §2 and §5b of this file. The bootloader identity in §2
+   (`PID 0x1977`, product `Bootloader`, `VersionNumber 0x0006`) was read from
+   the 1.07 device and has since been re-observed under 1.10 unchanged, so it
+   is safe; the rest of this file's application-mode numbers are 1.07's.
+   CLAUDE.md §5 says *"Every `[O]` in this project was taken from firmware
+   1.10"*. That sentence is wrong in both directions and is corrected there.
+2. The cross-version drift this exposes has been **measured**, not assumed: a
+   whole-record diff of `07-factory-reset` (1.07) against `10-postflash-baseline`
+   (1.10) differs at exactly one byte, record `0x71`, `01` → `00`. One byte of
+   1024. That is the only known behavioural difference between the two firmware
+   versions, and it is a factory default, not a layout change.
+
+**The general lesson, because this cost a real gap-hunt.** The claim that broke
+was not a measurement — it was the word *"nothing"* in "nothing has ever been
+flashed by us". §1.2a is about absence claims in the binaries; this is the same
+mistake about the project's own history, where it is easier to make because the
+history feels like something you would remember. Date a claim from a file's
+timestamp, never from recollection of what happened when.
 
 ## 6. What this does NOT establish
 

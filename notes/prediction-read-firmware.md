@@ -215,6 +215,13 @@ Verified against the mock under both hypotheses: on the refusal path it emits
 This is the interesting branch, so the readings are written down *now*, before
 the data can bias them. Save the diff either way.
 
+> **⚠ 2026-09-06. THE SECOND ROW OF THIS TABLE FIRED, AND HALF OF ITS READING
+> WAS WRONG. The table below is left exactly as it was pre-registered — see the
+> correction under it, which is where the right reading lives.** A
+> pre-registration that gets edited after the data arrives is worth nothing, so
+> nothing here is rewritten; the point of writing a reading down in advance is
+> to find out that it was wrong.
+
 | what comes back | reading |
 | --- | --- |
 | all 65 blocks match | prediction 6 holds. Block arithmetic confirmed `[O]`. |
@@ -226,6 +233,54 @@ the data can bias them. Save the diff either way.
 
 **A refusal is not a failure of the tool.** The command is built to abort on the
 first block that will not read, after 5 attempts, having written nothing.
+
+### 5a. WHAT ACTUALLY HAPPENED, and the correction to row 2 (2026-09-06)
+
+Row 2 fired: **exactly one block differed, device index `0x74`, the last one,
+1022 of its 1024 bytes**, identically across two full read-backs
+(`backup.bin` and `backup2.bin` are byte-identical, sha256
+`46e4dd15…ab9cac89`). Scored in full in `prediction-scores.md`.
+
+Row 2's reading has two halves and they scored differently.
+
+| half of the pre-registered reading | verdict |
+| --- | --- |
+| "the firmware writes to its own flash at runtime and those blocks hold it" | **survives** |
+| "it localises where settings or calibration live" | **REFUTED** |
+
+**Why the second half is wrong, and it is not a small thing** — it would have
+sent a later session looking for the settings record inside a firmware image.
+
+- The settings record is **not in block `0x74`**. No 16-byte run of
+  `~/.egg-mouse-known-good.bin` occurs anywhere in it.
+- **Nothing in the image is plaintext anything.** Block `0x74`'s entropy is
+  7.80 bits/byte, and so is every other block's (mean 7.80, range 7.76–7.84).
+  The whole FWFILE is encrypted or compressed. So "which block holds the
+  settings" is not a question this image can answer, for `0x74` or for any
+  other block, and the row assumed it could.
+
+**Where the mistaken reading came from, since that is the reusable part.** The
+row was written by reasoning about what a *typical* mouse firmware layout does
+with its last flash page, and typical-mouse-firmware reasoning is exactly what
+CLAUDE.md §1.2 names as the primary contamination risk. It carried no tag. Had
+it been tagged it would have been `[G]`, and a `[G]` in a pre-registration is
+fine — it is a hypothesis — but it must be *labelled*, because an untagged
+plausible sentence is indistinguishable from a derived one three files later.
+**Tag the readings in a pre-registration, not just the findings.**
+
+What survives, with a dated chain rather than a guess: the vendor's updater
+wrote all 65 blocks including `0x74` earlier the same day, the mouse was then
+used normally, and `0x74` now stably differs. So the firmware writes it at
+runtime. What it writes there is unknown and stays unknown.
+
+**Consequence for the flash: none.** Our flash writes FWFILE 140's `0x74`,
+byte-identical to what Endgame's own updater wrote to this same mouse hours
+earlier in a run that completed and left it working.
+
+**Consequence for the backup, so it is not a surprise later:** `backup.bin` is
+NOT a pristine factory image. 64 of 65 blocks are exact; `0x74` is this device's
+runtime state as of 23:03 on 2026-09-05. That is the right thing to be able to
+put back. Do not describe it as "the same as the `.exe`".
 
 ---
 

@@ -22,10 +22,57 @@
 #include "egg/Log.h"
 #include "egg/Transport.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 
 namespace egg::fw {
+
+// ---------------------------------------------------------------------------
+// What the link DECIDES, separated from what it DOES
+// ---------------------------------------------------------------------------
+// Extracted from the class 2026-09-06. The class was untestable and, worse,
+// ungradeable: it was the one file in the post-erase path that mutants.sh could
+// not touch, because nothing but a physical mouse in bootloader mode could
+// reach a single line of it. So a mutation here -- collapsing BadStatus into a
+// failure, or an off-by-one in the reconnect budget -- would have been caught
+// by nobody, in the one code path §4.2 says must never give up.
+//
+// The split is by testability, not by taste: everything below is a pure
+// function of an outcome and a couple of facts, so it can be graded on a
+// machine with no device attached. Everything that opens a handle, sends a
+// report or sleeps stays in the class, where only hardware can exercise it.
+//
+// This changes no byte on the wire (§4.2: a safety measure that changes the
+// byte stream is not free -- this one is off-wire and therefore free).
+
+// TransportFail after the device has left the bus is a DISCONNECT, which
+// reconnect() can fix; while it is still present it is a send failure, which
+// reconnect() cannot. driveToVerifiedImage picks between reconnecting and
+// simply retrying on exactly this distinction, so it is not cosmetic.
+Io classifySend(egg::Outcome o, bool devicePresent);
+
+// `got` is how many bytes came back, `want` how many the report declares.
+//
+// Ok, BadStatus and BusyTimeout all mean "the device answered and the bytes are
+// valid". BadStatus only says resp[1] was not 0x01, and judging resp[1] is the
+// CALLER's job: WritePhase::roundTrip returns it so the phase can decide, and
+// BootloaderLink's contract is to fetch a report, not to grade it. Collapsing
+// BadStatus into a failure here would turn every busy or not-yet-ready answer
+// into an indistinguishable failure and throw away the status byte the retry
+// logic is built on.
+Io classifyRecv(egg::Outcome o, std::size_t got, std::size_t want,
+                bool devicePresent);
+
+// The reconnect loop, with the device, the clock and the log passed in.
+//
+// Returns true as soon as `tryAttach` succeeds, having called `note` with how
+// long it took; false once the budget is spent. `tryAttach` is called before
+// the first sleep, so a device that is already back costs nothing.
+bool reconnectLoop(unsigned budgetMs, unsigned stepMs,
+                   const std::function<bool()>& tryAttach,
+                   const std::function<void(unsigned)>& sleep,
+                   const std::function<void(const std::string&)>& note);
 
 class HidBootloaderLink : public BootloaderLink {
 public:

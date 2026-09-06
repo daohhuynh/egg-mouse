@@ -103,7 +103,7 @@ if(Python3_FOUND)
   # Plain scripts that print their own PASS/FAIL and exit non-zero on failure.
   # They are NOT unittest modules, which is why `unittest discover` reported
   # them as import errors -- a loader complaint, never a test result.
-  foreach(t fieldmap score)
+  foreach(t fieldmap reconcile score)
     add_test(NAME ${t} COMMAND ${Python3_EXECUTABLE} Tests/test_${t}.py)
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endforeach()

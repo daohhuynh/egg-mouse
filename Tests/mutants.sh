@@ -82,13 +82,25 @@ MB=Sources/EGGFlashCore/src/MockBootloader.cpp
 # than spin the way driveToVerifiedImage deliberately does.
 FP=Sources/EGGFlashCore/src/FlashPlan.cpp
 
+# Added 2026-09-06, closing a gap that had been recorded in working-memory.md
+# since the file was written: it holds the reconnect budget and the
+# Disconnected-vs-SendFailed distinction that driveToVerifiedImage branches on,
+# in the post-erase phase that by design cannot give up -- and NOTHING graded a
+# line of it, because nothing but a mouse in bootloader mode could reach one.
+#
+# It is gradeable now because its DECISIONS were pulled out as pure functions
+# (HidBootloaderLink.h, same date). What is still ungraded is attach(), open(),
+# and the two bodies that call those functions: they need hardware, and no
+# mutant below pretends otherwise.
+HL=Sources/EGGFlashCore/src/HidBootloaderLink.cpp
+
 # ONE list. Backup and restore are both derived from it, because they used to be
 # two hardcoded lists and the second one drifted the moment a fourth file was
 # added: a mutant editing Firmware.h applied, restore() did not know that file
 # existed, and the mutation survived into every LATER mutant -- which then made
 # two correctly-labelled equivalent mutants look wrongly labelled. The harness
 # accused itself of a bug it did not have. Add a file here and nowhere else.
-MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB")
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB" "$HL")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -299,6 +311,54 @@ mutate kill "whole-image checksum truncated to 16 bits" "$FW" \
 mutate kill "extracts FWFILE 142 instead of 140" "$FWH" \
 'inline constexpr std::uint16_t kResourceName = 140;|||inline constexpr std::uint16_t kResourceName = 142;  // MUTANT'
 
+
+# --- HidBootloaderLink's decisions. ----------------------------------------
+# Every one of these is a bug that would only ever show up on the physical
+# mouse, after the erase, with no way to abort.
+
+# The distinction the post-erase loop branches on, backwards: a departed device
+# is reported as a send failure, so the phase retries into a handle the kernel
+# has torn down instead of reconnecting. It would spin until the budget in
+# driveToVerifiedImage ran out, on a device with no valid application.
+mutate kill "send: Disconnected and SendFailed swapped" "$HL" \
+'            return devicePresent ? Io::SendFailed : Io::Disconnected;|||            return devicePresent ? Io::Disconnected : Io::SendFailed;  // MUTANT'
+
+mutate kill "recv: Disconnected and RecvFailed swapped" "$HL" \
+'            return devicePresent ? Io::RecvFailed : Io::Disconnected;|||            return devicePresent ? Io::Disconnected : Io::RecvFailed;  // MUTANT'
+
+# BadStatus means "the device answered, and resp[1] was not 0x01". The bytes are
+# valid and the status is the caller's to judge. Dropping it here turns every
+# not-yet-ready answer into an indistinguishable failure, which is exactly the
+# information WritePhase's retry logic runs on.
+mutate kill "recv: BadStatus collapsed into a failure" "$HL" \
+'        case egg::Outcome::BadStatus:
+        case egg::Outcome::BusyTimeout:|||        case egg::Outcome::BusyTimeout:  // MUTANT: BadStatus arm removed'
+
+# A short read accepted as Ok. Downstream that is a block whose read-back
+# comparison runs over bytes the device never sent.
+mutate kill "recv: length no longer decides Ok" "$HL" \
+'            return got == want ? Io::Ok : Io::ShortRead;|||            return Io::Ok;  // MUTANT'
+
+# Off-by-one on the reconnect budget: one fewer attempt than the constant says.
+# Harmless-looking, and it is the difference between the log saying what the
+# header promises and the log being wrong about the only number a human has to
+# go on while the mouse is not a mouse.
+mutate kill "reconnect: budget loses its last attempt" "$HL" \
+'    for (unsigned waited = 0; waited <= budgetMs; waited += stepMs) {|||    for (unsigned waited = 0; waited < budgetMs; waited += stepMs) {  // MUTANT'
+
+# Sleep before the first try. Costs a full step on every reconnect where the
+# device never actually left -- inside the loop that has no timeout.
+mutate kill "reconnect: sleeps before trying" "$HL" \
+'        if (tryAttach()) {|||        sleep(stepMs);
+        if (tryAttach()) {  // MUTANT: a step wasted before the first try'
+
+# The elapsed time reported as the budget. A human reading "reconnected after
+# 20000 ms" when it took 400 concludes the device is failing.
+mutate kill "reconnect: reports the budget instead of the elapsed time" "$HL" \
+'            note("reconnected to the bootloader after " +
+                 std::to_string(waited) + " ms");|||            note("reconnected to the bootloader after " +
+                 std::to_string(budgetMs) + " ms");  // MUTANT'
+
 # --- Equivalent mutants. These MUST survive. -------------------------------
 
 # Comparing 1024 bytes is strictly stronger than comparing their 16-bit sum.
@@ -478,6 +538,21 @@ mutate equiv "removes the per-block checksum comparison" "$WP" \
 # could tell the difference.
 mutate equiv "write index loses its high byte" "$FC" \
 '    f[3] = static_cast<std::uint8_t>((deviceIndex >> 8) & 0xFF);|||    // MUTANT (equivalent): high byte dropped'
+
+# classifyRecv handles all five Outcome enumerators and every arm returns, so
+# the statement after the switch is unreachable for any value Transport can
+# produce. Changing what it returns cannot change behaviour for any reachable
+# input. It stays because a switch with no fallthrough return is a warning, and
+# because "unreachable" is a claim (§1.2a) that this mutant is the check on: if
+# the suite ever kills it, a sixth Outcome exists and this file does not know.
+mutate equiv "recv: the unreachable fallthrough returns something else" "$HL" \
+'    return Io::RecvFailed;
+}
+
+bool reconnectLoop|||    return Io::Disconnected;  // MUTANT (equivalent): unreachable
+}
+
+bool reconnectLoop'
 
 echo
 echo "Mutation testing EGGConfigCore"

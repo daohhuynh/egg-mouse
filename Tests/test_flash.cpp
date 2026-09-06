@@ -13,6 +13,7 @@
 #include "egg/FlashCommands.h"
 #include "egg/FlashPlan.h"
 #include "egg/Firmware.h"
+#include "egg/HidBootloaderLink.h"
 #include "egg/MockBootloader.h"
 #include "egg/Protocol.h"
 #include "egg/WritePhase.h"
@@ -1161,6 +1162,154 @@ static void testAuditRegressions() {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// The real link's decisions. Added 2026-09-06, closing the gap recorded in
+// working-memory.md: HidBootloaderLink.cpp was the only file in the post-erase
+// path that mutants.sh could not grade, because nothing but a mouse in
+// bootloader mode could reach a line of it. Its DECISIONS are now pure
+// functions (HidBootloaderLink.h), so they can be graded here with no device.
+//
+// What is still untested, said plainly rather than implied by silence: attach(),
+// open(), and the two bodies that call these functions. Those need hardware,
+// and this file cannot claim otherwise.
+// ---------------------------------------------------------------------------
+static void testLinkPolicy() {
+    std::printf("\nHidBootloaderLink policy (no device required)\n");
+
+    // ---- classifySend -----------------------------------------------------
+    ok("send: Ok is Ok whether or not the device is on the bus",
+       classifySend(Outcome::Ok, true)  == Io::Ok &&
+       classifySend(Outcome::Ok, false) == Io::Ok);
+    // The distinction driveToVerifiedImage branches on. Getting this backwards
+    // makes the phase retry a departed device forever instead of reconnecting.
+    ok("send: TransportFail with the device GONE is Disconnected",
+       classifySend(Outcome::TransportFail, false) == Io::Disconnected);
+    ok("send: TransportFail with the device PRESENT is SendFailed",
+       classifySend(Outcome::TransportFail, true) == Io::SendFailed);
+    ok("send: every other outcome is SendFailed, present or not", [] {
+           for (Outcome o : {Outcome::BusyTimeout, Outcome::BadStatus,
+                             Outcome::ShortRead})
+               for (bool present : {true, false})
+                   if (classifySend(o, present) != Io::SendFailed) return false;
+           return true;
+       }());
+    ok("send: nothing but TransportFail depends on device presence", [] {
+           for (Outcome o : {Outcome::Ok, Outcome::BusyTimeout,
+                             Outcome::BadStatus, Outcome::ShortRead})
+               if (classifySend(o, true) != classifySend(o, false)) return false;
+           return true;
+       }());
+
+    // ---- classifyRecv -----------------------------------------------------
+    // The load-bearing one. A not-ready or busy answer carries VALID BYTES and
+    // a status the caller must see; treating it as a failure here throws the
+    // status byte away and the retry logic is built on it.
+    ok("recv: BadStatus with a full-length reply is Ok, not a failure",
+       classifyRecv(Outcome::BadStatus, 64, 64, true) == Io::Ok);
+    ok("recv: BusyTimeout with a full-length reply is Ok, not a failure",
+       classifyRecv(Outcome::BusyTimeout, 64, 64, true) == Io::Ok);
+    ok("recv: Ok with a full-length reply is Ok",
+       classifyRecv(Outcome::Ok, 1041, 1041, true) == Io::Ok);
+    ok("recv: an answered-but-short reply is ShortRead in all three arms", [] {
+           for (Outcome o : {Outcome::Ok, Outcome::BadStatus,
+                             Outcome::BusyTimeout})
+               if (classifyRecv(o, 63, 64, true) != Io::ShortRead) return false;
+           return true;
+       }());
+    ok("recv: a LONGER-than-declared reply is ShortRead too, not Ok",
+       classifyRecv(Outcome::Ok, 65, 64, true) == Io::ShortRead);
+    ok("recv: Transport's own ShortRead stays ShortRead",
+       classifyRecv(Outcome::ShortRead, 0, 64, true)  == Io::ShortRead &&
+       classifyRecv(Outcome::ShortRead, 0, 64, false) == Io::ShortRead);
+    ok("recv: TransportFail with the device GONE is Disconnected",
+       classifyRecv(Outcome::TransportFail, 0, 64, false) == Io::Disconnected);
+    ok("recv: TransportFail with the device PRESENT is RecvFailed",
+       classifyRecv(Outcome::TransportFail, 0, 64, true) == Io::RecvFailed);
+    // Length is what decides Ok, so a zero-length "reply" must never be Ok --
+    // including the degenerate want==0, which no report has.
+    ok("recv: a zero-length reply is never Ok", [] {
+           for (Outcome o : {Outcome::Ok, Outcome::BadStatus,
+                             Outcome::BusyTimeout, Outcome::ShortRead,
+                             Outcome::TransportFail})
+               if (classifyRecv(o, 0, 64, true) == Io::Ok) return false;
+           return true;
+       }());
+
+    // ---- reconnectLoop ----------------------------------------------------
+    // The budget, counted rather than assumed. 20000/100 inclusive of zero is
+    // 201 attempts; an off-by-one either way changes how long the post-erase
+    // phase waits before re-printing the recovery procedure.
+    {
+        unsigned attempts = 0, slept = 0;
+        std::vector<std::string> said;
+        const bool back = reconnectLoop(
+            kReconnectBudgetMs, kReconnectStepMs,
+            [&] { ++attempts; return false; },
+            [&](unsigned ms) { slept += ms; },
+            [&](const std::string& l) { said.push_back(l); });
+        ok("reconnect: a device that never returns gives up, so the PHASE can "
+           "decide", !back);
+        ok("reconnect: it tries budget/step + 1 times",
+           attempts == kReconnectBudgetMs / kReconnectStepMs + 1,
+           "attempts " + std::to_string(attempts));
+        ok("reconnect: and sleeps the whole budget, one step per attempt",
+           slept == attempts * kReconnectStepMs,
+           "slept " + std::to_string(slept) + " ms");
+        ok("reconnect: it says so exactly once, and says how long it waited",
+           said.size() == 1 &&
+           said[0].find(std::to_string(kReconnectBudgetMs)) != std::string::npos,
+           said.empty() ? "(silent)" : said[0]);
+    }
+    {
+        // Already back: no sleep at all. A reconnect that costs 100 ms when the
+        // device never left is 100 ms added to every retry in the post-erase
+        // loop, which is the loop with no timeout.
+        unsigned attempts = 0, slept = 0;
+        std::vector<std::string> said;
+        const bool back = reconnectLoop(
+            kReconnectBudgetMs, kReconnectStepMs,
+            [&] { ++attempts; return true; },
+            [&](unsigned ms) { slept += ms; },
+            [&](const std::string& l) { said.push_back(l); });
+        ok("reconnect: a device already present is taken on the first try",
+           back && attempts == 1 && slept == 0,
+           "attempts " + std::to_string(attempts) + ", slept " +
+           std::to_string(slept));
+        ok("reconnect: and it reports 0 ms, not the budget",
+           said.size() == 1 && said[0].find("after 0 ms") != std::string::npos,
+           said.empty() ? "(silent)" : said[0]);
+    }
+    {
+        // Returning mid-budget must report the ELAPSED time, not the attempt
+        // count and not the budget. The number goes in a log a human reads
+        // while the mouse is not a mouse.
+        unsigned attempts = 0;
+        std::vector<std::string> said;
+        const bool back = reconnectLoop(
+            kReconnectBudgetMs, kReconnectStepMs,
+            [&] { return ++attempts == 5; },
+            [&](unsigned) {},
+            [&](const std::string& l) { said.push_back(l); });
+        ok("reconnect: success on attempt 5 is reported as 4 steps of waiting",
+           back && said.size() == 1 &&
+           said[0].find("after " + std::to_string(4 * kReconnectStepMs) + " ms")
+               != std::string::npos,
+           said.empty() ? "(silent)" : said[0]);
+    }
+    {
+        // §6.2: a harness that cannot produce a bad result is not evidence.
+        // A zero budget must still try once -- the device may already be back --
+        // and must not loop forever on a zero step.
+        unsigned attempts = 0;
+        const bool back = reconnectLoop(
+            0, kReconnectStepMs, [&] { ++attempts; return false; },
+            [](unsigned) {}, [](const std::string&) {});
+        ok("reconnect: a zero budget still tries exactly once",
+           !back && attempts == 1, "attempts " + std::to_string(attempts));
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -1175,6 +1324,7 @@ int main() {
     testBackupGate();
     testWireEqualsPlan();
     testAuditRegressions();
+    testLinkPolicy();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
