@@ -274,12 +274,17 @@ void noteOnPersistence() {
     std::puts(
       "\nThis was verified by reading the device back, so it is what the mouse\n"
       "holds now. A read-back cannot say what survives later.\n"
-      "One write HAS been observed to survive a power cycle intact: unplugged\n"
-      "8.6 s, replugged, all 1024 payload bytes unchanged (2026-09-05, n=1).\n"
-      "But in the capture run the vendor's own writes were gone by the next\n"
-      "session in five gaps out of six, and what emptied them is not known --\n"
-      "so it is not power loss, and it has not been ruled out for you.\n"
-      "If it matters, unplug, replug and `egg-config read`.");
+      "TWO writes have survived a power cycle intact, both 2026-09-05, both\n"
+      "0 of 1024 payload bytes changed (config-wire-observed.md §5):\n"
+      "  unplugged    8.6 s  -> identical\n"
+      "  unplugged 1706.8 s  -> identical   (28.4 minutes)\n"
+      "The long one is what matters: 1707 s exceeds FOUR of the five capture\n"
+      "gaps across which the vendor's own settings vanished, so \"the record\n"
+      "decays off power\" cannot explain those four. Power loss does not do\n"
+      "this.\n"
+      "What DID empty them is still unknown -- vendor software or the\n"
+      "tester's own actions are what remain, and neither is ruled out for\n"
+      "you. If it matters, unplug, replug and `egg-config read`.");
 }
 
 // ---------------------------------------------------------------------------
