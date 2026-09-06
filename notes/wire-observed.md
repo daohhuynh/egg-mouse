@@ -169,9 +169,68 @@ The 63-byte reply to `A1 02` (frame 1 of `01-baseline.pcapng`):
 VID and PID land on even offsets and match values already known independently —
 `0x3367` from `pidwatch.py` `[O]`, and `0x1978` pushed as an immediate at
 cfg107 `0x413edb` `[D]`. The firmware version matches
-`notes/device-predictions.md`. Whether `0x11` is the minor and `0x12` the major,
-or the pair is one little-endian `0x0107`, is **[G]** — one device on 1.07
-cannot separate those, and a post-flash capture on 1.10 settles it for free.
+`notes/device-predictions.md`.
+
+**RESOLVED 2026-09-05, and exactly as predicted, for free.** This paragraph used
+to end: *"Whether `0x11` is the minor and `0x12` the major, or the pair is one
+little-endian `0x0107`, is [G] — one device on 1.07 cannot separate those, and a
+post-flash capture on 1.10 settles it for free."* `egg-config info` on the
+device, now running 1.10, returns `00 10 01 00 67 33 78 19` at `0x10`:
+
+| firmware | `0x11` `0x12` | little-endian pair, as BCD | as (minor, major) decimal |
+| --- | --- | --- | --- |
+| 1.07 (capture) | `07 01` | `0x0107` → **1.07** ✓ | **1.07** ✓ |
+| 1.10 (device) | `10 01` | `0x0110` → **1.10** ✓ | 1.16 ✗ |
+
+Both readings agree on 1.07, which is why one device could not separate them.
+They disagree on 1.10 and only one survives: **`0x11`–`0x12` is a single
+little-endian BCD word.** `[O]`. It independently matches `bcdDevice` `0x0110`
+from the USB device descriptor, which is a second encoding of the same value
+from a different part of the stack.
+
+### 2.3 BYTE 0 IS NOT STABLE ON macOS, AND THE PAYLOAD IS  [O], 2026-09-05
+
+Two consecutive `egg-config read` runs, same binary, same machine, minutes
+apart, returned **different values in `buf[0]`** — `0xa1` on one and `0x00` on
+the other — with **byte-identical payloads**. A third read this morning gave
+`0x00`. Nothing in our code varies: `receive()` writes `kReportLarge` (`0xA0`)
+into `buf[0]` before every call, and `0xA0` is not what came back either time.
+
+**What this does NOT mean.** It is not a shift. The 1024 payload bytes printed
+at `+0x10` were identical across both runs, and the two saved records are equal
+across all 1041 bytes. Had the buffer sometimes included the report id and
+sometimes not, the payload would have moved to `+0x11` in one of them.
+
+**What it does mean.** `buf[0]` carries no information on macOS and cannot be
+validated against anything — not `0xA0`, not `0xA1`, not `0x00`. Any check on it
+would fail *intermittently*, which is worse than failing always: it would pass a
+test suite, pass a manual trial, and refuse a user's record next Tuesday. Two
+such checks existed in this repo on the morning of the same day (`plausible()`
+and `loadRecord`), both demanding `0xA0`, and both were removed before this was
+observed. The observation converts that fix from correct-by-derivation to
+correct-by-measurement.
+
+**Still open, and now diagnosable.** Whether the *returned length* also varies is
+untested: the log printed `buf.size()`, which is the length we allocated, so it
+could never have shown a difference. `Log::frame` now takes the transport's
+actual `rc` and prints `got=N` whenever it differs from the buffer. The next
+read that shows `id=0xa1` will say whether `rc` moved with it.
+
+### 2.4 THE RECORD SURVIVES A POWER CYCLE UNTOUCHED  [O], 2026-09-05
+
+Read, unplug, wait, replug, read again: **all 1041 bytes identical**, vault
+versus `after-replug.bin`. No write of any kind was involved.
+
+This is the baseline the persistence question was missing. `config-wire-observed.md`
+§5 records that the vendor's own writes had reverted by the next session in five
+gaps out of six, and nothing distinguished "`a0 11` does not persist" from
+"nothing persists across a replug". Now something does: **with no write, the
+record is stable across re-enumeration.** So a value that disappears after one
+of our writes is a fact about the write.
+
+It is only a baseline. It says nothing yet about whether a *written* record
+survives — that needs a write, and it is the reason to do this test before one
+rather than after, since afterwards the question is contaminated.
 
 ## 3. The settings record is 115 bytes of content, not 1024
 

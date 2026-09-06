@@ -20,7 +20,18 @@ public:
     // verbose: also hex-dump full frame bodies, not just the header line.
     explicit Log(bool verbose = false) : verbose_(verbose) {}
 
-    void frame(Dir d, const std::vector<std::uint8_t>& buf, const char* what);
+    // `got` is what the transport ACTUALLY received, when that differs from the
+    // buffer we sized. Pass -1 when it is not applicable or not known.
+    //
+    // This was missing and it mattered: `len=` printed buf.size(), which for an
+    // inbound frame is always the full report length we allocated, so the log
+    // could never show the N-1 the device really sends. Two reads on 2026-09-05
+    // returned different values in buf[0] (0xa1 then 0x00) with byte-identical
+    // payloads, and the log had no way to say whether the RETURNED LENGTH had
+    // changed too -- which is the difference between "byte 0 is unreliable" and
+    // "the buffer is sometimes shifted". Never again.
+    void frame(Dir d, const std::vector<std::uint8_t>& buf, const char* what,
+               int got = -1);
     void note(const std::string& s);
     void warn(const std::string& s);
 

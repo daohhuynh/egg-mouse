@@ -29,12 +29,16 @@ std::string hexDump(const std::uint8_t* p, std::size_t n, std::size_t indent) {
     return out;
 }
 
-void Log::frame(Dir d, const std::vector<std::uint8_t>& buf, const char* what) {
+void Log::frame(Dir d, const std::vector<std::uint8_t>& buf, const char* what,
+                int got) {
     const char* arrow = (d == Dir::Out) ? "-->" : "<--";
+    char gotbuf[24] = {0};
+    if (got >= 0 && static_cast<std::size_t>(got) != buf.size())
+        std::snprintf(gotbuf, sizeof gotbuf, " got=%d", got);
     // The header line carries the two bytes that decide everything: the report
     // id and byte 1, which is the command going out and the status coming back.
-    std::printf("%s %-28s len=%-5zu id=0x%02x b1=0x%02x\n",
-                arrow, what, buf.size(),
+    std::printf("%s %-28s len=%-5zu%s id=0x%02x b1=0x%02x\n",
+                arrow, what, buf.size(), gotbuf,
                 buf.empty() ? 0 : buf[0],
                 buf.size() > 1 ? buf[1] : 0);
     if (verbose_ && !buf.empty())

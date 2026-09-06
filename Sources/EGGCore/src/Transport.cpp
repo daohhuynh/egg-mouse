@@ -152,7 +152,7 @@ Reply Transport::receive(std::uint8_t reportId, const char* what,
                 "report-id slot the device does not send)", rc, least, want);
             log_.warn(b);
             r.buf.resize(static_cast<std::size_t>(rc));
-            log_.frame(Dir::In, r.buf, what);
+            log_.frame(Dir::In, r.buf, what, rc);
             r.outcome = Outcome::ShortRead;
             return r;
         }
@@ -164,7 +164,7 @@ Reply Transport::receive(std::uint8_t reportId, const char* what,
         // keeps seeing a full-length record and needs no change.
 
         r.status = r.buf[kStatusOffset];
-        log_.frame(Dir::In, r.buf, what);
+        log_.frame(Dir::In, r.buf, what, rc);
 
         if (r.status == kStatusReady) { r.outcome = Outcome::Ok; return r; }
 

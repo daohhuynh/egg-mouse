@@ -167,7 +167,23 @@ inline constexpr BusyPolicy kConfigBusy{0x03, 100, 100, 10};
 inline constexpr unsigned kDelaySmallQuery   = 50;
 inline constexpr unsigned kDelayReadRequest  = 80;
 inline constexpr unsigned kDelayFactoryReset = 1100;
-inline constexpr unsigned kDelayWriteRecord  = 300;   // [O] 302.0-317.7 over 73
+// A0 11 IS THE ONE WITH NO DERIVED SLEEP. The vendor takes it as a
+// caller-supplied word (`movzwl 0x8(%ebp)` at 0x404248) and the caller does not
+// push it as a literal -- `push $0x12c` appears nowhere in cfg107's code band,
+// checked exhaustively over the whole file for 300/305/310/320 in both the
+// imm32 and imm16 push forms. So this figure is [O] from the wire, not [D].
+//
+// WHERE THERE IS NO DERIVED VALUE, TAKE THE MOST CONSERVATIVE READING OF THE
+// OBSERVED ONE. Waiting longer than the vendor cannot hurt -- the device simply
+// holds the reply, as it does for 3 s during the erase -- while waiting less
+// puts a read on the device inside a window no capture covers. 320 is above the
+// largest gap ever observed (317.7 ms over 73 captured writes), so we are never
+// earlier than Endgame's tool has ever been seen to be.
+//
+// The other three delays are [D] and are used exactly as the vendor sets them;
+// they are not padded, because inventing a number on top of a derived one would
+// be replacing a fact with a preference.
+inline constexpr unsigned kDelayWriteRecord  = 320;   // [O] 302.0-317.7 over 73
 
 // The delay for a config command, or the policy default when we have no cited
 // figure. A [G] delay is not a [G] byte -- it cannot corrupt a record -- but an
