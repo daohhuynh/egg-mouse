@@ -350,3 +350,70 @@ have passed alone.
 than by reading.** Every earlier entry rests on me comparing prose to a
 sentence. §6.2 says a reader that cannot be trusted must not be load-bearing;
 these two are the first entries where it isn't.
+
+---
+
+## §4.4 stage 3 — `read-firmware`, scored 2026-09-05. **1/2 testable, and the MISS is the useful one**
+
+`python3 Tools/score-read-firmware.py backup.bin`, scorer written and committed
+BEFORE the run (`Tools/score-read-firmware.py`, `notes/prediction-read-firmware.md`).
+
+| P | prediction | result |
+| --- | --- | --- |
+| P8 | the saved file is exactly 66,560 bytes | **HIT** |
+| P6 | read-back == FWFILE/140 of updater 1.10 | **MISS** — 1 of 65 blocks differs |
+| P3 | `resp[6..7]` == 16-bit block sum | n/a, needs the run log |
+| P9 | settings untouched by the read | n/a, not captured |
+
+**The miss is a single block: device index `0x74`, the last one, 1022 of its
+1024 bytes.** The other 64 are byte-identical to the vendor's image. Read twice;
+`backup.bin` and `backup2.bin` are **identical byte-for-byte**
+(sha256 `46e4dd15d14c44382d6e6ec07218df23f3a51aa84849eea1ecb29d03ab9cac89`), the
+same block differs both times with the same bytes. So it is stable stored data,
+not a stale buffer or a bad read — which is precisely the discriminator §5 of
+the prediction file pre-registered.
+
+**WHAT P6's MISS DOES NOT MEAN, and this is why the prediction was written to be
+falsifiable in a specific direction.** It is not evidence against the block
+arithmetic. A wrong payload offset, a wrong index mapping or a wrong `+0x34`
+base produces garbage in *every* block; 64 of 65 matching a reference we never
+sent to the device is strong positive evidence that all three are right. §3.8's
+addressing is confirmed, and the application region is confirmed to hold
+firmware 1.10.
+
+**THE PRE-REGISTERED READING IS REFUTED IN ITS DETAIL AND SURVIVES IN ITS
+CONCLUSION.** §5 named ≤2 differing blocks as "the firmware writes to its own
+flash at runtime and those blocks hold it — benign, and it localises where
+settings/calibration live." The second half is **wrong**: the settings record is
+not there. No 16-byte run of `~/.egg-mouse-known-good.bin` occurs anywhere in
+block `0x74`, and the block's entropy (7.80 bits/byte) is indistinguishable from
+every other block in the image (mean 7.80, range 7.76–7.84 — the whole FWFILE is
+encrypted or compressed, so nothing in it is plaintext settings).
+
+What survives is "the firmware writes that block at runtime", now with a dated
+chain behind it rather than as a guess:
+
+1. the owner's Windows updater flashed FWFILE 140 to this mouse earlier on 2026-09-05,
+   writing all 65 blocks including `0x74` (both captures show 65 `A0 06` frames
+   for `0x34`–`0x74`).
+2. The mouse was then used normally.
+3. Block `0x74` now differs from that written image, stably, at the same entropy.
+
+**Ruled out by search, with the space stated (§1.2a).** Device `0x74` is not the
+last block of FWFILE 133/135/137/140/142/143; it does not occur anywhere in the
+1.10 updater `.exe` at any offset; and it is not FWFILE 140's `0x74` shifted by
+±1, ±16 or ±512 bytes. Not searched: the other three updater versions' files,
+and the config tool. So "it came from somewhere else in the vendor's shipped
+data" is not excluded in general, only for 1.10.
+
+**Consequence for the flash: none, and the reason is `[O]` rather than
+reasoned.** Our flash writes FWFILE 140's `0x74` — byte-identical to what
+Endgame's updater wrote to this same mouse hours earlier, in a run that
+completed and left it working. Whatever the firmware later put in that block,
+the vendor's own procedure overwrites it and the device rebuilds it.
+
+**Consequence for the backup: stated so it is not a surprise later.**
+`backup.bin` is NOT a pristine factory image. 64 of 65 blocks are exact; block
+`0x74` is this device's runtime state as of 23:03 on 2026-09-05. As a recovery
+artefact that is what the device actually had, which is the right thing to be
+able to put back — but do not describe it as "the same as the `.exe`".
