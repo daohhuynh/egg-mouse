@@ -84,6 +84,9 @@ static int usage() {
         "                                  confirm the mouse came back as the\n"
         "                                  bootloader, send it nothing. No erase,\n"
         "                                  no write. Exit by unplugging it.\n"
+        "  egg-flash leave-bootloader --yes\n"
+        "                                  the way back: ONE report (A1 09), the\n"
+        "                                  vendor's own exit. No erase, no write.\n"
         "  egg-flash help\n"
         "\n"
         "The image is always FWFILE resource %u of the .exe you name. That is a\n"
@@ -217,6 +220,103 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// The way back out, added after stage 2 established that a software entry
+// LATCHES and a power cycle does not undo it. See BootloaderEntry.h for the
+// full provenance -- the short version is [D] on what the command is and what
+// the vendor does after it, [G] on what it does to a bootloader that was never
+// flashed, and nothing was erased here so there is an intact application.
+// ---------------------------------------------------------------------------
+static int cmdLeaveBootloader(bool yes, bool verbose) {
+    const auto seen = seeAll();
+    const std::size_t apps = countVendorCollections(seen, egg::kProductIdApplication);
+    const std::size_t bls  = countVendorCollections(seen, egg::kProductIdBootloader);
+
+    if (!yes) {
+        std::printf(
+          "leave-bootloader sends ONE 64-byte report (A1 09) to the bootloader.\n"
+          "\n"
+          "It is the vendor's own exit: after it, updater 1.10 searches for the\n"
+          "application PID 0x1978 (fw110 0x00403c7c), and in both captures the\n"
+          "mouse came back as 0x1978 about 880 ms later. Updater 1.04, a separate\n"
+          "code base, builds the identical frame.\n"
+          "\n"
+          "WHAT IS A GUESS: Endgame only ever sends A1 09 to a bootloader it has\n"
+          "just finished flashing. Nothing has been flashed or erased here, so\n"
+          "there is an intact application to hand back to -- but the device's\n"
+          "behaviour in this exact state is not derivable from their binaries.\n"
+          "\n"
+          "It does not erase and does not write. The frame carries no parameters.\n"
+          "\n"
+          "IF IT DOES NOTHING, nothing is lost: the mouse stays in the bootloader\n"
+          "and Endgame's Windows updater still recovers it (it treats a 0x1977\n"
+          "device as a supported starting state and flashes it directly).\n");
+        std::printf("\npreflight, right now:\n"
+                    "  %zu application vendor collection(s)  (PID 0x%04x)\n"
+                    "  %zu bootloader  vendor collection(s)  (PID 0x%04x)\n",
+                    apps, egg::kProductIdApplication, bls, egg::kProductIdBootloader);
+        if (apps >= 1)      std::printf("  -> already in application mode; --yes would send nothing.\n");
+        else if (bls == 1)  std::printf("  -> ready. Re-run with --yes.\n");
+        else                std::printf("  -> NOT ready: --yes would refuse and send nothing.\n");
+        return 2;
+    }
+
+    egg::Log log(verbose);
+    auto dev = egg::Device::open(egg::kProductIdBootloader, log);
+    if (!dev) return 1;
+    egg::Transport t(*dev, egg::kUpdaterBusy, log);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    EntryEnv env;
+    env.nowMs = [t0] {
+        return static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+    };
+    env.sleepMs   = [](unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
+    env.enumerate = seeAll;
+    env.exchange  = [&t](const std::vector<std::uint8_t>& frame,
+                         std::vector<std::uint8_t>& reply, bool& readOk) {
+        // The vendor sleeps 50 ms after this send before reading (0x00403bfa),
+        // which is longer than the 2 ms it allows after A1 3A.
+        const egg::Reply r = t.exchange(frame, egg::kReportSmall,
+                                        "A1 09 leave bootloader", 50);
+        readOk = !r.buf.empty();
+        reply  = r.buf;
+        return r.outcome != egg::Outcome::TransportFail;
+    };
+
+    const EntryOutcome o = leaveBootloaderAndConfirm(env);
+
+    if (!o.sent.empty()) {
+        std::printf("\nsent       ");
+        for (std::size_t i = 0; i < 4; ++i) std::printf("%02x ", o.sent[i]);
+        std::printf("... (%zu bytes, rest zero)\n", o.sent.size());
+        std::printf("ack        %u ms, reply %s", o.ackMs, o.replyRead ? "read" : "NOT read");
+        if (o.replyRead) std::printf(", resp[1]=0x%02x", o.status);
+        std::printf("\n");
+    }
+
+    if (o.result != EntryResult::EnteredAndConfirmed) {
+        std::printf("\nFAILED: %s\n", describe(o.result));
+        std::printf(
+          "\nThe mouse is still in the bootloader. NOTHING was erased or written,\n"
+          "so it is not damaged -- it is in the wrong mode.\n"
+          "Endgame's own Windows updater recovers this: it treats a 0x1977 device\n"
+          "as a supported starting state and goes straight to flashing\n"
+          "(notes/updater-protocol.md 5.1a).\n\n%s\n", kRecoveryProcedure);
+        return 1;
+    }
+
+    std::printf("\nBACK IN APPLICATION MODE.\n"
+                "  PID 0x%04x  bcdDevice 0x%04x  \"%s\"\n",
+                o.seen.productId, o.seen.releaseNumber, o.seen.product.c_str());
+    if (o.reenumerateMs) std::printf("  came back %u ms after the reply\n", o.reenumerateMs);
+    std::printf("\nNow check the settings survived:\n"
+                "  ./build/egg-config read --save after-stage2.bin\n"
+                "  ./build/egg-config diff ~/.egg-mouse-known-good.bin after-stage2.bin\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     std::string vaultPath = defaultVaultPath();
     std::string args[3];
@@ -237,6 +337,7 @@ int main(int argc, char** argv) {
     // Before the image is loaded, because this rung has no image and must not
     // acquire one by accident.
     if (verb == "enter-bootloader") return cmdEnterBootloader(yes, verbose);
+    if (verb == "leave-bootloader") return cmdLeaveBootloader(yes, verbose);
 
     if (n < 2) return usage();
     const std::string exePath = args[1];

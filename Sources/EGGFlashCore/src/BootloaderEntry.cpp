@@ -131,4 +131,59 @@ EntryOutcome enterBootloaderAndConfirm(EntryEnv& env) {
     return o;
 }
 
+EntryOutcome leaveBootloaderAndConfirm(EntryEnv& env) {
+    EntryOutcome o;
+
+    {
+        const auto before = env.enumerate();
+        // Already out? Then there is nothing to send, and A1 09 is a BOOTLOADER
+        // command whose effect on an application is constrained by nothing we
+        // have read. Same reasoning, mirrored, as the entry path's first check.
+        if (countVendorCollections(before, kProductIdApplication) >= 1) {
+            for (const auto& d : before)
+                if (d.productId == kProductIdApplication) { o.seen = d; break; }
+            o.result = EntryResult::EnteredAndConfirmed;
+            return o;
+        }
+        if (countVendorCollections(before, kProductIdBootloader) != 1) {
+            o.result = EntryResult::NoApplicationDevice;
+            return o;
+        }
+    }
+
+    o.sent = bootloaderComplete();
+
+    const unsigned t0 = env.nowMs();
+    std::vector<std::uint8_t> reply;
+    bool readOk = false;
+    if (!env.exchange(o.sent, reply, readOk)) {
+        o.result = EntryResult::SendFailed;
+        return o;
+    }
+    o.ackMs     = env.nowMs() - t0;
+    o.replyRead = readOk;
+    if (readOk && reply.size() >= 2) o.status = reply[1];
+
+    // As with entry, the enumeration is the evidence. The vendor DOES gate on
+    // resp[1] here (0x00403c30) and we deliberately do not: on the entry
+    // command this device answered 0x03 where both captures showed 0x01, so a
+    // status gate on an undocumented value is a way to report failure on a
+    // success. We record it and let the PID decide.
+    const unsigned t1 = env.nowMs();
+    for (unsigned waited = 0; waited <= kExitPollCeilMs; waited += kEntryPollStepMs) {
+        for (const auto& d : env.enumerate()) {
+            if (d.productId != kProductIdApplication) continue;
+            o.seen          = d;
+            o.reenumerateMs = env.nowMs() - t1;
+            o.result        = EntryResult::EnteredAndConfirmed;
+            return o;
+        }
+        env.sleepMs(kEntryPollStepMs);
+    }
+
+    o.reenumerateMs = env.nowMs() - t1;
+    o.result        = EntryResult::NoReenumeration;
+    return o;
+}
+
 }  // namespace egg::fw

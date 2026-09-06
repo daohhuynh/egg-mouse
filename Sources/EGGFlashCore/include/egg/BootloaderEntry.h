@@ -112,6 +112,13 @@ struct EntryEnv {
 inline constexpr unsigned kEntryPollStepMs = 25;
 inline constexpr unsigned kEntryPollCeilMs = 10000;
 
+// Exit gets a longer ceiling than entry, and for a different reason. On entry,
+// giving up is free -- nothing has changed. On exit we are trying to get the
+// mouse back, so patience is cheap and impatience costs a false "it failed".
+// The vendor allows Sleep(800..16000) summing to 168 s (0x403c92); observed
+// re-enumeration was ~860-900 ms.
+inline constexpr unsigned kExitPollCeilMs = 30000;
+
 // Sends A1 3A once and watches. Does NOT retry the send: the vendor's
 // nine-attempt loop (updater-protocol.md §5.3a) has never been exercised on the
 // wire -- both captures succeeded first try -- so retrying here would be
@@ -126,5 +133,32 @@ EntryOutcome enterBootloaderAndConfirm(EntryEnv& env);
 // count being wrong and the prompt could not have shown it.
 std::size_t countVendorCollections(const std::vector<SeenDevice>& seen,
                                    std::uint16_t productId);
+
+// ---------------------------------------------------------------------------
+// The way back. Added 2026-09-05, unplanned, because stage 2 established the
+// thing stage 2 existed to find out: A SOFTWARE ENTRY LATCHES.
+//
+// `bootloader-observed.md` §5a is [O] that a BUTTON entry is left by a power
+// cycle. It is now [O] that an `A1 3A` entry is NOT -- two logged power cycles,
+// both returning PID 0x1977. Identical USB identity did not mean identical
+// state, and that inference must not be restated as though it did.
+//
+// Since the flag survives loss of power it is in NVM, so waiting cannot clear
+// it. `A1 09` is the vendor's own exit and the only software route we have.
+//
+// PROVENANCE, because this is [G] in one specific way that matters:
+//   [D] fw110 0x00403bd1-0x403bf2 builds it -- memset(buf,0,0x40), then
+//       mov dword [ebp-0x50], 0x000009a1 and mov dword [ebp-0x4c], 0.
+//   [D] fw110 0x00403c30 tests resp[1] == 1 (unlike A1 3A, which tests nothing).
+//   [D] fw110 0x00403c7c then searches for PID 0x1978, looping at 0x403c92
+//       with Sleep(800,1600,...,16000) and failing to 0x403e6f if it never comes.
+//   [D] updater 1.04, a SEPARATE code base, builds the identical frame at file
+//       offset 0x004188 with the same instruction form and stack offset.
+//   [O] both captures: A1 09 -> `50 01 ...`, device back as 0x1978 in ~880 ms.
+//   [G] what it does to a bootloader that was never flashed. The vendor only
+//       ever sends it after a completed write. What bounds that guess: the
+//       frame carries NO parameters, nothing was erased here (`a0 03` was never
+//       sent), so there is an intact application to hand off to.
+EntryOutcome leaveBootloaderAndConfirm(EntryEnv& env);
 
 }  // namespace egg::fw

@@ -454,9 +454,14 @@ struct FakeWorld {
         e.nowMs   = [this] { return clock; };
         e.sleepMs = [this](unsigned ms) {
             clock += ms;
+            // Swap when the thing we are WAITING FOR is not yet present. Keyed
+            // on appearsAs, not on a hardcoded PID: this world has to model the
+            // transition in both directions, and the first version only worked
+            // for entry.
             if (everAppears && clock >= appearAfterMs) {
                 bool present = false;
-                for (auto& d : devices) if (d.productId == kProductIdBootloader) present = true;
+                for (auto& d : devices)
+                    if (d.productId == appearsAs.productId) present = true;
                 if (!present) {
                     devices.clear();
                     devices.push_back(appearsAs);
@@ -645,6 +650,92 @@ static void testStage2Entry() {
     }
 }
 
+
+static void testStage2Exit() {
+    std::printf("\nthe way back -- A1 09, against an adversarial world\n");
+
+    // A world that starts in the bootloader and returns to the application.
+    auto blWorld = [] {
+        FakeWorld w;
+        pushRealMouse(w, kProductIdBootloader, "Bootloader");
+        for (auto& d : w.devices) { d.releaseNumber = kBootloaderRelease; d.manufacturer = "EGG"; }
+        w.appearsAs = {kProductIdApplication, 0x0110, kUsagePageVendor, kUsageVendor,
+                       "Endgame Gear OP1 8k v2 Gaming Mouse", "Endgame Gear"};
+        w.appearAfterMs = 880;   // [O] 857-896 ms in the captures
+        return w;
+    };
+
+    {
+        FakeWorld w = blWorld();
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        const std::uint8_t want[4] = {0xa1, 0x09, 0x00, 0x00};
+        bool exact = o.sent.size() == 64 && std::memcmp(o.sent.data(), want, 4) == 0;
+        for (std::size_t i = 4; i < o.sent.size(); ++i) if (o.sent[i]) exact = false;
+        ok("the frame is a1 09 + 62 zeros, exactly as captured", exact);
+        ok("it comes back to the application", o.result == EntryResult::EnteredAndConfirmed,
+           describe(o.result));
+        ok("EXACTLY ONE report is ever sent", w.sent.size() == 1);
+        ok("and it is the application collection it reports",
+           o.seen.productId == kProductIdApplication);
+    }
+    {
+        // Already out. Must not send A1 09 to an application device -- the
+        // mirror of the entry path's already-in-bootloader guard.
+        FakeWorld w = appOnly();
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("already in application mode -> sends NOTHING",
+           o.result == EntryResult::EnteredAndConfirmed && w.sent.empty());
+    }
+    {
+        FakeWorld w;   // nothing attached
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("no device at all -> refuses, sends nothing",
+           o.result == EntryResult::NoApplicationDevice && w.sent.empty());
+    }
+    {
+        // The failure that actually matters: the command does nothing. The
+        // mouse must be reported as still in the bootloader, not as fixed.
+        FakeWorld w = blWorld();
+        w.everAppears = false;
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("A1 09 does nothing -> NoReenumeration, reported honestly",
+           o.result == EntryResult::NoReenumeration);
+        ok("...bounded by the exit ceiling, and still one report",
+           w.clock <= kExitPollCeilMs + 200 && w.sent.size() == 1,
+           std::to_string(w.clock) + " ms");
+    }
+    {
+        // resp[1] is not a gate here either. The device answered 0x03 to A1 3A
+        // where both captures showed 0x01, so gating on an undocumented status
+        // is a way to report failure on a success.
+        FakeWorld w = blWorld();
+        w.replyStatus = 0x03;
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("odd resp[1] but the device came back -> still confirmed",
+           o.result == EntryResult::EnteredAndConfirmed && o.status == 0x03);
+    }
+    {
+        FakeWorld w = blWorld();
+        w.sendWorks = false;
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("send failure -> SendFailed, no waiting", o.result == EntryResult::SendFailed);
+    }
+    {
+        FakeWorld w = blWorld();
+        w.appearAfterMs = 25000;   // slow, inside the 30 s exit ceiling
+        EntryEnv e = w.env();
+        const EntryOutcome o = leaveBootloaderAndConfirm(e);
+        ok("a slow return inside the exit ceiling is accepted",
+           o.result == EntryResult::EnteredAndConfirmed);
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -654,6 +745,7 @@ int main() {
     testAdversarial();
     testDeterminismAndIdentity();
     testStage2Entry();
+    testStage2Exit();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
