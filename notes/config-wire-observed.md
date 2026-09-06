@@ -448,9 +448,24 @@ edit boxes (`0x40edde`, a suspected vendor copy-paste bug), so a stage-4 X/Y
 split should move **stage 3's** flag and not its own. **That prediction is still
 untested**, and no amount of re-reading the captures will test it.
 
-It is also the one thing that does not need the owner's memory: it needs one more
-capture, or — since config writes are reversible and factory reset is proven —
-it can be settled on the device with our own tool.
+**Correction, 2026-09-06: our own tool CANNOT settle it, and three files said
+it could.** The claim is about what *cfg107's serializer computes*, not about
+what the device stores. `egg-config` computes stage 4's flag from stage 4 (it
+must -- §4.2 says mirror the vendor's verification, not the vendor's
+arithmetic), so writing with our tool and reading back returns our own value and
+tests nothing. Deliberately emulating the suspected bug would be writing a byte
+we believe to be wrong, which is worse and still proves nothing about cfg107.
+
+**The only test is the vendor tool on Windows with a capture running:** set CPI
+stage 3 to X!=Y, set stage 4 to X==Y, apply. The prediction is that record
+`0x32` (stage 4's flag) follows STAGE 3's boxes -- so it reads `01` while stage
+4's own X and Y are equal. About thirty seconds of clicking.
+
+**And nothing of ours depends on the answer.** Read-modify-write preserves the
+byte when we are not editing that stage, and recomputes it correctly when we
+are, whichever way cfg107 behaves. This is a curiosity about a vendor defect,
+not a risk to this project -- which is why it stayed open all night rather than
+being worth waking anyone for.
 
 ## 7. The factory-default record, verified against the screenshots  [O]
 

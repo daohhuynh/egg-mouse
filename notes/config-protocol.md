@@ -2002,10 +2002,19 @@ flag from stage 4. Theirs: this is testable from a capture.
 > twice over.** That file is quarantined (§1.1a), and the owner has separately
 > confirmed those three lines were **never performed**. So this prediction is
 > UNTESTED, not tested-and-passed, and re-reading the existing captures cannot
-> settle it — none of them contains the edit. It needs a new capture, or a run
-> against the device with our own tool (config writes are reversible and factory
-> reset scores 21/21). It is the only thing lost with the log that an action can
-> recover.
+> settle it — none of them contains the edit.
+>
+> **It needs the vendor tool on Windows with a capture running, and nothing
+> else will do** (corrected 2026-09-06; this block previously offered "or a run
+> against the device with our own tool", which is wrong). The claim is about
+> what cfg107 *computes*, not what the device *stores*. `egg-config` computes
+> stage 4's flag from stage 4, so a write-then-read returns our own value and
+> tests nothing about cfg107's arithmetic.
+>
+> The test: stage 3 X≠Y, stage 4 X==Y, apply. Record `0x32` should read `01`.
+> **Nothing of ours depends on the outcome** — read-modify-write preserves the
+> byte when we are not editing that stage and recomputes it correctly when we
+> are, under either reading.
 
 ## 7.9 The Advanced Sensor page, end to end  [D]
 
