@@ -362,3 +362,92 @@ Consequence for the tools: `egg-config`'s persistence warning no longer tells
 the user the loss is unexplained, because it is not. It now reports both
 power-cycle tests (8.6 s and 1706.8 s, both 0/1024 bytes changed) and this
 answer, and still offers the unplug-replug check for anyone who wants it.
+
+## 6. The captures reconcile line-by-line WITHOUT `windows-run/log.txt`  [O]
+
+The owner asked on 2026-09-06 whether `windows-run/` is still usable given that his
+filled-in `log.txt` was lost to a non-autosaving editor before upload. **It is.**
+All **73** config writes across the five config captures map one-to-one onto a
+numbered instruction line in the repo-root `./log.txt`, with every non-writing
+line separately explained. Nothing is ambiguous and nothing is guessed.
+
+Two things make this work, and it is worth being explicit about why:
+
+1. **Root `./log.txt` is the instruction script, and it was revised during the
+   session.** It is not a blank template — it already carries `NOT PRESENT`
+   annotations (02 line 9, 03 lines 2 and 4, all "confirmed 2026-09-05"),
+   `SKIPPED` markers (02 lines 31–37), inserted lines (`18a`–`18f`), the exact
+   intended values, and the reasoning for each. The lost file was the owner's
+   *confirmations*, not the plan.
+2. **The record layout is already mapped**, so a diff labels itself. A write
+   that moves `0x09` from `03` to `04` is a LOD change whatever any log says.
+
+### Method
+Diff each `A0 11` payload against the **`A1 12` read response at the start of
+the capture**, not against the first write. The first write is the first APPLY,
+not a baseline; diffing from it silently loses one action per capture and was
+the reason an earlier pass of this analysis wrongly concluded that `motion sync`
+and `slamclick filter` moved no byte. Both move a byte. Payload offset is `+16`.
+
+### Reconciliation
+
+| capture | writes | instruction lines | residue |
+| --- | --- | --- | --- |
+| `02-basic` | 30 | 1–30 + `18a`–`18f`, less 7 `SKIPPED` | 0 |
+| `03-sensor` | 12 | 15 | 0 |
+| `04-buttons` | 15 | 15 | 0 |
+| `05-buttonmapping` | 12 | 12 | 0 |
+| `06-cpi-stage` | 4 | 4 | 0 |
+
+Lines that legitimately produced no write, all predicted **in the file itself**
+before the run: 02 line 9 (`ripple control` — not on the Basic page; it is an
+item in the Advanced Sensor *Smoothing Tuning* combo, see `basic.png` and
+`smoothing-tuning.png`); 03 lines 2 and 4 (`motion jitter filter`, `sensor glass
+mode` — neither control exists, `advanced-sensor.png` shows the page has exactly
+five controls); 02 line `18a` (`tick X/Y Settings`, annotated `NO APPLY
+(expected)` and indeed host-side only); 02 lines 19–30 (twelve LOD slots, eleven
+real options); 03 line 15 (four smoothing slots, three real options).
+
+**Three of those are cases where the instruction file asked for controls that do
+not exist.** Without the log saying `NOT PRESENT` that reads as missing data;
+with the screenshots it reads as an answered question.
+
+### What this scored on the way past
+
+- **Sensor angle is two's complement, `[O]`.** 03 line 6 asked for `-45`;
+  record `0x70` went `0x14` → **`0xd3`**. Sign-magnitude would be `0xad`. Line 7
+  ("maximum, WRITE THE NUMBER") gave `0x7f` = **127**. The log line said this was
+  "the only way to tell two's complement from sign-magnitude, and no positive
+  value can" — it worked, and the answer survives the log's loss because it is
+  in the bytes.
+- **The `X≠Y` flag at `0x23` behaves exactly as §7.8 predicted, `[O]`.** Line
+  `18b` (CPI 1 X → 1000) moved `0x23` `00`→`01` *and* `0x24`/`0x25` → `e8 03`.
+  Line `18c` (Y → 1500) moved `0x26`/`0x27` → `dc 05` and **left `0x23` alone**,
+  because it was already `1`. Flag-first confirmed from the wire.
+- **CPI values match the intended values exactly** — `0x0258` = 600, `0x04e2` =
+  1250, `0x07d0` = 2000. The log line chose those three precisely because
+  400/800/1600 all have a zero high byte; nothing was clamped.
+- **Record `0x72`, the "I understand…" acknowledgement, moved `00`→`01`** on 04
+  line 2, confirming §7.11 against the alternative that it was host-side.
+- **Multiclick range is `0x00`–`0x19` (0–25), `[O]`** — 04 lines 3/4/5 gave
+  min `00`, max `19`, and 12 → `0x0c`.
+- **LOD is eleven steps, `[O]` on the wire**: `0x09` walked `00`…`0a`, and
+  `LOD-0.7to1.2mm.png` + `LOD-1.2to1.7mm.png` show `0.7mm`…`1.7mm` in 0.1
+  steps. Independently confirms the `wire-predictions.md` correction that
+  refuted the twelve-entry reading.
+- **Polling is a descending bitmask, `[O]`**: `0x40` 125 Hz, `0x20` 250,
+  `0x10` 500, `0x08` 1000, `0x04` 2000, `0x02` 4000, `0x01` 8000.
+- **Record `0x01` reads back `0x80` but is written as `0x00`.** Visible as the
+  first diff of four separate captures. A read/write asymmetry, not a setting.
+
+### The one thing genuinely lost, and it is a known gap rather than an ambiguity
+02 lines **`18d`, `18e`, `18f`** — the CPI *stage 4* X/Y sequence — produced no
+writes. They were not performed. That sequence exists to test a specific
+committed prediction: that cfg107 computes stage 4's `X≠Y` flag from stage 3's
+edit boxes (`0x40edde`, a suspected vendor copy-paste bug), so a stage-4 X/Y
+split should move **stage 3's** flag and not its own. **That prediction is still
+untested**, and no amount of re-reading the captures will test it.
+
+It is also the one thing that does not need the owner's memory: it needs one more
+capture, or — since config writes are reversible and factory reset is proven —
+it can be settled on the device with our own tool.
