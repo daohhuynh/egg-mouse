@@ -82,6 +82,53 @@ struct WritePhaseBanner: View {
     }
 }
 
+/// THE RECOVERY BANNER. Shown whenever the mouse enumerates as its bootloader.
+///
+/// This is the state a user is most likely to reach and least likely to
+/// understand: a firmware backup or a flash enters the bootloader with `A1 3A`,
+/// and that entry LATCHES -- it survives unplugging and is cleared only by a
+/// COMPLETED flash (notes/bootloader-observed.md §5a, §5b; CLAUDE.md §4.2b
+/// calls the latched window the accepted cost of entering the vendor's way).
+/// So "I cancelled the backup and now my mouse does not work" is an expected
+/// outcome of using this app correctly, and the answer to it belonged in the
+/// app rather than only in the README.
+///
+/// It says what is true and no more. It does not offer a one-click fix,
+/// because the fix is a firmware write and §4.2c forbids an approval that is
+/// not bound to bytes the person has been shown.
+struct BootloaderBanner: View {
+    @Binding var screen: Screen
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Your mouse is in its bootloader", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+            Text("It shows up as ProductID 0x1977 and will not work as a mouse "
+                 + "until a firmware write finishes. Nothing is broken and "
+                 + "nothing has been lost.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text("This is what an interrupted firmware backup or flash leaves "
+                 + "behind. That entry is sticky on purpose: unplugging it will "
+                 + "not clear it, and only a completed write will. If you got "
+                 + "here by holding both mouse buttons while plugging in "
+                 + "instead, that kind does clear on its own -- just replug "
+                 + "without holding anything.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Go to Firmware") { screen = .firmware }
+                Text("Endgame's own Windows updater also accepts a mouse that "
+                     + "is already in this state, if you would rather use it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 /// A back button plus a title, used by every non-home screen.
 struct ScreenHeader: View {
     let title: String

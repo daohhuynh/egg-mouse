@@ -10,6 +10,17 @@ struct HomeView: View {
     @EnvironmentObject var runner: ToolRunner
     @State private var toolsFound = ToolRunner.locate("egg-config") != nil
                                  && ToolRunner.locate("egg-flash") != nil
+    @State private var deviceState: Commands.DeviceState = .absent
+
+    /// Enumerate on appear. `devices` opens no handle and sends no frame, so
+    /// this costs the mouse nothing -- and it is the only way the app can tell
+    /// a person that their mouse is latched in the bootloader at the moment
+    /// they are wondering why it stopped working.
+    private func refreshDeviceState() async {
+        guard let r = try? await runner.run("egg-config", Commands.listDevices())
+        else { return }
+        deviceState = Commands.parseDeviceState(r.text)
+    }
 
     var body: some View {
         ScrollView {
@@ -18,6 +29,10 @@ struct HomeView: View {
                     Text("Endgame Gear OP1 8k v2").font(.largeTitle).bold()
                     Text("Settings and firmware, on macOS.")
                         .foregroundStyle(.secondary)
+                }
+
+                if deviceState == .bootloader {
+                    BootloaderBanner(screen: $screen)
                 }
 
                 if !toolsFound {
@@ -75,6 +90,7 @@ struct HomeView: View {
             }
             .padding(24)
         }
+        .task { await refreshDeviceState() }
     }
 }
 

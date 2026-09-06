@@ -230,6 +230,13 @@ close button, a Dock quit item and a force-quit, and a flash between the erase
 and a verified image may not honour any of them — so the flash stays a process
 that cannot be asked to stop, and the app is only its caller.
 
+If the mouse is in its bootloader when you open the app — which is what an
+interrupted backup or flash leaves behind, and which does **not** clear by
+unplugging — the home screen says so, says nothing is broken, and points at the
+one thing that clears it. That state is the most likely bad outcome of using
+this software correctly, so the explanation belongs where the person is, not
+only in this file.
+
 - **Settings** — read the record, change one field at a time, and every change
   is previewed before it is written and read back after. It can save a copy and
   restore one, in two clicks: the preview runs entirely offline (the mouse can

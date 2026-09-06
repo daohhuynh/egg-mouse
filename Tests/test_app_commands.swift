@@ -538,5 +538,58 @@ do {
 }
 
 // --------------------------------------------------------------------------
+// Device state, and the banner that depends on it.
+//
+// The app tells a person their mouse is latched in the bootloader. Getting
+// that wrong in either direction is bad: a false negative leaves them with a
+// dead mouse and no explanation, and a false positive tells them a working
+// mouse is broken. So both directions are checked, and the "absent" case is
+// driven against the real tool -- which is exactly the case this machine can
+// produce, because there is no mouse attached to a test run.
+// --------------------------------------------------------------------------
+do {
+    // The literal row format is egg-config's cmdDevices printf. If that
+    // changes, these strings stop matching what the tool emits -- which is
+    // why the `absent` case below runs the real binary as an anchor.
+    let bootRow = "0x1977   0xff00     0x01    0x0006    Endgame Gear   "
+                + "Bootloader (BOOTLOADER)"
+    let appRow  = "0x1970   0xff00     0x01    0x0110    Endgame Gear   "
+                + "OP1 8k v2 (application)"
+    let header  = "PID      usagepage  usage   version   manufacturer   product"
+
+    equal(Commands.parseDeviceState(header + "\n" + bootRow), .bootloader,
+          "a 0x1977 row means the mouse is latched in the bootloader")
+    equal(Commands.parseDeviceState(header + "\n" + appRow), .application,
+          "an application row is not a bootloader")
+    equal(Commands.parseDeviceState(header + "\n" + appRow + "\n" + bootRow),
+          .unclear,
+          "two mice in two modes is not a state the banner may guess at")
+    equal(Commands.parseDeviceState("no VID 0x3367 device attached."), .absent,
+          "no mouse is absent, not bootloader")
+    equal(Commands.parseDeviceState(""), .absent,
+          "empty output must not read as bootloader -- a false alarm tells "
+          + "someone their working mouse is broken")
+    equal(Commands.parseDeviceState(header), .absent,
+          "a header with no rows is absent")
+
+    // Against the real tool. With no mouse attached this is `absent`; with one
+    // attached it is whatever the mouse is, and either way it must not crash
+    // or read as `unclear`, which would mean the parser and the printf have
+    // drifted apart.
+    let (drc, dtext) = run("egg-config", Commands.listDevices())
+    if drc == -1 {
+        print("SKIP: build/egg-config not present; device state parsed offline only")
+    } else {
+        let st = Commands.parseDeviceState(dtext)
+        check(st != .unclear,
+              "parseDeviceState could not make sense of the real `devices` "
+              + "output -- the printf in cmdDevices has probably changed",
+              dtext.prefix(300).description)
+        check(!Commands.listDevices().contains("--yes"),
+              "enumerating must never carry --yes")
+    }
+}
+
+// --------------------------------------------------------------------------
 print("\(checks - failures)/\(checks) checks passed")
 if failures > 0 { exit(1) }

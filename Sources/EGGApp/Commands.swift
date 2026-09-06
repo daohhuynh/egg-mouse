@@ -26,6 +26,53 @@ enum Commands {
 
     static func deviceInfo() -> [String] { ["info"] }
 
+    /// Enumerate. `egg-config devices` calls `hid_enumerate` and nothing else --
+    /// it opens no handle and sends no frame -- so this is safe to run on a
+    /// timer and safe to run on a mouse that is mid-recovery.
+    static func listDevices() -> [String] { ["devices"] }
+
+    /// What the mouse is right now, as far as USB enumeration can say.
+    enum DeviceState: Equatable {
+        case absent
+        case application
+        case bootloader     // PID 0x1977: NOT a mouse until a flash completes
+        case unclear        // more than one, or something unrecognised
+    }
+
+    /// WHY THE GUI NEEDS THIS AT ALL. A firmware backup or a flash enters the
+    /// bootloader with `A1 3A`, and that entry LATCHES: it survives unplugging
+    /// and is cleared only by a completed flash. So the single most likely bad
+    /// state a user reaches is "I stopped the backup and now my mouse does not
+    /// work", and until 2026-09-06 the app said nothing about it -- the recovery
+    /// was in the README, which is not where anyone is looking at that moment.
+    ///
+    /// Parsed from `devices`, whose rows carry a literal " (BOOTLOADER)" /
+    /// " (application)" suffix. Tests/test_app_commands.swift drives this
+    /// against the real tool's own output as well as against fixed rows, so a
+    /// change to cmdDevices' printf shows up as a failing test.
+    ///
+    /// One mouse produces SEVERAL rows -- `devices` lists every HID collection,
+    /// not one per device -- so this reasons about which modes are present, not
+    /// how many rows there are. Both modes at once is `unclear` rather than
+    /// `bootloader`: that is what the re-enumeration window after `A1 3A` looks
+    /// like, and a banner is the wrong thing to show for half a second.
+    static func parseDeviceState(_ text: String) -> DeviceState {
+        if text.contains("no VID 0x3367 device attached") { return .absent }
+        var boot = false, app = false, rows = 0
+        for raw in text.split(separator: "\n") {
+            let line = String(raw)
+            guard line.hasPrefix("0x") else { continue }
+            rows += 1
+            if line.contains("(BOOTLOADER)") { boot = true }
+            if line.contains("(application)") { app = true }
+        }
+        if rows == 0 { return .absent }
+        if boot && app { return .unclear }
+        if boot { return .bootloader }
+        if app { return .application }
+        return .unclear
+    }
+
     static func factoryReset() -> [String] { ["factory-reset", "--yes"] }
 
     /// RESTORE, which is the undo `factoryReset` needs to exist beside it.
