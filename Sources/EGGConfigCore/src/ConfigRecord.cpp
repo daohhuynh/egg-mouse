@@ -280,7 +280,12 @@ const Settable kSettable[] = {
     // Added 2026-09-05, once the capture scored them. Every one of these was
     // already derived and cited; what changed is that each was then seen to
     // move the predicted byte to the predicted value on the real device.
-    {"lod", 0x09, encodeLod, "0 to 10 (eleven lift-off distance steps)",
+    // The scale is NOT arbitrary and is worth naming in the help text: cfg107
+    // keeps eleven `.rdata` millimetre strings, "0.7mm" through "1.7mm" in
+    // 0.1mm steps, and the index into them IS the stored value (§7.25). A user
+    // told "0 to 10" has to guess which end is closer to the pad.
+    {"lod", 0x09, encodeLod,
+     "0 to 10 -- lift-off distance, 0 = 0.7mm up to 10 = 1.7mm in 0.1mm steps",
      "config-protocol.md §7.18, cfg107 0x40ec62 bound / 0x40ec6e-0x40ec9e "
      "eleven stores of 0x00-0x0a; scored against windows-run/02-basic"},
     {"cpi-stage", 0x0d, encodeCpiStage,
@@ -332,6 +337,14 @@ const Withheld kWithheld[] = {
      "switch mode -- so `set` will not take it. Use `egg-config multiclick`, "
      "which names the mode and refuses GX on the three buttons that have no "
      "SPDT switch behind them (\u00a77.22.3)"},
+    {"glass-mode",
+     "record 0x6f (\u00a77.25). Derived, and deliberately not offered: it is the "
+     "`Sensor Glass Mode` checkbox, control 1031, which cfg100/101/104 write "
+     "(cfg104 0x411824 sets it, 0x411845 clears it) and cfg107 only reads. Four "
+     "reasons to wait rather than four reasons it is wrong -- no capture has "
+     "ever seen it written, what it does inside the sensor is [G], setting it "
+     "silently changes what `lod` means, and Endgame withdrew the control by "
+     "two separate mechanisms. `factory-reset` and `restore` both clear it"},
     {"multiclick-ack",
      "record 0x72 (\u00a77.23). [D] from cfg107 0x4045d9, and deliberately not "
      "offered: it records that someone ticked a warning checkbox in Endgame's "
@@ -358,15 +371,22 @@ struct Gate {
 };
 const Gate kGates[] = {
     {"lod", 0x6f, 0x00,
-     "record 0x6f is not 0, and it decides what `lod` means. Endgame's own tool "
-     "(cfg107 0x40ec42/0x40eeb6/0x40f1e5) offers eleven steps 0.7mm-1.7mm when "
-     "this byte is 0 and only two, on a different scale, when it is 1 -- where "
-     "1 is 1.0mm rather than 0.8mm. Every record ever read from this model has "
-     "reported 0, so a device reporting otherwise is one nothing here has seen. "
-     "Refusing costs no frame; guessing costs a wrong lift-off distance. "
-     "See config-protocol.md \u00a77.25"},
+     "SENSOR GLASS MODE is on (record 0x6f is not 0), and it decides what `lod` "
+     "means. Endgame's own tool (cfg107 0x40ec42/0x40eeb6/0x40f1e5) offers "
+     "eleven steps 0.7mm-1.7mm when this byte is 0 and only two, on a different "
+     "scale, when it is 1 -- where 1 is 1.0mm rather than 0.8mm. Turn Sensor "
+     "Glass Mode off first, with `factory-reset` or by restoring a saved "
+     "record. Refusing costs no frame; guessing costs a wrong lift-off "
+     "distance. See config-protocol.md \u00a77.25"},
 };
 }  // namespace
+
+const std::size_t* gatedRecordOffsets(std::size_t& count) {
+    static std::size_t offs[sizeof(kGates) / sizeof(kGates[0])];
+    count = sizeof(kGates) / sizeof(kGates[0]);
+    for (std::size_t i = 0; i < count; ++i) offs[i] = kGates[i].governedBy;
+    return offs;
+}
 
 const char* capabilityRefusal(const Settable& f, const std::uint8_t* record) {
     if (!record) return nullptr;

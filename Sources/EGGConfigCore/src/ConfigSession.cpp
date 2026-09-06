@@ -188,6 +188,20 @@ std::vector<std::uint8_t> ConfigSession::buildRunFrame(
     return frame;
 }
 
+// NO CAPABILITY GATE HERE, and that is structural rather than an omission.
+// `set`'s gate table (ConfigRecord.cpp, kGates) is keyed by `Settable.name`,
+// and a run write has no field name -- it is an offset and a length. So there
+// is nothing for the table to match, and adding a lookup would be inventing a
+// key rather than enforcing a rule. The consequence is real and stated out
+// loud, because "the gate cannot apply here" is worth nothing next to "and so
+// nobody has checked whether it should": setRun's four callers are `button`,
+// `cpi`, `handedness` and `multiclick` (egg-config/main.cpp), and their target
+// runs are 0x0d, 0x23-0x36 and 0x37-0x6e. The only gated byte today is 0x6f,
+// which lies outside every one of them, so no caller can currently reach one.
+// That is a fact about the CURRENT table, not a property of the design -- add
+// a gate inside the CPI or button block and this comment becomes wrong. The
+// check is `Tests/test_config.cpp`, which asserts the disjointness rather than
+// leaving it to whoever edits kGates next.
 SetOutcome ConfigSession::setRun(std::size_t recordOffset,
                                  const std::uint8_t* bytes, std::size_t n) {
     SetOutcome o;

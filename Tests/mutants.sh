@@ -110,7 +110,13 @@ restore() {
   for f in "${MUTABLE[@]}"; do cp "$BACKUP/$(basename "$f")" "$f"; done
   touch "${MUTABLE[@]}"
 }
-trap 'restore; cmake --build build >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT
+# EXIT alone is not enough, and this cost a corrupted tree on 2026-09-06:
+# ctest's TIMEOUT killed this script mid-run and ConfigRecord.cpp was left
+# holding `// MUTANT: no high clamp` -- a CPI ceiling silently removed. bash
+# runs the EXIT trap for SIGINT/SIGTERM/SIGHUP only if they are trapped, so
+# name them. SIGKILL still cannot be caught by anything; `Tools/no-mutants.sh`
+# is the backstop for that, and it is what found the leftover.
+trap 'restore; cmake --build build >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT INT TERM HUP
 
 # Which suite grades a mutation, and which object files must die for the
 # rebuild to be real. Derived from the path so that adding a mutant never means
@@ -137,7 +143,7 @@ objdir_for() {
 # it -- including every equivalent -- never ran. The script printed nothing
 # about it because the summary lives below the error too. A count fixed at the
 # TOP is the only version of this check that a truncated script cannot skip.
-DECLARED_KILL=74
+DECLARED_KILL=76
 DECLARED_EQUIV=7
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
@@ -588,10 +594,10 @@ mutate kill "verifies the read-back against itself" "$CS" \
 mutate kill "writes even after the read failed" "$CS" \
 '    if (!read(o.before, o.result)) return o;
 
-    const std::size_t at = kPayloadOffset + f.recordOffset;|||    read(o.before, o.result);  // MUTANT
+    // 1a. CAPABILITY GATE|||    read(o.before, o.result);  // MUTANT
     if (o.before.size() != kLargeLen) o.before.assign(kLargeLen, 0);
 
-    const std::size_t at = kPayloadOffset + f.recordOffset;'
+    // 1a. CAPABILITY GATE'
 
 # §4.1: "Read-modify-write always. Never construct a settings blob from
 # scratch." Send a zeroed payload with one byte set, which is a factory reset
@@ -791,6 +797,21 @@ mutate kill "the capability gate runs after the write" "$CS" \
         o.result = Result::RefusedCapability;
         return o;
     }|||    // MUTANT: gate moved after the send'
+
+# gatedRecordOffsets exists so a test can hold the one thing the gate table
+# cannot enforce for itself: that no setRun block steps over a governing byte.
+# An accessor with no mutant is an accessor nobody has checked, and the test
+# that reads it would pass on an empty answer -- which is the vacuous-pass
+# shape this suite exists to catch.
+mutate kill "the gated-offset list reports itself as empty" "$CR" \
+'    count = sizeof(kGates) / sizeof(kGates[0]);|||    count = 0;  // MUTANT'
+
+# Subtler, and the reason the disjointness test is not alone. This reports the
+# gate's TRIGGER VALUE (0x00) where its governed OFFSET (0x6f) belongs. 0x00 is
+# outside every setRun run, so the disjointness check still passes; only the
+# adjacency check notices.
+mutate kill "the gated-offset list reports the value, not the offset" "$CR" \
+'    for (std::size_t i = 0; i < count; ++i) offs[i] = kGates[i].governedBy;|||    for (std::size_t i = 0; i < count; ++i) offs[i] = kGates[i].onlyWhen;  // MUTANT'
 
 # The known-good blob stops being known-good: every read overwrites it, so the
 # undo becomes a mirror of whatever state the device is in now.

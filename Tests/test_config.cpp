@@ -891,6 +891,42 @@ static void testCapabilityGate() {
         return o.result == Result::Ok && dev.storedRecord(0x09) == want &&
                !dev.sentFrames().empty();
     }());
+
+    // THE HOLE THE GATE CANNOT COVER, asserted rather than described.
+    //
+    // `setRun` writes a range of bytes and has no field name, so the gate
+    // table -- keyed by name -- cannot fire for it. Nothing stops `button` or
+    // `cpi` from writing across a governing byte except the arithmetic
+    // accident that no block contains one, and 0x6f sits exactly ONE past the
+    // end of the button block (0x37 + 8*7 == 0x6f). An extra button entry, a
+    // stride correction, or a second gate placed inside the CPI block would
+    // close that gap silently. This test is what makes it loud.
+    ok("no setRun block contains a byte that governs a gate", [&] {
+        std::size_t n = 0;
+        const std::size_t* gated = gatedRecordOffsets(n);
+        if (n == 0) return false;          // an empty table would pass vacuously
+        struct Run { std::size_t first, len; };
+        const Run runs[] = {
+            {kButtonBlockFirst, kButtonEntryCount * kButtonEntryLen},  // button
+            {kButtonBlockFirst, 2 * kButtonEntryLen},                  // handedness
+            {kCpiBlockFirst,    kCpiStageCount * kCpiEntryLen},        // cpi
+            {kMulticlickFirst,  (kMulticlickCount - 1) * kMulticlickStride + 1},
+        };
+        for (const Run& r : runs)
+            for (std::size_t i = 0; i < n; ++i)
+                if (gated[i] >= r.first && gated[i] < r.first + r.len) return false;
+        return true;
+    }());
+
+    ok("the gated byte is adjacent to the button block, not far from it", [&] {
+        // Not decoration: if this ever stops holding, the reason is that one
+        // of the two moved, and the test above would then be passing for a
+        // different reason than the one it was written for.
+        std::size_t n = 0;
+        const std::size_t* gated = gatedRecordOffsets(n);
+        return n == 1 && gated[0] == kButtonBlockFirst +
+                                     kButtonEntryCount * kButtonEntryLen;
+    }());
 }
 
 static void testHandedness() {

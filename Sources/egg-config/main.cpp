@@ -427,6 +427,32 @@ void reportVault(const ConfigSession& s, const FileRecordVault& v) {
 // ---------------------------------------------------------------------------
 // Read-only commands
 // ---------------------------------------------------------------------------
+// §7.25. Which derived fields is THIS device's record not safe to set? The
+// answer is in the record, so anything that already holds one can answer it --
+// which is the whole point of an off-wire gate (§4.2). Printed in a stable
+// shape so `EGGApp/Commands.swift` can parse it without knowing a single record
+// offset; a GUI that hard-coded 0x6f would be a second copy of the table, and
+// the file's own header says why that is the bug to avoid.
+void reportGates(const std::uint8_t* record) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < kSettableCount; ++i) {
+        const char* why = capabilityRefusal(kSettable[i], record);
+        if (!why) continue;
+        if (n++ == 0)
+            std::puts("\nfields this device will NOT accept:");
+        // TWO spaces after the padded name, not one. `%-16s %s` looks fine
+        // until a field name is longer than the pad -- `motion-jitter-filter`
+        // is twenty characters -- and then the separator collapses to a single
+        // space and EGGApp's parser, which splits on the first double space,
+        // reads the whole line as a name with no reason. Found by checking the
+        // longest name in the table rather than by seeing it happen.
+        std::printf("  %-20s  %s\n", kSettable[i].name, why);
+    }
+    if (n == 0)
+        std::puts("\nfields this device will NOT accept: none -- "
+                  "every derived field is settable on it.");
+}
+
 int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy,
             const std::string& vaultPath) {
     Log log(verbose);
@@ -456,6 +482,7 @@ int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy,
         std::printf("\nsaved all %zu bytes (frame included, not just the payload) to %s\n",
                     rec.size(), savePath.c_str());
     }
+    reportGates(rec.data());
     reportVault(s, vault);
     return 0;
 }
@@ -670,6 +697,16 @@ int cmdEncode(const std::string& field, const std::string& value,
     std::vector<std::uint8_t> before;
     if (!loadRecord(inPath, before)) return 1;
 
+    // §7.25 again. `encode` produces a file that `restore` will later put on the
+    // wire, so a gated field written here reaches the device by a longer road,
+    // not a safer one.
+    if (const char* why = capabilityRefusal(*f, before.data())) {
+        std::printf("REFUSED, and %s was not written. On a record like %s,\n"
+                    "%s is not safe to set:\n\n    %s\n",
+                    outPath.c_str(), inPath.c_str(), f->name, why);
+        return 8;
+    }
+
     warnIfActiveStageWouldBeOutOfRange(before, *f, v);
 
     std::vector<std::uint8_t> frame = ConfigSession::buildFrame(before, *f, encoded, policy);
@@ -718,6 +755,16 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
         std::uint8_t encoded = 0;
         f = resolve(field, value, v, encoded, false);
         if (!f) return 2;
+        // §7.25's gate, here too. A dry run prints the approval token §4.2c
+        // binds a write to, so producing one for a field `set` will refuse
+        // would mean handing someone an approval for something that cannot
+        // happen. Refuse in the same place the device path refuses.
+        if (const char* why = capabilityRefusal(*f, before.data())) {
+            std::printf("REFUSED. %s could not be set on a device holding this\n"
+                        "record, so no frame and no token are produced:\n\n"
+                        "    %s\n", f->name, why);
+            return 8;
+        }
         warnIfActiveStageWouldBeOutOfRange(before, *f, v);
         frame = ConfigSession::buildFrame(before, *f, encoded, policy);
         std::printf("set %s = %s   (record 0x%02zx", f->name, value.c_str(),

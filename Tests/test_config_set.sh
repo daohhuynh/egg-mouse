@@ -158,6 +158,44 @@ else
   echo "  FAIL  $n_fields settable fields but $n_cites citations"; FAIL=$((FAIL+1))
 fi
 
+# --------------------------------------------------------------------- §7.25
+# THE CAPABILITY GATE, OFFLINE. `dryrun` prints the frame and the approval token
+# §4.2c binds a write to, so it must refuse a gated field for the same reason
+# `set` does -- otherwise the tool hands out an approval for a write it will not
+# perform. Exercised against a REAL captured record with one byte poked, so the
+# only thing invented is the byte whose meaning is the whole point.
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+cat frames/01-baseline-003-in-01.bin > "$TMP/plain.bin"
+printf '\0' >> "$TMP/plain.bin"            # the device sends N-1; pad to 1041
+cp "$TMP/plain.bin" "$TMP/gated.bin"
+# record 0x6f lives at payload+0x6f = file offset 16 + 111 = 127.
+printf '\x01' | dd of="$TMP/gated.bin" bs=1 seek=127 count=1 conv=notrunc 2>/dev/null
+
+want_rc 0 "record 0x09" dryrun "$TMP/plain.bin" lod 5
+want_rc 8 "REFUSED"     dryrun "$TMP/gated.bin" lod 5
+want_rc 8 "0x6f"        dryrun "$TMP/gated.bin" lod 5
+
+# The gate is per FIELD. Everything else still works on the same record, or the
+# guard is a blanket refusal wearing a reason.
+want_rc 0 "record 0x05" dryrun "$TMP/gated.bin" polling 1000
+
+# `encode` writes a file `restore` would later put on the wire. Same gate, and
+# the output file must NOT appear.
+rm -f "$TMP/out.bin"
+want_rc 8 "REFUSED" encode lod 5 "$TMP/gated.bin" "$TMP/out.bin"
+if [ ! -e "$TMP/out.bin" ]; then
+  echo "  PASS  encode refused and wrote no file"; PASS=$((PASS+1))
+else
+  echo "  FAIL  encode refused but wrote $TMP/out.bin anyway"; FAIL=$((FAIL+1))
+fi
+rm -f "$TMP/out.bin"
+if "$BIN" encode lod 5 "$TMP/plain.bin" "$TMP/out.bin" >/dev/null 2>&1 \
+   && [ -s "$TMP/out.bin" ]; then
+  echo "  PASS  encode still works on an ungated record"; PASS=$((PASS+1))
+else
+  echo "  FAIL  encode refused an ungated record, or wrote nothing"; FAIL=$((FAIL+1))
+fi
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

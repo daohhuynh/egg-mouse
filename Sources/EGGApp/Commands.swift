@@ -28,6 +28,37 @@ enum Commands {
 
     static func factoryReset() -> [String] { ["factory-reset", "--yes"] }
 
+    /// RESTORE, which is the undo `factoryReset` needs to exist beside it.
+    ///
+    /// The Settings screen has been able to wipe the mouse and to save a copy
+    /// since the day it shipped, and its own tooltip said "Your saved copy is
+    /// the way back" -- while offering no way back. CLAUDE.md 4.1 puts it the
+    /// other way round: implement the undo FIRST, then the thing it undoes.
+    ///
+    /// The preview is genuinely free. `egg-config dryrun REC` with no field
+    /// prints the exact 1041-byte A0 11 frame and its diff against the saved
+    /// record WITHOUT opening the device at all, so a restore can be inspected
+    /// in full with the mouse unplugged.
+    static func previewRestore(record path: String) -> [String] {
+        ["dryrun", path]
+    }
+
+    static func applyRestore(record path: String) -> [String] {
+        ["restore", path, "--yes"]
+    }
+
+    /// Where egg-config keeps the automatic known-good copy. Hardcoded here
+    /// to match `defaultVaultPath()` in egg-config/main.cpp, and checked
+    /// against the CLI's own help text by Tests/test_app_commands.swift --
+    /// a dotfile in $HOME is not something a person can find in an open
+    /// panel, so the GUI has to know the name to offer it at all.
+    static let knownGoodVaultName = ".egg-mouse-known-good.bin"
+
+    static func knownGoodVaultPath() -> String {
+        (NSHomeDirectory() as NSString)
+            .appendingPathComponent(knownGoodVaultName)
+    }
+
     /// Preview a field change. Sends nothing: `set` without --yes is a dry run
     /// that prints the byte it would move.
     static func previewSet(field: String, value: String) -> [String] {
@@ -239,6 +270,46 @@ enum Commands {
     /// Tests/test_citations.py. A second copy here would drift, and the first
     /// symptom would be the GUI offering a field the tool refuses -- or naming
     /// one after the wrong record.
+    /// Which fields `egg-config read` says THIS device will not accept, and why.
+    ///
+    /// The GUI must not offer a choice the tool will reject -- the same rule
+    /// that keeps `left` and `cpi-button` out of the button picker. §7.25 adds
+    /// a second kind of rejection: a field whose MEANING depends on another
+    /// record byte. The reason is parsed rather than reconstructed, and no
+    /// record offset appears anywhere in this file, because a second copy of
+    /// the gate table here is exactly the drift ConfigView.swift's header warns
+    /// about.
+    ///
+    /// `read` prints either
+    ///     fields this device will NOT accept: none -- ...
+    /// or
+    ///     fields this device will NOT accept:
+    ///       lod              <reason>
+    /// and an empty result means "nothing gated", which is also what a caller
+    /// gets from output that has no such section at all. That is deliberate:
+    /// an older egg-config prints no section, and the GUI must not respond to
+    /// that by disabling everything.
+    static func parseGates(_ text: String) -> [String: String] {
+        var out: [String: String] = [:]
+        var inSection = false
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("fields this device will NOT accept:") {
+                inSection = !line.contains("none --")
+                continue
+            }
+            guard inSection else { continue }
+            guard line.hasPrefix("  ") else { inSection = false; continue }
+            let body = line.trimmingCharacters(in: .whitespaces)
+            if body.isEmpty { inSection = false; continue }
+            guard let sp = body.range(of: "  ") else { continue }
+            let name = String(body[body.startIndex..<sp.lowerBound])
+            let why = String(body[sp.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty && !why.isEmpty { out[name] = why }
+        }
+        return out
+    }
+
     static func parseFields(_ text: String) -> (fields: [Field],
                                                 withheld: [(String, String)]) {
         var fields: [Field] = []

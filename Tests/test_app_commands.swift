@@ -47,6 +47,15 @@ equal(Commands.readSettings(savingTo: "/tmp/x.bin"),
 equal(Commands.readSettings(savingTo: ""), ["read"],
       "an empty save path must not produce a bare --save")
 
+equal(Commands.previewRestore(record: "/tmp/r.bin"), ["dryrun", "/tmp/r.bin"],
+      "a restore PREVIEW is the offline dryrun")
+check(!Commands.previewRestore(record: "/tmp/r.bin").contains("--yes"),
+      "a restore PREVIEW must never contain --yes")
+equal(Commands.applyRestore(record: "/tmp/r.bin"),
+      ["restore", "/tmp/r.bin", "--yes"], "an applied restore carries --yes")
+check(Commands.applyRestore(record: "/tmp/r.bin").contains("/tmp/r.bin"),
+      "the applied restore must name the SAME file the preview was given")
+
 equal(Commands.previewSet(field: "polling", value: "1000"),
       ["set", "polling", "1000"], "preview carries no --yes")
 check(!Commands.previewSet(field: "polling", value: "1000").contains("--yes"),
@@ -398,6 +407,133 @@ if mcStatus == -1 {
                       + "egg-config \(cli ? "accepted" : "refused")")
             }
         }
+    }
+}
+
+// -------------------------------------------------------------- §7.25 gates
+// The GUI greys a field out on the strength of THIS parse, so a parse that
+// silently returns nothing would re-offer a field the tool refuses -- and the
+// user would only find out after typing a value and pressing Apply.
+
+let gatedText = """
+settings record, 1024 payload bytes at +0x10:
+
+0000  a0 11 00 00
+saved 1041 bytes
+
+fields this device will NOT accept:
+  lod              record 0x6f is not 0, and it decides what `lod` means. See §7.25
+
+known-good record: held
+"""
+let gates = Commands.parseGates(gatedText)
+check(gates.count == 1, "one gated field, got \(gates.count)")
+check(gates["lod"] != nil, "the gated field is named")
+check(gates["lod"]?.contains("0x6f") == true, "the reason survives the parse")
+
+check(Commands.parseGates("""
+fields this device will NOT accept: none -- every derived field is settable on it.
+""").isEmpty, "`none` must parse as nothing gated, not as a field called none")
+
+// AN OLDER egg-config PRINTS NO SUCH SECTION. The GUI must read that as
+// "nothing gated" and keep working, never as "everything gated".
+check(Commands.parseGates("settings record, 1024 payload bytes at +0x10:\n\n0000  a0 11\n").isEmpty,
+      "output with no gate section leaves every field enabled")
+
+// The section ends at the first line that is not an indented entry. Without
+// this the vault line below it would be parsed as a gated field named
+// `known-good`.
+check(gates["known-good"] == nil && gates["record:"] == nil,
+      "the section stops at the blank line; nothing after it is a field")
+
+// A field name longer than the CLI's pad width. `%-16s %s` would collapse to a
+// single space here and this parse would return nothing at all -- silently
+// re-enabling a field the device refuses. The CLI pads to 20 and always emits
+// two spaces; this is the check that keeps it honest.
+let longName = Commands.parseGates("""
+fields this device will NOT accept:
+  motion-jitter-filter  a twenty-character name still separates cleanly
+""")
+check(longName["motion-jitter-filter"] != nil,
+      "a name at the pad width still parses; got \(longName.keys.sorted())")
+
+// Scored against the CLI's real shape, offline -- `dryrun` refuses a gated
+// field and `read` prints the section, so a record with 0x6f poked to 1 is the
+// only fixture needed and it needs no mouse.
+let (dStatus, dText) = run("egg-config", ["set"])
+if dStatus == -1 {
+    print("SKIP: build/egg-config not present; gate wording not scored")
+} else {
+    check(!dText.contains("fields this device will NOT accept"),
+          "`set` lists fields; only `read` knows what a DEVICE will accept")
+}
+
+// --------------------------------------------------------------------------
+// Restore, driven against the real egg-config with NO DEVICE ATTACHED.
+//
+// This is the pair CLAUDE.md 4.1 asks for: the GUI could already factory-reset
+// the mouse and save a copy, and until 2026-09-06 it could not put the copy
+// back. The preview half is the interesting one to test, because it is the
+// half that must work with the mouse unplugged -- if `dryrun` ever needed the
+// device, the GUI's two-step flow would silently become one step.
+// --------------------------------------------------------------------------
+do {
+    let frame = repoRoot().appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    if let raw = FileManager.default.contents(atPath: frame.path) {
+        var rec = [UInt8](raw)
+        if rec.count < 1041 { rec += [UInt8](repeating: 0, count: 1041 - rec.count) }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("egg-restore-preview.bin")
+        try? Data(rec[0..<1041]).write(to: tmp)
+
+        let (rc, text) = run("egg-config", Commands.previewRestore(record: tmp.path))
+        if rc == -1 {
+            print("SKIP: build/egg-config not present; restore shapes checked only")
+        } else {
+            check(rc == 0, "the restore preview must succeed offline",
+                  "rc \(rc)\n      " + text.prefix(300).description)
+            check(text.contains("restore"),
+                  "the preview must say it is previewing a RESTORE", text.prefix(200).description)
+            check(text.contains("command 0x11"),
+                  "the preview must name the A0 11 write frame it would send",
+                  text.prefix(300).description)
+            // Assert the REASSURANCE, not the absence of a scary word. The
+            // first version of this check failed on `dryrun`'s own closing
+            // line -- "Nothing was sent. No device was opened." -- by
+            // grepping for "no device". Searching for the string a FAILURE
+            // would contain is the weaker test anyway: it passes on any
+            // output that happens not to use those words.
+            check(text.contains("Nothing was sent")
+                  && text.contains("No device was opened"),
+                  "the preview must SAY it opened no device, so the person "
+                  + "approving the second click can see the first was free",
+                  text.suffix(200).description)
+        }
+
+        // The GUI hardcodes the vault's name. If egg-config ever moves it,
+        // the "Restore known-good" button silently stops appearing -- a
+        // disappearing undo, which is the worst way for this to fail. The
+        // CLI prints the default in its own help, so compare against that.
+        let (_, help) = run("egg-config", [])
+        check(help.contains(Commands.knownGoodVaultName),
+              "egg-config's help no longer names \(Commands.knownGoodVaultName); "
+              + "the GUI's known-good button is pointing at the wrong file",
+              help.prefix(400).description)
+        check(Commands.knownGoodVaultPath().hasSuffix(Commands.knownGoodVaultName),
+              "the vault path must end in the vault name")
+        check(Commands.knownGoodVaultPath().hasPrefix("/"),
+              "the vault path must be absolute -- an open panel cannot use a "
+              + "relative one")
+
+        // A file that is not a record must be REFUSED, not previewed: the GUI
+        // arms its write button on the preview's exit status alone.
+        let junk = FileManager.default.temporaryDirectory
+            .appendingPathComponent("egg-restore-junk.bin")
+        try? Data([0x00, 0x01, 0x02]).write(to: junk)
+        let (jrc, _) = run("egg-config", Commands.previewRestore(record: junk.path))
+        check(jrc != 0, "a 3-byte file must not preview as a restorable record")
+    } else {
+        print("SKIP: frames/01-baseline-003-in-01.bin not present")
     }
 }
 

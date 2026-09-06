@@ -27,6 +27,11 @@ struct Field: Identifiable {
 final class ConfigModel: ObservableObject {
     @Published var fields: [Field] = []
     @Published var withheld: [(String, String)] = []
+    /// §7.25. Field name -> why THIS device will not accept it, from
+    /// `egg-config read`. Empty until a read happens, and empty is the safe
+    /// default: an older CLI prints no such section and the GUI must not
+    /// respond to silence by disabling every field.
+    @Published var gates: [String: String] = [:]
     @Published var buttons: [String] = []
     @Published var actions: [String] = []
     @Published var output = ""
@@ -126,6 +131,12 @@ struct ConfigView: View {
 
     @State private var side = "right"
 
+    // The restore flow's two-step state. `restorePath` is set by the file
+    // panel and survives the preview so the apply cannot target a different
+    // file than the one that was shown.
+    @State private var restorePath: String = ""
+    @State private var restorePreviewed = false
+
     var field: Field? { model.fields.first { $0.name == selected } }
 
     /// The X/Y the CPI panel would send, or nil if either is not on the grid.
@@ -167,6 +178,24 @@ struct ConfigView: View {
                 Button("Read from mouse") { run(Commands.readSettings()) }
                 Button("Device info")     { run(Commands.deviceInfo()) }
                 Button("Save a copy")     { run(Commands.readSettings(savingTo: defaultSavePath())) }
+                if FileManager.default.fileExists(
+                        atPath: Commands.knownGoodVaultPath()) {
+                    Button("Restore known-good") {
+                        restorePath = Commands.knownGoodVaultPath()
+                        restorePreviewed = false
+                        run(Commands.previewRestore(record: restorePath)) {
+                            restorePreviewed = true
+                        }
+                    }
+                    .help("The copy egg-config saved by itself the first time "
+                        + "it read this mouse (\(Commands.knownGoodVaultName)). "
+                        + "It is never overwritten, so it is the oldest good "
+                        + "state there is.")
+                }
+                Button("Restore a copy\u{2026}") { chooseRestore() }
+                    .help("Pick a record saved earlier. It is PREVIEWED first, "
+                        + "offline, with the mouse unplugged if you like -- "
+                        + "the write needs a second click.")
                 Spacer()
                 Button(role: .destructive) {
                     run(Commands.factoryReset())
@@ -177,6 +206,31 @@ struct ConfigView: View {
             }
             .padding(.horizontal)
             .disabled(model.busy)
+
+            if !restorePath.isEmpty {
+                HStack(spacing: 10) {
+                    Text("Restore ")
+                        + Text(URL(fileURLWithPath: restorePath).lastPathComponent)
+                            .bold()
+                    Spacer()
+                    Button("Write it to the mouse") {
+                        run(Commands.applyRestore(record: restorePath)) {
+                            restorePath = ""; restorePreviewed = false
+                        }
+                    }
+                    .disabled(!restorePreviewed)
+                    .help(restorePreviewed
+                          ? "Sends one A0 11, then reads the record back and "
+                          + "verifies it byte for byte."
+                          : "The preview did not succeed, so there is nothing "
+                          + "to approve.")
+                    Button("Cancel") { restorePath = ""; restorePreviewed = false }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.12))
+                .disabled(model.busy)
+            }
 
             Divider()
 
@@ -226,6 +280,15 @@ struct ConfigView: View {
 
                     if let f = field {
                         Text(f.record).font(.caption).foregroundStyle(.secondary)
+                        // §7.25. The tool would refuse this write; say so here
+                        // rather than letting someone fill the form in first.
+                        if let why = model.gates[f.name] {
+                            Text("This device will not accept `\(f.name)`.")
+                                .font(.caption).bold()
+                            Text(why)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let choices = f.choices {
                             Picker("Value", selection: $value) {
                                 Text("—").tag("")
@@ -249,15 +312,17 @@ struct ConfigView: View {
                         HStack {
                             // Dry run first, always. §4.3 wants a dry-run seam
                             // and this is where a person uses it.
+                            let gated = model.gates[f.name] != nil
                             Button("Preview") {
                                 previewed = true
                                 run(Commands.previewSet(field: f.name, value: value))
                             }
-                            .disabled(value.isEmpty)
+                            .disabled(value.isEmpty || gated)
                             Button("Apply") { run(Commands.applySet(field: f.name, value: value)) }
-                                .disabled(!previewed || value.isEmpty)
-                                .help(previewed ? "Write it, read it back, verify."
-                                                : "Preview it first.")
+                                .disabled(!previewed || value.isEmpty || gated)
+                                .help(gated ? "This device will not accept this field."
+                                            : previewed ? "Write it, read it back, verify."
+                                                        : "Preview it first.")
                         }
                     }
         }
@@ -462,20 +527,50 @@ struct ConfigView: View {
         }
     }
 
+    /// Two clicks, never one. The first is offline (`dryrun`) and shows the
+    /// whole frame plus the diff; the second is the only one that opens the
+    /// device. Deliberately NOT modelled as a confirmation alert: an alert
+    /// asks "are you sure" about a thing the user has not been shown, which is
+    /// the reflex CLAUDE.md 4.2c exists to refuse. Here the second click comes
+    /// after the bytes are on screen.
+    private func chooseRestore() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.allowsMultipleSelection = false
+        p.message = "Choose a settings record saved earlier"
+        guard p.runModal() == .OK, let u = p.url else { return }
+        restorePath = u.path
+        restorePreviewed = false
+        run(Commands.previewRestore(record: u.path)) { restorePreviewed = true }
+    }
+
     private func defaultSavePath() -> String {
         let d = FileManager.default.urls(for: .documentDirectory,
                                          in: .userDomainMask).first!
         return d.appendingPathComponent("egg-mouse-settings.bin").path
     }
 
-    private func run(_ args: [String]) {
+    /// `ok` is called only when egg-config both ran AND exited 0. The
+    /// distinction matters for restore: a preview that refused (a short file,
+    /// an implausible record) must NOT arm the write button, and `try await`
+    /// alone would not tell them apart -- ToolRunner throws when the tool
+    /// cannot be launched, not when the tool says no.
+    private func run(_ args: [String], ok: (() -> Void)? = nil) {
         Task {
             model.busy = true
             defer { model.busy = false }
             do {
                 let r = try await runner.run("egg-config", args)
+                if r.ok { ok?() }
                 model.output = "$ egg-config " + args.joined(separator: " ")
                             + "\n\n" + r.text
+                // §7.25. A read is the only command that reports which fields
+                // THIS device will not accept, so it is the only one that may
+                // update the gates. Deliberately not cleared by other commands:
+                // a stale "lod is gated" is a refusal the CLI would repeat
+                // anyway, while a cleared one would re-offer a field that is
+                // still unsafe.
+                if args.first == "read" { model.gates = Commands.parseGates(r.text) }
             } catch {
                 model.output = error.localizedDescription
             }

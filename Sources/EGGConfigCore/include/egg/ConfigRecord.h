@@ -206,6 +206,14 @@ struct Withheld { const char* name; const char* why; };
 // Returns nullptr when the field may be written, or the reason it may not.
 const char* capabilityRefusal(const Settable& f, const std::uint8_t* record);
 
+// Which record offsets currently GOVERN a gate -- not the offsets being
+// written, the ones being consulted. Exposed for one reason: `setRun` cannot
+// apply the gate table at all (it has an offset, not a field name), so the
+// only thing keeping a block write from silently stepping over a governing
+// byte is that no block contains one. That is a fact about today's table, and
+// a fact is something a test can hold. See ConfigSession.cpp above setRun.
+const std::size_t* gatedRecordOffsets(std::size_t& count);
+
 extern const Settable kSettable[];
 extern const std::size_t kSettableCount;
 extern const Withheld  kWithheld[];
