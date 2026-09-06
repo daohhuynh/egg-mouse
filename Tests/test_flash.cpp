@@ -9,6 +9,7 @@
 // of these deliberately arm a fault and require the flasher to notice. If the
 // adversarial section ever passes with the faults disabled, it is measuring
 // nothing.
+#include "egg/BootloaderEntry.h"
 #include "egg/FlashCommands.h"
 #include "egg/Firmware.h"
 #include "egg/MockBootloader.h"
@@ -428,6 +429,179 @@ static void testObservedFrameLayout() {
        ps.size() == 64 && ps[0] == 0xA1 && ps[1] == 0x13 && ps[2] == 0x00);
 }
 
+
+// ---------------------------------------------------------------------------
+// §4.4 stage 2. This runs against the ONE mouse, so every failure mode is
+// exercised here first. The invariant that matters most is not "it works" --
+// it is "it sends exactly one report, and nothing at all when it should not".
+// ---------------------------------------------------------------------------
+namespace {
+
+struct FakeWorld {
+    std::vector<SeenDevice> devices;
+    std::vector<std::vector<std::uint8_t>> sent;   // every frame that went out
+    bool         sendWorks   = true;
+    bool         replyArrives = true;
+    std::uint8_t replyStatus = 0x01;
+    unsigned     appearAfterMs = 450;              // [O] 448-489 ms
+    SeenDevice   appearsAs{kProductIdBootloader, kBootloaderRelease, "Bootloader"};
+    bool         everAppears = true;
+    unsigned     clock = 0;
+
+    EntryEnv env() {
+        EntryEnv e;
+        e.nowMs   = [this] { return clock; };
+        e.sleepMs = [this](unsigned ms) {
+            clock += ms;
+            if (everAppears && clock >= appearAfterMs) {
+                bool present = false;
+                for (auto& d : devices) if (d.productId == kProductIdBootloader) present = true;
+                if (!present) {
+                    devices.clear();
+                    devices.push_back(appearsAs);
+                }
+            }
+        };
+        e.enumerate = [this] { return devices; };
+        e.exchange  = [this](const std::vector<std::uint8_t>& f,
+                             std::vector<std::uint8_t>& reply, bool& readOk) {
+            sent.push_back(f);
+            if (!sendWorks) return false;
+            clock += 2;
+            readOk = replyArrives;
+            if (replyArrives) { reply.assign(64, 0); reply[1] = replyStatus; }
+            return true;
+        };
+        return e;
+    }
+};
+
+FakeWorld appOnly() {
+    FakeWorld w;
+    w.devices.push_back({kProductIdApplication, 0x0110, "Endgame Gear OP1 8k v2 Gaming Mouse"});
+    return w;
+}
+
+}  // namespace
+
+static void testStage2Entry() {
+    std::printf("\nstage 2 -- bootloader entry, against an adversarial world\n");
+
+    // The frame, byte for byte against what Endgame's tool put on the wire in
+    // 08-flash.pcapng. Not against our intent: against the capture.
+    {
+        FakeWorld w = appOnly();
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        const std::uint8_t want[8] = {0xa1, 0x3a, 0x00, 0x00, 0x00, 0x5a, 0xa5, 0x32};
+        bool exact = o.sent.size() == 64 && std::memcmp(o.sent.data(), want, 8) == 0;
+        for (std::size_t i = 8; i < o.sent.size(); ++i) if (o.sent[i]) exact = false;
+        ok("the frame is a1 3a 00 00 00 5a a5 32 + 56 zeros, exactly as captured", exact);
+        ok("happy path confirms", o.result == EntryResult::EnteredAndConfirmed);
+        ok("EXACTLY ONE report is ever sent", w.sent.size() == 1,
+           "sent " + std::to_string(w.sent.size()));
+        ok("it measures the re-enumeration", o.reenumerateMs >= 400 && o.reenumerateMs <= 500,
+           std::to_string(o.reenumerateMs) + " ms");
+    }
+
+    // Nothing to send to -> nothing sent. This is the one that protects the
+    // mouse from a half-understood state, so it is asserted on the SEND COUNT
+    // and not merely on the result code.
+    {
+        FakeWorld w;  // no devices at all
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("no application device -> refuses", o.result == EntryResult::NoApplicationDevice);
+        ok("...and sends NOTHING", w.sent.empty());
+    }
+    {
+        FakeWorld w = appOnly();
+        w.devices.push_back({kProductIdApplication, 0x0110, "Endgame Gear OP1 8k v2 Gaming Mouse"});
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("TWO application devices -> refuses rather than picking one",
+           o.result == EntryResult::NoApplicationDevice);
+        ok("...and sends NOTHING", w.sent.empty());
+    }
+    {
+        FakeWorld w;
+        w.devices.push_back({kProductIdBootloader, kBootloaderRelease, "Bootloader"});
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("already in the bootloader -> confirms without sending A1 3A",
+           o.result == EntryResult::EnteredAndConfirmed && w.sent.empty());
+    }
+
+    // Identity is checked on all three fields, not just the PID.
+    {
+        FakeWorld w = appOnly();
+        w.appearsAs = {kProductIdBootloader, 0x0007, "Bootloader"};
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("wrong bcdDevice on 0x1977 -> REFUSED, not accepted",
+           o.result == EntryResult::UnrecognisedIdentity);
+        ok("...and it reports what it refused", o.seen.releaseNumber == 0x0007);
+    }
+    {
+        FakeWorld w = appOnly();
+        w.appearsAs = {kProductIdBootloader, kBootloaderRelease, "Bootloadr"};
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("wrong product string on 0x1977 -> REFUSED",
+           o.result == EntryResult::UnrecognisedIdentity);
+    }
+
+    // The vendor does not consult resp[1] and neither do we: the PID change is
+    // the evidence. These two pin that decision so a later "tidy-up" cannot
+    // quietly add a status gate.
+    {
+        FakeWorld w = appOnly();
+        w.replyStatus = 0x00;
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("resp[1]=0x00 but the device re-enumerated -> still confirmed",
+           o.result == EntryResult::EnteredAndConfirmed);
+        ok("...and the status is still reported", o.status == 0x00 && o.replyRead);
+    }
+    {
+        FakeWorld w = appOnly();
+        w.replyArrives = false;
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("no reply at all but the device re-enumerated -> still confirmed",
+           o.result == EntryResult::EnteredAndConfirmed && !o.replyRead);
+    }
+
+    // Failures, and that they are BOUNDED. §4.2: before erase, abort is right.
+    {
+        FakeWorld w = appOnly();
+        w.sendWorks = false;
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("send failure -> SendFailed and no waiting", o.result == EntryResult::SendFailed);
+    }
+    {
+        FakeWorld w = appOnly();
+        w.everAppears = false;
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("device never comes back -> NoReenumeration, does not hang",
+           o.result == EntryResult::NoReenumeration);
+        ok("...and it gave up at our ceiling, not the vendor's 22.5 s",
+           w.clock <= kEntryPollCeilMs + 100,
+           std::to_string(w.clock) + " ms");
+        ok("...having still sent exactly one report", w.sent.size() == 1);
+    }
+    {
+        FakeWorld w = appOnly();
+        w.appearAfterMs = 9000;   // slow, but inside the ceiling
+        EntryEnv e = w.env();
+        const EntryOutcome o = enterBootloaderAndConfirm(e);
+        ok("a slow re-enumeration inside the ceiling is still accepted",
+           o.result == EntryResult::EnteredAndConfirmed);
+    }
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -436,6 +610,7 @@ int main() {
     testInvariants();
     testAdversarial();
     testDeterminismAndIdentity();
+    testStage2Entry();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

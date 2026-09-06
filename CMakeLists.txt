@@ -43,6 +43,7 @@ add_library(EGGFlashCore STATIC
   Sources/EGGFlashCore/src/FlashCommands.cpp
   Sources/EGGFlashCore/src/WritePhase.cpp
   Sources/EGGFlashCore/src/MockBootloader.cpp
+  Sources/EGGFlashCore/src/BootloaderEntry.cpp
 )
 target_include_directories(EGGFlashCore PUBLIC Sources/EGGFlashCore/include)
 target_link_libraries(EGGFlashCore PUBLIC EGGCore)

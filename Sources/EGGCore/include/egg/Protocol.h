@@ -30,6 +30,26 @@ inline constexpr std::uint16_t kVendorId = 0x3367;
 inline constexpr std::uint16_t kProductIdApplication = 0x1978;
 inline constexpr std::uint16_t kProductIdBootloader  = 0x1977;
 
+// The bootloader's full identity. [O] TWICE, by two independent routes that
+// agree on all three fields:
+//   - on this machine, entered by holding LEFT+RIGHT at plug-in
+//     (notes/bootloader-observed.md §2);
+//   - in Endgame's own captures 08 and 09, entered by sending A1 3A
+//     (notes/flash-wire-observed.md §2.1) -- VID 0x3367, PID 0x1977,
+//     bcdDevice 0x0006, iProduct string exactly "Bootloader".
+//
+// THAT AGREEMENT IS WHY SOFTWARE ENTRY IS AS SAFE AS THE BUTTON. The hardware
+// path is [O] to leave the application intact and hand back to it on a power
+// cycle. If A1 3A lands on a device presenting the identical identity, it is
+// landing in the same place -- which is the strongest evidence available
+// without opening the mouse, and it is still [G] that the two are the same
+// code, because USB identity is what the firmware chooses to report.
+//
+// §4.2: "if the bootloader reports a version or an identity of any kind, refuse
+// anything unrecognised." All three are checked, not just the PID.
+inline constexpr std::uint16_t kBootloaderRelease = 0x0006;
+inline constexpr const char*   kBootloaderProduct = "Bootloader";
+
 // The vendor collection, and the reason this is not optional.
 // [D] config 1.07 0x403777 (movl $0xff01,%edx) / 0x40377c / 0x403785.
 // [D] updater 1.10 0x40113c / 0x401145 -- different function, identical test.

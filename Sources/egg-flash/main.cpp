@@ -1,14 +1,19 @@
 // egg-flash -- CLI-first by design (CLAUDE.md §3): no window to close, no Dock
 // quit item, and the output is a log by construction.
+#include "egg/BootloaderEntry.h"
+#include "egg/Device.h"
 #include "egg/FlashCommands.h"
 #include "egg/Firmware.h"
 #include "egg/RecordVault.h"
+#include "egg/Transport.h"
 #include "egg/WritePhase.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 
 using namespace egg::fw;
 
@@ -74,6 +79,11 @@ static int usage() {
         "  egg-flash dryrun <updater.exe>  emit the exact byte stream, send nothing\n"
         "  egg-flash stream <updater.exe>  the same stream in full, one frame per\n"
         "                                  line, for diffing against a capture\n"
+        "  egg-flash enter-bootloader --yes\n"
+        "                                  §4.4 stage 2: send ONE report (A1 3A),\n"
+        "                                  confirm the mouse came back as the\n"
+        "                                  bootloader, send it nothing. No erase,\n"
+        "                                  no write. Exit by unplugging it.\n"
         "  egg-flash help\n"
         "\n"
         "The image is always FWFILE resource %u of the .exe you name. That is a\n"
@@ -92,19 +102,120 @@ static int usage() {
     return 2;
 }
 
+// ---------------------------------------------------------------------------
+// §4.4 stage 2. One command out, then nothing but watching.
+//
+// It takes no image and loads none: an image path here would be a path by which
+// a mistyped verb could start a flash, and there is no reason for this rung to
+// know what firmware even is.
+// ---------------------------------------------------------------------------
+static int cmdEnterBootloader(bool yes, bool verbose) {
+    if (!yes) {
+        std::printf(
+          "enter-bootloader sends ONE 64-byte report (A1 3A + the 5A A5 32\n"
+          "magic) to the application device and then only watches.\n"
+          "\n"
+          "It does not erase, does not write, and sends the bootloader nothing\n"
+          "at all. The mouse will disappear and come back as PID 0x1977.\n"
+          "To get out again: UNPLUG IT AND PLUG IT BACK IN. A power cycle is\n"
+          "the observed exit and it has been done on this mouse before.\n"
+          "\n"
+          "Re-run with --yes.\n");
+        return 2;
+    }
+
+    egg::Log log(verbose);
+    auto dev = egg::Device::open(egg::kProductIdApplication, log);
+    if (!dev) return 1;
+    egg::Transport t(*dev, egg::kUpdaterBusy, log);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    EntryEnv env;
+    env.nowMs = [t0] {
+        return static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+    };
+    env.sleepMs = [](unsigned ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    };
+    env.enumerate = [] {
+        std::vector<SeenDevice> out;
+        for (const auto& m : egg::enumerateAll())
+            out.push_back({m.productId, m.releaseNumber, m.product, m.manufacturer});
+        return out;
+    };
+    env.exchange = [&t](const std::vector<std::uint8_t>& frame,
+                        std::vector<std::uint8_t>& reply, bool& readOk) {
+        // The vendor sleeps i*2 ms after the send and before the read, i = 1 on
+        // the first pass (updater 1.10 0x004037b3). Two milliseconds.
+        const egg::Reply r = t.exchange(frame, egg::kReportSmall,
+                                        "A1 3A enter bootloader", 2);
+        readOk = !r.buf.empty();
+        reply  = r.buf;
+        return r.outcome != egg::Outcome::TransportFail;
+    };
+
+    const EntryOutcome o = enterBootloaderAndConfirm(env);
+
+    if (!o.sent.empty()) {
+        std::printf("\nsent       ");
+        for (std::size_t i = 0; i < 8; ++i) std::printf("%02x ", o.sent[i]);
+        std::printf("... (%zu bytes, rest zero)\n", o.sent.size());
+        std::printf("ack        %u ms, reply %s",
+                    o.ackMs, o.replyRead ? "read" : "NOT read");
+        if (o.replyRead) std::printf(", resp[1]=0x%02x", o.status);
+        std::printf("\n           (resp[1] is logged, not gated on -- the vendor\n"
+                    "            does not check it either; the PID change is the evidence)\n");
+    }
+
+    if (o.sawBootloaderPid) {
+        std::printf("appeared   %u ms after the reply\n", o.reenumerateMs);
+        std::printf("identity   PID 0x%04x  bcdDevice 0x%04x  \"%s\"  (manufacturer \"%s\")\n",
+                    o.seen.productId, o.seen.releaseNumber, o.seen.product.c_str(),
+                    o.seen.manufacturer.c_str());
+    }
+
+    if (o.result != EntryResult::EnteredAndConfirmed) {
+        std::printf("\nFAILED: %s\n", describe(o.result));
+        if (o.result == EntryResult::UnrecognisedIdentity)
+            std::printf("Refused it rather than proceeding. Expected bcdDevice 0x%04x and \"%s\".\n",
+                        egg::kBootloaderRelease, egg::kBootloaderProduct);
+        if (o.result == EntryResult::NoReenumeration)
+            std::printf("Nothing was erased and nothing was written. If the mouse still\n"
+                        "works normally, the command simply did not take; run it again.\n");
+        std::printf("\n%s\n", kRecoveryProcedure);
+        return 1;
+    }
+
+    std::printf("\nCONFIRMED: in the bootloader, all three identity fields matched.\n"
+                "Nothing was sent to it and nothing will be.\n"
+                "\n"
+                "TO GET OUT: unplug the mouse, wait a moment, plug it back in.\n"
+                "Then `egg-config devices` should show PID 0x1978 (application).\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     std::string vaultPath = defaultVaultPath();
     std::string args[3];
+    bool yes = false, verbose = false;
     int n = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--vault" && i + 1 < argc) { vaultPath = argv[++i]; continue; }
+        if (a == "--yes") { yes = true; continue; }
+        if (a == "-v" || a == "--verbose") { verbose = true; continue; }
         if (n < 3) args[n++] = a;
     }
 
     if (n < 1) return usage();
     const std::string verb = args[0];
     if (verb == "help" || verb == "--help" || verb == "-h") return usage();
+
+    // Before the image is loaded, because this rung has no image and must not
+    // acquire one by accident.
+    if (verb == "enter-bootloader") return cmdEnterBootloader(yes, verbose);
+
     if (n < 2) return usage();
     const std::string exePath = args[1];
 
