@@ -94,9 +94,32 @@ for rid, _lang, off, size, _d in fwfile.fwfiles(sys.argv[1]):
     if rid == 140:
         open(sys.argv[2], 'wb').write(raw[off:off+size])
 PY
+# ASSERTED ON THE GATE, NOT ON THE EXIT CODE -- fixed 2026-09-05.
+#
+# This used to require rc=2, "the plan printed, waiting for --confirm". That is
+# only reachable when a mouse is attached in exactly one mode, so this file's
+# own header promise -- "every case below runs with no mouse attached" -- was
+# false for its single positive case, and the suite flipped to FAIL the moment
+# the owner unplugged the mouse. A gate that depends on hardware is not a gate.
+#
+# What this case is about is whether the BACKUP was accepted. So it checks that:
+# the backup block is printed and no refusal naming the backup appears. Both
+# hold whether or not a device is present, because the host-side gates run
+# before enumeration -- which is the property §4.2 actually requires.
 out=$(run --backup "$TMP/good.bin"); rc=$?
-[ "$rc" = 2 ]
-check "a valid 66560-byte image IS accepted (rc=$rc, want 2)" $?
+printf '%s' "$out" | grep -q "^backup " \
+  && printf '%s' "$out" | grep -qi "sha256" \
+  && ! printf '%s' "$out" | grep -qiE "REFUSED.*backup|no backup file was named|does not read back|not a plausible"
+check "a valid 66560-byte image IS accepted by the backup gate (rc=$rc)" $?
+
+# And the gate really does run before the device is touched, which is the whole
+# reason a refusal is cheap: it costs an error message, not a latched mouse.
+printf '%s' "$out" | grep -q "^backup " && {
+  b=$(printf '%s' "$out" | grep -n "^backup "        | head -1 | cut -d: -f1)
+  q=$(printf '%s' "$out" | grep -n "^preflight"      | head -1 | cut -d: -f1)
+  [ -z "$q" ] || [ "$b" -lt "$q" ]
+}
+check "...and the backup is checked BEFORE the device is enumerated" $?
 printf '%s' "$out" | grep -q "sha256"
 check "...and its sha256 is printed, so the user can compare runs" $?
 
