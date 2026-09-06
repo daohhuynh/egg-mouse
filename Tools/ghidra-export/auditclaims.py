@@ -13,11 +13,38 @@ than mid-instruction, or that they exist at all.
 WHAT THIS DECIDES, AND WHAT IT CANNOT (CLAUDE.md 1.2a: state the blind spots).
 
   DECIDED mechanically, from raw bytes, reproducible with objdump and grep:
-    - a [D] claim cites no address at all                   -> rule violation
-    - a cited address is not mapped in the named binary     -> the address is wrong
-    - it is unmapped there but real in another binary       -> mis-attributed
+    - a [D] claim carries no CITATION OF ANY FORM           -> rule violation
+    - a cited address is not mapped in any binary           -> the address is wrong
+    - it is unmapped in the named binary, real in another,
+      and inside the named image's own span                 -> mis-attributed
+    - it is outside the named image entirely                -> a constant, or a
+      wrong binary name; a script cannot tell, so this is REPORTED AND NOT
+      COUNTED as an error. Every instance found so far is a whole-image
+      checksum or a Windows style dword.
     - it is in .text but not an instruction boundary        -> suspect
     - a claim's only source is the quarantined log (1.1a)   -> void
+
+  WHAT COUNTS AS A CITATION, which is the part that changed on 2026-09-06.
+  CLAUDE.md 1.2 said "[D] ... Cite the address", which is written for a claim
+  about code and under-specifies every other kind. Reporting a resource id or a
+  SHA-256 as "no citation" was not merely noisy: the obvious way to silence this
+  script would have been to bolt a plausible address onto a claim that never
+  rested on one, which is worse than no script. The forms, all checkable by
+  someone else, and 1.2 now lists the same five:
+    - a virtual address in a named binary
+    - a resource: RT_DIALOG 102, FWFILE 140, DIALOG 137, a .rsrc RVA
+    - a file offset, or a hash of a named artefact
+    - a reproducible command on a named binary (rabin2, blobcensus.py, ...)
+    - a verbatim quoted literal -- VERIFIED, in both encodings, against the
+      binary the block names. A fabricated quote does not buy a pass.
+    - a cross-reference to a section of a notes file, resolved ONE LEVEL:
+      the section must exist and must itself carry an address. A chain of
+      deferrals is how a guess becomes a derivation by being restated.
+
+  Tests/test_auditclaims.py plants a broken instance of every form above and
+  requires this script to catch it (6.2: a harness that cannot produce a bad
+  result is not evidence). The uncited count went 87 -> 0 on the day those forms
+  were added, and that test is the only reason the zero means anything.
 
   NOT DECIDED. Whether the instruction at the address MEANS what the note says.
   That is a reading, and a script cannot check a reading. This narrows the set a
@@ -62,6 +89,142 @@ BINARIES = {
     "cfg100": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.00.exe",
     "xm1r":   "XM1r_Flash_Upgrade_1.9.46.exe",
 }
+
+# ---------------------------------------------------------------------------
+# The citation forms that are NOT addresses
+# ---------------------------------------------------------------------------
+# Added 2026-09-06, after triaging the 87 "uncited" claims this script produced
+# and finding that most of them were cited perfectly well -- to a RESOURCE, a
+# FILE OFFSET, a HASH, or a reproducible command, none of which is an address.
+#
+# CLAUDE.md 1.2 said "[D] ... Cite the address", which is written for a claim
+# about code and under-specifies every other kind. Reporting those as rule
+# violations was not merely noisy: the obvious way to silence this script would
+# have been to bolt a plausible address onto a claim that never rested on one,
+# which is a worse outcome than no script at all. 1.2 now names the forms; this
+# is the same list, and the two must stay in agreement.
+#
+# Every form here is CHECKABLE BY SOMEONE ELSE, which is the actual requirement.
+# A hash is stronger evidence than an address: it verifies, where an address
+# only points.
+RESOURCE = re.compile(
+    r"\bRT_[A-Z]+\b"                       # RT_DIALOG, RT_MENU, RT_STRING
+    r"|\bDIALOG\s+\d+"                     # DIALOG 137
+    r"|\bFWFILE\s*/?\s*\d+"               # FWFILE 140, FWFILE/140
+    r"|\.rsrc\b"
+    r"|\bIDD[_ ]?0?x?[0-9A-Fa-f]+\b")
+HASH = re.compile(r"\b[0-9a-f]{16,64}\b|\bSHA-?256\b", re.I)
+# A command anyone can re-run against a named binary. The script name IS the
+# citation -- these all live in Tools/ and are in git.
+TOOLCMD = re.compile(
+    r"\brabin2\b|\bobjdump\b|\breadpe\b|\bstrings\b|\bxxd\b"
+    r"|\b(?:dis|coverage|classify|recmap|rsrc|dlgdump|dlgref|litscan|"
+    r"calls|resource_id|ingest|ingest_config|fieldmap|score|fwfile|"
+    r"blobcensus|auditclaims|reconcile_scores|pidwatch|bootwatch)\.(?:py|sh)\b")
+FILEOFF = re.compile(r"\bfile offset\s+`?0x[0-9a-fA-F]+", re.I)
+
+# A hex literal BELOW the VA window that is a valid offset into the named
+# binary. gui-surface.md cites string runs by file offset (`0x1573e8`), which is
+# exactly as checkable as a VA and was being reported as no citation at all.
+def file_offset_in(tag, block):
+    if tag not in BINARIES:
+        return False
+    try:
+        size = os.path.getsize(os.path.join(ROOT, BINARIES[tag]))
+    except OSError:
+        return False
+    lo, _ = va_window()
+    for m in re.finditer(r"0x0*([0-9a-fA-F]{4,8})\b", block):
+        v = int(m.group(1), 16)
+        if 0x1000 <= v < size and v < lo:
+            return True
+    return False
+
+
+# A verbatim literal quoted out of the binary. This is the STRONGEST citation
+# form in the whole list, and the only one this script can actually VERIFY
+# rather than merely recognise: it goes and finds the bytes. `0.1.1 The 1.10
+# build's project identity is a different mouse` cites nothing but the PDB path
+# it quotes -- and that path either is in fw110 or it is not.
+_BLOB = {}
+
+
+def blob(tag):
+    if tag not in _BLOB:
+        try:
+            with open(os.path.join(ROOT, BINARIES[tag]), "rb") as f:
+                _BLOB[tag] = f.read()
+        except (OSError, KeyError):
+            _BLOB[tag] = b""
+    return _BLOB[tag]
+
+
+def quoted_literal_in(tag, block):
+    """A quoted string of 12+ chars that really occurs in the named binary.
+
+    Both encodings, because CLAUDE.md 1.2a's own example of a bad scan is one
+    that looked in only one of them.
+    """
+    b = blob(tag)
+    if not b:
+        return False
+    cands = re.findall(r"`([^`\n]{12,120})`", block)
+    for fence in re.findall(r"```[^\n]*\n(.*?)```", block, re.S):
+        cands += [l.strip() for l in fence.splitlines() if len(l.strip()) >= 12]
+    for c in cands:
+        c = c.strip().strip("*_")
+        if len(c) < 12 or c.startswith("0x"):
+            continue
+        try:
+            raw = c.encode("latin-1")
+        except UnicodeEncodeError:
+            continue
+        if raw in b or c.encode("utf-16-le") in b:
+            return True
+    return False
+
+
+# A cross-reference to a section of another notes file (or this one). Resolved
+# ONE LEVEL, never recursively: the named section must exist and must itself
+# carry an address. A reference that dangles, or that points at a section as
+# uncited as the claim, is not a citation -- it is a deferral, and a chain of
+# deferrals is how a [G] becomes a [D] by being restated.
+XREF = re.compile(r"(?:`?([a-z][a-z0-9-]*\.md)`?[^.\n]{0,40}?)?"
+                  r"§\s*([0-9]+(?:\.[0-9a-z]+)*)")
+
+
+def xref_resolves(path, block):
+    for m in XREF.finditer(block):
+        fname, sec = m.group(1), m.group(2)
+        target = os.path.join(NOTES, fname) if fname else path
+        if not os.path.exists(target):
+            continue
+        try:
+            lines = open(target, encoding="utf-8").read().splitlines()
+        except OSError:
+            continue
+        for i, l in enumerate(lines):
+            lv = level(l)
+            if not lv:
+                continue
+            if not re.match(r"^#+\s+%s[\s.:]" % re.escape(sec), l):
+                continue
+            nxt = next((j for j in range(i + 1, len(lines))
+                        if 0 < level(lines[j]) <= lv), len(lines))
+            body = "\n".join(lines[i:nxt])
+            if addrs_in(body):
+                return True
+    return False
+
+
+def cited_otherwise(tag, block, path=None):
+    """True if the block carries a checkable citation that is not an address."""
+    return bool(RESOURCE.search(block) or HASH.search(block)
+                or TOOLCMD.search(block) or FILEOFF.search(block)
+                or file_offset_in(tag, block)
+                or quoted_literal_in(tag, block)
+                or (path and xref_resolves(path, block)))
+
 
 # Prose spells the versions several ways. Longest/most specific first.
 PROSE_TAG = [
@@ -175,6 +338,24 @@ def va_window():
     return lo, hi
 
 
+def span(tag):
+    """(lowest VA, highest VA) of one image, for judging plausibility."""
+    t = sect_table(tag)
+    return min(x[0] for x in t), max(x[1] for x in t)
+
+
+# `0x401000`-`0x52c65f` is a RANGE, and its right-hand end is exclusive: one
+# past the last mapped byte, so it is unmapped by construction and always will
+# be. Two of the ten remaining "mis-attributed" results were that, in notes
+# whose whole subject is section boundaries.
+RANGE_END = re.compile(
+    r"0x[0-9a-fA-F]{4,8}`?\s*[-\u2013\u2014]+\s*`?0x0*([0-9a-fA-F]{4,8})")
+
+
+def range_ends(text):
+    return {int(m.group(1), 16) for m in RANGE_END.finditer(text)}
+
+
 def classify(tag, addr):
     """'code', 'code-misaligned', '<section>', or None if unmapped."""
     for lo, hi, name, code in sect_table(tag):
@@ -195,32 +376,83 @@ def addrs_in(text):
     return out
 
 
-def context_tag(block, path):
-    for rx, f in PROSE_TAG:
-        m = rx.search(block)
-        if m:
-            return f(m), "prose"
+def context_tag(block, path, at=None):
+    """The binary a block of prose is talking about.
+
+    THE NEAREST NAME WINS, not the first one. A paragraph that reads "cfg107's
+    0x00404830 copies ... cfg100's 0x004050e0 is the mirror image" is about
+    cfg100 by the time it reaches the disassembly under it, and taking the
+    first match attributed six correct cfg100 addresses to cfg107 (2026-09-06).
+    Prose narrows as it goes down; so does this.
+    """
+    hits = sorted((m.start(), f(m))
+                  for rx, f in PROSE_TAG for m in rx.finditer(block))
+    if hits:
+        # Nearest name BEFORE the address if we know where the address is.
+        # "cfg100 0x401000-0x57f957, cfg101 0x401000-0x52c65f, cfg104 ...,
+        # cfg107 ..." puts four names and four ranges on two lines; nearest
+        # -anywhere picked cfg107 for cfg101's range, which is a name that
+        # comes AFTER the address it was applied to.
+        before = [h for h in hits if at is None or h[0] < at]
+        return (before[-1][1] if before else hits[-1][1]), "prose"
     d = FILE_DEFAULT.get(os.path.basename(path))
     return (d, "file default") if d else (None, "none")
+
+
+def level(line):
+    """Markdown heading depth, or 0 for a non-heading."""
+    m = re.match(r"^(#+)\s", line)
+    return len(m.group(1)) if m else 0
 
 
 def claims(path):
     """(line_no, line, block) for every line carrying [D].
 
-    A heading's block runs to the next heading -- a section titled "... [D]" is
-    cited by the lines beneath it, not by its own title.
+    A heading's block runs to the next heading OF THE SAME OR HIGHER LEVEL --
+    a section titled "... [D]" is cited by everything beneath it, including its
+    own subsections.
+
+    THIS USED TO STOP AT THE NEXT HEADING OF ANY LEVEL, and that alone
+    manufactured most of the "uncited" list: `## 7. The complete command set
+    [D]` is immediately followed by `### 7.1`, so its block was four lines long
+    and the forty addresses under it were invisible. Fixed 2026-09-06 while
+    triaging that list; the count went 87 -> the residue below, and the residue
+    is the part that was ever worth reading.
     """
     lines = open(path, encoding="utf-8").read().splitlines()
-    heads = [i for i, l in enumerate(lines) if l.startswith("#")]
     for i, l in enumerate(lines):
         if "[D]" not in l:
             continue
-        if l.startswith("#"):
-            nxt = next((h for h in heads if h > i), len(lines))
+        lv = level(l)
+        if lv:
+            nxt = next((j for j in range(i + 1, len(lines))
+                        if 0 < level(lines[j]) <= lv), len(lines))
             yield i + 1, l, "\n".join(lines[i:nxt])
         else:
-            # A table row's citation is often the row above it.
-            yield i + 1, l, "\n".join(lines[max(0, i - 3):i + 6])
+            # A claim in prose is cited by ITS SECTION, which is how a reader
+            # actually finds the evidence: "Two HID feature report IDs,
+            # distinguished by length [D]" is followed eight lines later by
+            # `### FUN_004012a0 @ 0x004012a0`, and nobody reading it would call
+            # that uncited. The old +-3/+6 window called it uncited, which is
+            # most of what was left on the list after the heading fix.
+            #
+            # THIS IS DELIBERATELY THE WEAKER TEST, and the residue is what
+            # makes it worth running: a [D] claim whose ENTIRE SECTION contains
+            # no address anywhere is a real §1.2 violation and there is nothing
+            # to argue about.
+            start = max((j for j in range(i, -1, -1) if level(lines[j])),
+                        default=0)
+            lv = level(lines[start]) or 1
+            nxt = next((j for j in range(start + 1, len(lines))
+                        if 0 < level(lines[j]) <= lv), len(lines))
+            # From the SECTION HEADING, not from i-3. The heading itself often
+            # carries the address -- "### FUN_00401330 @ 0x00401330" -- and
+            # starting three lines above the claim skipped it, which is how
+            # "Status byte values seen: 0x01 = ready, 0x04 = busy [D]" got
+            # reported as uncited while sitting inside the section named after
+            # the function that reads those exact bytes.
+            yield i + 1, l, "\n".join(lines[min(start, max(0, i - 3)):
+                                             max(nxt, i + 6)])
 
 
 def main():
@@ -232,7 +464,7 @@ def main():
 
     strict = "--strict" in sys.argv
     uncited, logsourced = [], []
-    unmapped, misattr, misaligned = [], [], []
+    unmapped, misattr, misaligned, outside = [], [], [], []
     seen = set()
     nclaims = 0
 
@@ -244,7 +476,8 @@ def main():
         for lineno, line, block in claims(path):
             nclaims += 1
             where = "%s:%d" % (name, lineno)
-            if not addrs_in(block):
+            btag, _ = context_tag(block, path)
+            if not addrs_in(block) and not cited_otherwise(btag, block, path):
                 uncited.append((where, line.strip()[:100]))
             if LOGTXT.search(block) and not re.search(
                     r"1\.1a|quarantin|void|OFF LIMITS|not deleted", block, re.I):
@@ -256,8 +489,40 @@ def main():
         lines = open(path, encoding="utf-8").read().splitlines()
         for i, l in enumerate(lines):
             for a in addrs_in(l):
-                tag, how = context_tag(
-                    "\n".join(lines[max(0, i - 12):i + 3]), path)
+                # THE LINE FIRST, then the surrounding window. In a
+                # cross-binary comparison table every row names a different
+                # binary -- `| cfg100 | 0x004038a0 | 0x5dcb70 |` -- and a
+                # 15-line window picks whichever was named first, so every row
+                # but one was reported as citing an address that is unmapped in
+                # a binary the row never mentions. That was 24 of the 24
+                # "mis-attributed" results, i.e. the whole category was an
+                # artefact of reading the wrong scope (2026-09-06).
+                # Three scopes, narrowest first, each accepted only if it
+                # actually maps the address. The LINE, then the PARAGRAPH (back
+                # to the previous blank line), then a 15-line window.
+                #
+                # The paragraph step is not cosmetic: `0x5814a0` sits in a
+                # bullet whose FIRST line reads "**cfg100: 47 hits.**" and
+                # whose third line holds the address. Line scope misses it,
+                # window scope picks up the cfg107 bullet above it, and the
+                # tool reported a correct cfg100 address as unmapped in cfg107.
+                para = next((j for j in range(i, max(0, i - 12), -1)
+                             if not lines[j].strip()), max(0, i - 12))
+                col = l.lower().find("%x" % a)
+                if col < 0:
+                    col = l.lower().find("%06x" % a)
+                pre = "\n".join(lines[para:i])
+                scopes = [(l, col if col >= 0 else None),
+                          (pre + "\n" + l, None if col < 0 else len(pre) + 1 + col),
+                          ("\n".join(lines[max(0, i - 12):i + 3]), None)]
+                tag, how = None, "none"
+                for sc, at in scopes:
+                    t, h = context_tag(sc, path, at)
+                    if t and classify(t, a) is not None:
+                        tag, how = t, h
+                        break
+                    if t and not tag:
+                        tag, how = t, h
                 if not tag or (name, a, tag) in seen:
                     continue
                 seen.add((name, a, tag))
@@ -268,13 +533,31 @@ def main():
                     misaligned.append(("%s:%d" % (name, i + 1), tag, a,
                                        l.strip()[:70]))
                 elif k is None:
+                    # An exclusive range END is unmapped by construction --
+                    # one past the last byte -- and always will be. Judge the
+                    # last byte instead of complaining forever.
+                    if a in range_ends(l) and classify(tag, a - 1):
+                        continue
+                    lo, hi = span(tag)
                     other = [t for t in BINARIES if classify(t, a)]
-                    if other:
+                    if not other:
+                        unmapped.append(("%s:%d" % (name, i + 1), tag, a,
+                                         l.strip()[:70]))
+                    elif lo <= a < hi:
+                        # Inside the named image's own span but in no section:
+                        # it really looks like an address there and is not one.
+                        # THIS is the interesting case.
                         misattr.append(("%s:%d" % (name, i + 1), tag, how, a,
                                         other, l.strip()[:60]))
                     else:
-                        unmapped.append(("%s:%d" % (name, i + 1), tag, a,
-                                         l.strip()[:70]))
+                        # Outside the named image entirely. It is a constant
+                        # that happens to fall inside a LARGER image's range --
+                        # every one found so far is a whole-image checksum or a
+                        # Windows style dword -- or the note names the wrong
+                        # binary. A script cannot tell those apart, so this is
+                        # its own bucket and is NOT reported as an error.
+                        outside.append(("%s:%d" % (name, i + 1), tag, a,
+                                        other, l.strip()[:60]))
                 # a data section is a legitimate citation; nothing to report
 
     def show(title, rows, fmt):
@@ -297,6 +580,10 @@ def main():
     show("MIS-ATTRIBUTED: unmapped in the named binary, real in another", misattr,
          lambda r: "%-40s says %-7s (%s) 0x%08x -> %s | %s" %
                    (r[0], r[1], r[2], r[3], ",".join(r[4]), r[5]))
+    show("OUTSIDE THE NAMED IMAGE: a constant, or the wrong binary name. "
+         "NOT an error", outside,
+         lambda r: "%-40s %-7s 0x%08x  only in %s | %s" %
+                   (r[0], r[1], r[2], ",".join(r[3]), r[4]))
     show("SUSPECT (low precision -- see boundaries()): not decoded by the sweep",
          misaligned,
          lambda r: "%-40s %-7s 0x%08x  %s" % (r[0], r[1], r[2], r[3]))
@@ -304,9 +591,15 @@ def main():
          uncited, lambda r: "%-40s %s" % (r[0], r[1]))
 
     hard = len(unmapped) + len(logsourced)
-    print("\nhard: %d   mis-attributed: %d   suspect: %d   uncited: %d"
-          % (hard, len(misattr), len(misaligned), len(uncited)))
-    return 1 if (strict and (hard or misattr)) else 0
+    print("\nhard: %d   mis-attributed: %d   outside-image: %d   suspect: %d"
+          "   uncited: %d"
+          % (hard, len(misattr), len(outside), len(misaligned), len(uncited)))
+    # --strict fails on UNCITED too. It did not, which made the flag useless
+    # for the one category §1.2 actually legislates. The outside-image bucket
+    # is excluded on purpose: a script cannot tell a constant from a wrong
+    # binary name, and failing a build on a judgement call trains people to
+    # pass --no-strict.
+    return 1 if (strict and (hard or misattr or uncited)) else 0
 
 
 if __name__ == "__main__":

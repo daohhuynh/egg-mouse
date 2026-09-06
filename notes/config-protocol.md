@@ -1899,7 +1899,12 @@ standard USB HID encoding. §7.12.**
 cfg107 writes **only bits 0 and 4**. Bits 1,2,3,5,6,7 are never set or cleared
 by the config tool, so they are §1.3 read-modify-write territory: preserve them.
 Bit 4's control is `Motion Jitter Filter`, which **the owner confirmed is not visible
-on the Advanced Sensor page** (2026-09-05, `log.txt` 03 line 2) — so bit 4 is
+on the Advanced Sensor page** — *"motion jitter filter and sensor glass mode are
+not seen anywhere on advanced sensor"*, 2026-09-05, scored as
+`cfg-advanced-sensor-hidden-controls` in `prediction-scores.md`. (**Re-anchored
+2026-09-06.** This cited `./log.txt` 03 line 2, which is quarantined by
+CLAUDE.md §1.1a. The observation itself is the owner's quoted words and stands; only
+the pointer needed replacing.) So bit 4 is
 unreachable from the shipped UI and no capture can attribute it. Note this does
 not make bit 4 *unwritten*: `FUN_00411ab0` runs on every APPLY and clears the
 bit from a hidden, unchecked box. Whatever the device reports in bit 4, the
@@ -1991,8 +1996,16 @@ The displacements would have to be `f4 04` and `88 0e` to match the pattern.
 
 Two consequences. Ours: §4.2 says mirror the vendor's *verification*; it does
 not say mirror the vendor's arithmetic, and `egg-config` must compute stage 4's
-flag from stage 4. Theirs: this is testable from a capture, and `log.txt` 02
-lines 18d–18f now do exactly that.
+flag from stage 4. Theirs: this is testable from a capture.
+
+> ~~and `log.txt` 02 lines 18d–18f now do exactly that.~~ **Struck 2026-09-06,
+> twice over.** That file is quarantined (§1.1a), and the owner has separately
+> confirmed those three lines were **never performed**. So this prediction is
+> UNTESTED, not tested-and-passed, and re-reading the existing captures cannot
+> settle it — none of them contains the edit. It needs a new capture, or a run
+> against the device with our own tool (config writes are reversible and factory
+> reset scores 21/21). It is the only thing lost with the log that an action can
+> recover.
 
 ## 7.9 The Advanced Sensor page, end to end  [D]
 
@@ -2071,7 +2084,9 @@ that range, so the claim is "not read by dialog 140's class by any single-step
 displacement", not "does not exist".
 
 That matches the other half of the evidence: the owner confirmed on 2026-09-05 that
-Sensor Glass Mode is **not visible** on the page (`log.txt` 03 line 4). A
+Sensor Glass Mode is **not visible** on the page — same sentence as above,
+scored as `cfg-advanced-sensor-hidden-controls` in `prediction-scores.md`
+(**re-anchored 2026-09-06 off `./log.txt` 03 line 4**, §1.1a). A
 control that is bound, hidden, and never read is the same shape as the X/Y
 Settings checkbox (`gui-surface.md` §6) — host-side only, reaching no byte.
 
@@ -2083,8 +2098,13 @@ when unchecked. Hidden does not imply inert.
 
 Everything derived from captures so far rests on an assumption nobody wrote
 down: that the config tool talks to the mouse **only** when APPLY is pressed.
-`log.txt`'s core rule — "every numbered line = exactly one APPLY" — is that
-assumption in procedural form. It is false.
+The capture procedure's core rule — "every numbered line = exactly one APPLY" —
+is that assumption in procedural form. It is false.
+
+*(That rule lived in `./log.txt`, quarantined 2026-09-06 under CLAUDE.md §1.1a.
+Nothing in this section rests on it: the finding below is `[D]` from cfg107 and
+`[O]` from the capture bytes. The rule is named here only as the thing being
+refuted.)*
 
 The owner, 2026-09-05: *"when you change a CPI level on the software it isnt a real
 change so you cant apply anything, but it changes the CPI level currently on the
@@ -2129,9 +2149,12 @@ the expensive way. It was not — but the claim was only ever checked against
 functions reachable from APPLY, and this path is not one of them.
 
 ### What it changes
-1. **`log.txt` gains section 06**, four radio-button clicks with no APPLY, so the
-   bypass gets an isolated capture instead of arriving as noise at the end of a
-   long section. `02-basic` lines 34–37 are marked SKIPPED and moved there.
+1. ~~**`log.txt` gains section 06**, four radio-button clicks with no APPLY, so
+   the bypass gets an isolated capture instead of arriving as noise at the end
+   of a long section.~~ **Moot as of 2026-09-06:** the log is quarantined
+   (§1.1a) and no section 06 capture was ever taken. The bypass is still real
+   and still `[D]`; what is missing is an isolated capture of it, and that needs
+   a new capture run.
 2. **`fieldmap.py` must not assume a diff implies an APPLY.** It attributes by
    log line, not by APPLY count, so it is already correct — but the reasoning
    was accidental and is now deliberate.
@@ -2187,9 +2210,12 @@ which is exactly what the owner reported from the page on 2026-09-05.
 ### Record `0x72` is the acknowledgement, and it DOES reach the mouse
 Object `0x08` ← `setne(BM_GETCHECK(IDC 1064))` at `0x4061bd`/`0x4061c2`,
 serialised at `0x4045d6` to **record `0x72`** — the last byte of the record and,
-until now, the only one with no attribution at all. `log.txt` 04 line 2 told the owner
-that if no record byte moved, the acknowledgement lived host-side in the
-registry. **That guess was wrong and the line is corrected**: it has a byte.
+until now, the only one with no attribution at all. A line in the (now
+quarantined, §1.1a) `./log.txt` told the owner that if no record byte moved, the
+acknowledgement lived host-side in the registry. **That guess was wrong**, and
+the correction rests on the two addresses above, not on the log: object `0x08`
+is written at `0x4061bd`/`0x4061c2` and serialised at `0x4045d6`. It has a
+byte.
 
 ### The multiclick filter and the SPDT mode are ONE byte
 The two coupled fields do not merely interact in the UI; they are literally the
@@ -2332,10 +2358,16 @@ applying that rule gives the whole menu:
 **Committed prediction: the top-level groups are, in order, `MOUSE`,
 `KEYBOARD KEY`, `CPI`, `MEDIA`, `DISABLE` — five of them.**
 
-`log.txt`'s ANSWERS block asks the owner for exactly this list and **is deliberately
-not being told the answer** (§6.2: never state the expected answer in the
-prompt). He also already screenshotted the dropdown and every submenu, so this
-is checkable against material that exists, by someone who was not primed.
+The capture procedure asked the owner for exactly this list and **deliberately did not
+tell him the answer** (§6.2: never state the expected answer in the prompt). He
+had also already screenshotted the dropdown and every submenu, so it was
+checkable against material that existed, by someone who was not primed.
+
+**SCORED 4/4 EXACT, 2026-09-06**, against
+`windows-run/screenshots/button-mapping{,-mouse,-CPI,-media}.png` — see
+`prediction-scores.md` §7.13. The screenshots are the evidence; the request
+lived in `./log.txt`, which is quarantined (§1.1a) and which the score does not
+touch.
 
 **REFUTED IF** the menu shows a group not in this list, omits one that is, or
 orders them differently. Note the group *order* is the weakest part of the claim
@@ -2343,9 +2375,10 @@ orders them differently. Note the group *order* is the weakest part of the claim
 usually but not necessarily the order they are added to the menu. If only the
 order is wrong, that is a partial refutation and the membership claim survives.
 
-This also fixes the guesses in `log.txt` section 05, which named the groups
-`MOUSE`, `MEDIA`, `CPI` and `KEYBOARD` from a rough strings pass. Four of those
-five are right; the fifth is `KEYBOARD KEY`, not `KEYBOARD`.
+It also supersedes an earlier rough-strings guess (in the now-quarantined
+`./log.txt`, §1.1a) that named the groups `MOUSE`, `MEDIA`, `CPI` and
+`KEYBOARD`. Four of the five are right; the fifth is `KEYBOARD KEY`, not
+`KEYBOARD`.
 
 ### The LED page names THREE zones, and the record block has FOUR entries
 `0x1925e0`–`0x192788` holds the unreachable LED page's controls: `LED effect`,
@@ -2552,6 +2585,8 @@ wrong."** Taken at face value. `./log.txt` is quarantined as evidence — see
 config findings that most visibly rested on it.
 
 ### Sensor angle is two's complement, range −127…+127  — `[D]`, not `[O]`
+*(§7.16: re-derived from cfg107 after `./log.txt` was quarantined, §1.1a. The
+log is named below only to say what it can no longer support.)*
 `0x411f62`–`0x411f8a`:
 
     411f62  cmpl $-0x7f, %eax               ; SIGNED compare against -127
@@ -2579,6 +2614,7 @@ complement and `211` unsigned, and **nothing in the capture distinguishes them**
 The binary does.
 
 ### The "Disable LED on Lift-Off" inversion  — `[D]`, and never depended on the log
+*(§7.16, same quarantine, §1.1a.)*
 `0x40ecc6`–`0x40ecd7`:
 
     40ecc6  pushl $0xf0                     ; BM_GETCHECK

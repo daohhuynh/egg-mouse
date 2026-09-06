@@ -103,10 +103,25 @@ if(Python3_FOUND)
   # Plain scripts that print their own PASS/FAIL and exit non-zero on failure.
   # They are NOT unittest modules, which is why `unittest discover` reported
   # them as import errors -- a loader complaint, never a test result.
-  foreach(t fieldmap reconcile score)
+  foreach(t auditclaims fieldmap reconcile score)
     add_test(NAME ${t} COMMAND ${Python3_EXECUTABLE} Tests/test_${t}.py)
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endforeach()
+
+  # The audits themselves, not just the tests OF the audits. Both reached zero
+  # on 2026-09-06 and both stay there only if something checks: auditclaims
+  # --strict fails on an uncited [D] claim, a wrong address or a citation to
+  # the quarantined log, and reconcile_scores fails on a tally that drifts from
+  # the entries under it. A gate that is not run is a gate that is open.
+  add_test(NAME audit_claims_strict
+           COMMAND ${Python3_EXECUTABLE} Tools/ghidra-export/auditclaims.py --strict)
+  set_tests_properties(audit_claims_strict PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 600)
+
+  add_test(NAME blob_census
+           COMMAND ${Python3_EXECUTABLE} Tools/pe/blobcensus.py --check)
+  set_tests_properties(blob_census PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
 
 # The SwiftUI front end's command builders, driven against the real CLIs.

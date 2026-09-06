@@ -2079,14 +2079,53 @@ block  64         distinct                                  real content
 `FWFILE` 133, 135, 137, 140, 142 and 143 all give `distinct = 31` with the same
 35× run at the same indices [D].
 
+**REPRODUCE, 2026-09-06.** This section's numbers were computed once and written
+down as prose, cited to nothing. They are a command now:
+
+```
+python3 Tools/pe/blobcensus.py --check
+```
+
+It recomputes every claim in §8 across all four updaters — 21 resources — and
+exits non-zero if any fails. It holds: 65 blocks, 31 distinct, one 35-long
+**contiguous** run at indices `[29..63]` in every one of the 21, no 1024-byte
+block shared between any two resource *ids*, and every id sharing blocks across
+its own releases.
+
+**And it produced a finding §8 did not have.** Of the six resource names, only
+**140 and 142 ever change**. `133`, `135` and `137` are byte-identical in all
+four updaters across the entire 1.04 → 1.10 history:
+
+| id | 1.04 | 1.06 | 1.07 | 1.10 |
+| --- | --- | --- | --- | --- |
+| 133 | `09ba5297…` | `09ba5297…` | `09ba5297…` | `09ba5297…` |
+| 135 | `4fb2c174…` | `4fb2c174…` | `4fb2c174…` | `4fb2c174…` |
+| 137 | `9cf31ca8…` | `9cf31ca8…` | `9cf31ca8…` | `9cf31ca8…` |
+| 140 | `41d5397e…` | `9f01d732…` | `3922b141…` | `8148ebe9…` |
+| 142 | `b09b0ac0…` | `defb2243…` | `05c051d9…` | `42660cc0…` |
+| 143 | — | — | — | `13c13a62…` |
+
+That sharpens §8.5a's wrong-image guard rather than softening it. 140 and 142
+are the only two that track the release history, which is exactly the pattern
+that invites "the updater must use both" — and `resource_id.py` recovers `140`
+and nothing else from the vendor's own `FindResourceW` call site in all four
+binaries. Three resources that never changed in six years of releases are not
+this mouse's firmware.
+
 ### The encryption is deterministic and position-independent [D]
+*(Cite: `python3 Tools/pe/blobcensus.py --check`, which asserts the 35-long run
+is CONTIGUOUS and at the same indices in all 21 resources — the contiguity is
+what rules out chaining, and it was asserted here in prose before anything
+checked it.)*
+
 A single 1024-byte value occupying 35 different block positions produces
 **identical ciphertext at every one of them**. So whatever transform produced
 these blobs has no IV, no chaining and no dependence on block index or address:
 the same plaintext block always yields the same ciphertext block. That is
 ECB-shaped, at a granularity no coarser than 1024 bytes.
 
-Confirmed independently by the version diffs of `FWFILE` 140 [D]:
+Confirmed independently by the version diffs of `FWFILE` 140 [D]
+(`Tools/pe/fwfile.py --extract 140 <exe> <out>` for each pair, then `cmp -l`):
 
 | pair | differing bytes | shape |
 | --- | --- | --- |
@@ -2097,6 +2136,9 @@ A change confined to four blocks leaving all others bit-identical is only
 possible without chaining.
 
 ### The key appears to be per-image [D]
+*(`blobcensus.py --check` recomputes this one directly: it counts the resource
+id pairs sharing any 1024-byte block, and §8 says that count is zero.)*
+
 **No 1024-byte block is shared between any two of the six `FWFILE` resources** —
 not even the filler block, which all six have 35 copies of. If the filler
 plaintext is the same in all six, which its identical position and run length

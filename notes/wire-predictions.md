@@ -31,7 +31,7 @@ Fault mix of the 86 rejections:
 | fault | n | what it means |
 | --- | --- | --- |
 | `citation-wrong` | 33 | the cited address does not say what was claimed |
-| `mistagged` | 21 | claimed [D] or [O] where the evidence is inference |
+| `mistagged` | 21 | claimed *derived* or *observed* where the evidence is inference |
 | `contradicts-notes` | 18 | disagrees with a committed finding without saying so |
 | `not-falsifiable` | 11 | `refuted_if` names no observation a capture could make |
 | `vague` | 2 | no numbers where the binary supplies numbers |
@@ -1215,7 +1215,7 @@ entries deserves suspicion, not celebration — see the fault mix above.
 **In the block phase the 1041-byte SET_REPORTs alternate between high-entropy and near-all-zero, which is how the two 0xA0 commands are told apart at a glance in the trace.**
 
 - **Expect:** Odd-numbered 1041-byte SETs (the A0 06 writes) carry 1024 bytes of high-entropy ciphertext (~7.94 bits/byte). Even-numbered ones (the A0 07 read-backs) carry 1038 consecutive 0x00 bytes after the 3-byte header. Additionally, blocks 0x51 through 0x73 — 35 consecutive blocks — carry byte-identical 1024-byte payloads beginning 7e 84 7e 92 c9 78 92 d9 b9 2e 68 5c 90 0a 46 65 and ending fc b6 44 cf 50 8a 10 9b, all with checksum 0x0088. Only 31 of the 65 blocks are distinct.
-- **Cite:** .analysis/blobs/fw110-140.bin block census; notes/updater-protocol.md §8.5
+- **Cite:** `python3 Tools/pe/blobcensus.py --check` (recomputes the census for all 21 FWFILE resources and asserts it); notes/updater-protocol.md §8.5. *Was cited to `.analysis/blobs/fw110-140.bin`, a path in nobody else's tree — corrected 2026-09-06 during the citation audit.*
 - **REFUTED IF:** The 35 payloads for blocks 0x51..0x73 are not byte-identical to each other, or the A0 07 frames are not near-all-zero.
 - **Matters:** It gives whoever reads the pcap a zero-effort sanity check that the capture is complete and untruncated, and it independently confirms the source pointer advances exactly 0x400 per block (a stride bug would break the identical run).
 
@@ -2592,7 +2592,7 @@ entries deserves suspicion, not celebration — see the fault mix above.
 **The rate decoded from event 0x06 equals the actual report-0x01 arrival rate during continuous movement.**
 
 - **Expect:** Median inter-arrival time of consecutive report-0x01 interrupt-IN completions during sustained movement equals 1/rate within 2%: 125 us at 8000 Hz, 250 us at 4000, 500 us at 2000, 1 ms at 1000, 2 ms at 500, 4 ms at 250, 8 ms at 125.
-- **Cite:** [O] both interfaces report ReportInterval = 125 (microseconds) in ioreg, so the endpoint is serviced every 125 us and the device throttles by NAKing; [D] the one-hot table above
+- **Cite:** [O] both interfaces report ReportInterval = 125 (microseconds) in ioreg, so the endpoint is serviced every 125 us and the device throttles by NAKing; [D] the one-hot rate table of `#3 polling-rate-onehot-table` in this section — cfg107 bound check 0x413a7d (`cmpl $0x3f` on byte[2]-1) and the index byte table at 0x413c04. *"the one-hot table above" named no address; corrected 2026-09-06.*
 - **REFUTED IF:** The measured interval disagrees with the decoded rate by more than 2%, or the interval is 1 ms regardless of the decoded value — which would mean the byte is not the polling rate at all.
 - **Matters:** It validates the event decode end to end using nothing but Wireshark timestamps, with no vendor software and no writes.
 

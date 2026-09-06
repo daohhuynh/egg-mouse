@@ -94,7 +94,15 @@ moment it is back on the bus:
 application device's last packet is at 0.2167 s, so the detach happens ~210 ms
 after the ack and the bus is quiet for only ~240 ms.
 
-### 2.1a EVERY DEVICE ACK IS SUB-MILLISECOND EXCEPT `a1 3a`. The 63-65 ms is Windows. [D]
+### 2.1a EVERY DEVICE ACK IS SUB-MILLISECOND EXCEPT `a1 3a`. The 63-65 ms is Windows. [O]
+
+> **Was tagged as derived. Corrected to `[O]` on 2026-09-06** by the citation
+> audit, which flagged it as a derived claim citing no address — correctly,
+> because there is no address to cite. Every number below is a timestamp read off
+> `windows-run/08-flash.pcapng` and `09-flash-again.pcapng`, i.e. off the
+> physical device on the wire. `prediction-scores.md` rule 3: reading a capture
+> is `[O]`. Nothing here was derived from the `.exe`, and the mistag made the
+> measurement look weaker than it is.
 
 The same trap as §2.1, one level down, and I fell into it on 2026-09-05 before
 measuring: the gap between a command completing and its status arriving is
