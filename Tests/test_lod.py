@@ -1,4 +1,4 @@
-"""§7.25 -- record 0x6f decides what `lod` means.
+"""§7.25 -- record 0x6f is Sensor Glass Mode, and it decides what `lod` means.
 
 Everything here is recovered from raw bytes: the three `cmpb $0x1, 0x57f23b`
 sites, the eleven `.rdata` millimetre strings in the order cfg107 adds them,
@@ -27,11 +27,15 @@ GATE = OBJECT + 0x2B       # -> record 0x6f
 LOD = OBJECT + 0x27        # -> record 0x09
 
 
-def disassemble(start, stop):
+def disassemble_tag(tag, start, stop):
     return subprocess.run(
-        [os.path.join(ROOT, "Tools/ghidra-export/dis.sh"), "cfg107",
+        [os.path.join(ROOT, "Tools/ghidra-export/dis.sh"), tag,
          hex(start), hex(stop)],
         capture_output=True, text=True, check=True).stdout
+
+
+def disassemble(start, stop):
+    return disassemble_tag("cfg107", start, stop)
 
 
 class SectionMap:
@@ -178,6 +182,130 @@ class TheGateIsReadOnlyAndGovernsTheLodCombo(unittest.TestCase):
         self.assertTrue(slot and "EnableWindow" in slot[0], slot)
 
 
+class TheGateIsAWithdrawnSetting(unittest.TestCase):
+    """§7.25's correction. Read from cfg107 alone, record 0x6f looks like a
+    device capability flag: only ever compared, never stored. The other three
+    config tools WRITE it, from a checkbox. Every number below is recovered per
+    binary -- the object base from that tool's own immediate loads, the record
+    mapping from recmap.py -- so none of it is cfg107's layout assumed onto the
+    others."""
+
+    # The `lod` read each tool's Advanced Sensor page performs, object +0x27.
+    # Used only to CHECK the base recovered independently below.
+    LOD_LOAD = {"cfg100": 0x5DBF67, "cfg101": 0x57F2D7,
+                "cfg104": 0x57E237, "cfg107": 0x57F237}
+    BASE = {"cfg100": 0x5DBF40, "cfg101": 0x57F2B0,
+            "cfg104": 0x57E210, "cfg107": 0x57F210}
+
+    def test_every_version_serialises_0x6f_from_object_0x2b(self):
+        sys.path.insert(0, os.path.join(ROOT, "Tools/ghidra-export"))
+        from recmap import extract
+        for tag in ("cfg100", "cfg101", "cfg104", "cfg107"):
+            r = extract(tag)
+            self.assertTrue(r["ok"], tag)
+            self.assertEqual(0x2B, r["map"][0x6F], tag)
+            self.assertEqual(0x27, r["map"][0x09], tag)
+
+    def test_the_recovered_base_agrees_with_the_lod_read(self):
+        """base + 0x27 == the byte the page loads for `lod`. If these ever
+        disagree the base is wrong and every address below is meaningless."""
+        for tag, base in self.BASE.items():
+            self.assertEqual(self.LOD_LOAD[tag], base + 0x27, tag)
+
+    def test_the_older_tools_write_the_gate_and_cfg107_does_not(self):
+        want = {"cfg100": (0x4134B8, 0x4134D3),
+                "cfg101": (0x411764, 0x411785),
+                "cfg104": (0x411824, 0x411845)}
+        for tag, (on, off) in want.items():
+            text = disassemble_tag(tag, 0x401000, 0x520000)
+            gate = self.BASE[tag] + 0x2B
+            stores = {}
+            for line in text.splitlines():
+                m = re.match(r"\s*([0-9a-f]+):.*movb\t\$(0x[0-9a-f]+), 0x%x$" % gate,
+                             line)
+                if m:
+                    stores[int(m.group(1), 16)] = int(m.group(2), 16)
+            self.assertEqual({on: 1, off: 0}, stores, tag)
+
+    def test_cfg107_only_ever_compares_it(self):
+        text = disassemble_tag("cfg107", 0x401000, 0x52C591)
+        gate = self.BASE["cfg107"] + 0x2B
+        hits = [l for l in text.splitlines() if ("0x%x" % gate) in l]
+        self.assertEqual(3, len(hits))
+        for l in hits:
+            self.assertIn("cmpb", l, l)
+
+    def test_the_control_is_a_checkbox_called_sensor_glass_mode(self):
+        """The caption comes from the resources by way of ctlchain.py, which
+        resolves a control to the class that binds it. Both spellings are
+        accepted because 1.00/1.01 say `Glass Mode` and 1.04/1.07 say
+        `Sensor Glass Mode` -- and a test that demanded one would fail on a
+        rename rather than on a finding."""
+        for tag in ("cfg100", "cfg101", "cfg104", "cfg107"):
+            out = subprocess.run(
+                [sys.executable,
+                 os.path.join(ROOT, "Tools/ghidra-export/ctlchain.py"), tag],
+                capture_output=True, text=True, cwd=ROOT).stdout
+            rows = [l for l in out.splitlines()
+                    if "1031" in l and "Glass Mode" in l]
+            self.assertTrue(rows, "%s: no control 1031 captioned Glass Mode" % tag)
+            self.assertIn("AUTOCHECKBOX", rows[0], tag)
+
+    def test_cfg107s_handler_for_it_is_a_bare_ret(self):
+        """§7.21. The control survives into 1.07 and its BN_CLICKED entry points
+        at 0x413d90, which is one byte of `retl`."""
+        out = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "Tools/ghidra-export/ctlchain.py"),
+             "cfg107"], capture_output=True, text=True, cwd=ROOT).stdout
+        lines = out.splitlines()
+        idx = [i for i, l in enumerate(lines)
+               if "1031" in l and "Sensor Glass Mode" in l]
+        self.assertEqual(1, len(idx))
+        window = "\n".join(lines[idx[0]:idx[0] + 3])
+        self.assertIn("0x00413d90", window, window)
+        body = disassemble_tag("cfg107", 0x413D90, 0x413D91)
+        self.assertIn("retl", body)
+
+
+@unittest.skipUnless(os.path.exists(EXE), "cfg107 not present")
+class LodHasTwoWritersWithDifferentEncodings(unittest.TestCase):
+    """§7.29. Two eleven-arm tables write object +0x27 in cfg107. Only the APPLY
+    collector's values have ever been on the wire."""
+
+    def arms(self, lo, hi, base):
+        text = disassemble_tag("cfg107", lo, hi)
+        out = {}
+        for line in text.splitlines():
+            m = re.match(r"\s*([0-9a-f]+):.*movb\t\$(-?0x[0-9a-f]+), %s" % base,
+                         line)
+            if m:
+                out[int(m.group(1), 16)] = int(m.group(2), 16) & 0xFF
+        return out
+
+    def table(self, va, n):
+        pe = SectionMap(EXE)
+        return [struct.unpack_from("<I", pe.f, pe.raw_off(va) + 4 * i)[0]
+                for i in range(n)]
+
+    def test_the_selection_handler_stores_a_sensor_looking_ladder(self):
+        arms = self.arms(0x40FA70, 0x40FB1C, r"0x57f237")
+        vals = [arms[t] for t in self.table(0x40FB1C, 11)]
+        self.assertEqual([0xC2, 0xC4, 0xC6, 0xC9, 0xCA, 0xCC, 0xCD,
+                          0xD0, 0xD4, 0xD7, 0xD9], vals)
+        self.assertEqual(sorted(vals), vals, "the ladder is monotone")
+
+    def test_the_apply_collector_stores_the_index(self):
+        arms = self.arms(0x40EC40, 0x40ECA2, r"0x27\(%edi\)")
+        self.assertEqual(list(range(11)),
+                         [arms[t] for t in self.table(0x40EE54, 11)])
+
+    def test_the_two_sets_are_disjoint(self):
+        """They differ by ~200, so picking the wrong one is not a near miss."""
+        a = set(self.arms(0x40FA70, 0x40FB1C, r"0x57f237").values())
+        b = set(self.arms(0x40EC40, 0x40ECA2, r"0x27\(%edi\)").values())
+        self.assertEqual(set(), a & b)
+
+
 @unittest.skipUnless(os.path.isdir(CAPTURES), "captures not present")
 class OnThisMouseTheGateIsZero(unittest.TestCase):
 
@@ -196,6 +324,13 @@ class OnThisMouseTheGateIsZero(unittest.TestCase):
         seen = {f[PAYLOAD + 0x09] for f in self.recs}
         self.assertEqual(set(range(0x0B)), seen,
                          "02-basic swept all eleven; a gap means a lost capture")
+
+    def test_the_sensor_ladder_has_never_been_on_the_wire(self):
+        """§7.29. If a record ever carried 0xc2..0xd9 at 0x09 the selection
+        handler's encoding would be the live one and `set lod 0..10` would be
+        writing nonsense."""
+        seen = {f[PAYLOAD + 0x09] for f in self.recs}
+        self.assertEqual(set(), seen & set(range(0xC0, 0xE0)))
 
     def test_the_factory_lod_is_three_which_is_one_millimetre(self):
         import collections

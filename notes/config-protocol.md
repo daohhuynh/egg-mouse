@@ -3028,7 +3028,9 @@ Deviating is the right call because the alternative is reproducing a bug whose
 effect on the device is `[G]`, but it is a deviation and the tool says so out
 loud rather than hiding it.
 
-> **UNTESTED, and recorded as working-memory gap 3.** The capture that would
+> **UNTESTED, and recorded in `working-memory.md` under OPEN GAPS as the
+> `18d`-`18f` gap** (referred to by name, not number: the list is renumbered
+> whenever an item is closed). The capture that would
 > have exercised this (`02` lines `18d`–`18f`) was never performed. No
 > observation of stage 4 with `X != Y` exists, from the vendor or from us.
 
@@ -3180,12 +3182,42 @@ binds it and to its message-map handler. Four controls in cfg107 point at
 invisible, from `OnInitDialog` hiding them. This is a **second, independent
 mechanism** reaching the same place: even reached, clicking them does nothing.
 
-**The consequence for this project is a negative one, and it is useful.** These
-are not fields waiting to be named — there is no byte behind them. A tool that
-offered `ripple-control` would be offering a setting the vendor's own software
-cannot change, and it would look exactly like a working feature. They are
-recorded here so that a later pass over the dialog captions does not "discover"
-them again.
+**CORRECTED 2026-09-06, and the correction is the point.** The sentence that
+stood here was:
+
+> These are not fields waiting to be named — there is no byte behind them.
+
+**Two of the four have bytes behind them, and one of those bytes is now named.**
+The claim was drawn from cfg107 alone, where the handlers are empty, and it does
+not survive looking at the earlier tools:
+
+| dlg | IDC | caption | cfg107 handler | cfg104 handler | record byte |
+| --- | --- | --- | --- | --- | --- |
+| 140 | 1031 | `Sensor Glass Mode` | `0x413d90` (`retl`) | `0x411800`, writes it | **`0x6f`** (§7.25) |
+| 135 | 1065 | `Ripple Control` | `0x413d90` (`retl`) | `0x40dfa0`, writes it | `0x0b` (object `+0x29`) |
+| 139 | 1072 | *(combo, no `WS_VISIBLE`)* | `0x413d90` | `0x401eb0` (`retl` there too) | — |
+| 140 | 1024 | *(combo)* | `0x413d90` on `EN_CHANGE` only | — | see §7.29 |
+
+So what is true is narrower and still useful: **in cfg107 these controls cannot
+change anything**, which is why 82 captured records never move record `0x6f`.
+What is NOT true is that there is nothing behind them.
+
+`Ripple Control` is a curiosity rather than a lead. cfg104's handler stores
+`setne %cl` into object `+0x29` as a whole byte — the byte cfg107 packs
+`smoothing` (`0x03`) and `cpi-downshift` (`0x0c`) into (§7.9) — so on 1.04 that
+checkbox would clobber both. Record `0x0b`'s observed values across all 82
+records are exactly `{0x00, 0x01, 0x02, 0x04, 0x08, 0x0c}`, a union of `0x0f`
+and no more, so nothing outside those two named fields has ever moved on the
+wire. Nothing here is settable and nothing is offered.
+
+**The general lesson, which is §1.2a's:** "there is no byte behind them" is an
+absence claim about the whole product family, drawn from one member of it.
+Checking the other three cost ten minutes and changed the answer.
+
+A tool that offered `ripple-control` would still be offering a setting the
+vendor's own software cannot change. They are recorded here so that a later pass
+over the dialog captions does not "discover" them again — and so that the next
+reader knows which of them *did* have a byte.
 
 Stated with its blind spot (§1.2a): this says the BN_CLICKED entry in the
 class's own message map is empty. It cannot see a base-class map entry, a
@@ -3453,6 +3485,44 @@ CPI stages. Dialog **137** binds Red/Green/Blue EDIT controls (ids 1017, 1018,
 tab page by none of cfg100/101/104/107** — so nothing in the shipped tool could
 ever move these bytes, which is exactly what 82 records show.
 
+**Corroborated from a second direction, 2026-09-06, across all four tools.**
+`Tools/ghidra-export/ctlchain.py` resolves every control on dialog 137 in all
+four config tools, and **on dialog 137 every one of them has a DDX binding and
+zero message-map entries** — not a dead handler like §7.21's `retl`, simply no
+entry. So it is not merely that the page is never created: even reached, no
+control on it is wired to anything.  [D]
+
+**This closes `gui-surface.md`'s own stated blind spot, which is why it is
+worth having rather than being a second opinion.** That file's method is a
+literal scan for the tab-creation run, and it says out loud what it cannot see:
+"a path that reaches the dialog through a stored pointer rather than a literal
+member offset". A message-map scan does not care how the dialog got on screen.
+If some pointer-mediated path created DIALOG 137 tomorrow, the page would
+appear and every control on it would still do nothing, because there is no
+entry to dispatch to. Creation and wiring are independent, and both are now
+negative.
+
+| id | caption | cfg100 | cfg101 | cfg104 | cfg107 |
+| --- | --- | --- | --- | --- | --- |
+| 1040 | `Scroll led` | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 |
+| 1041 | `Logo led` | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 |
+| 1042 | `DPI led` | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 |
+| 1017 | R/G/B EDIT | *absent* | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 |
+| 1018 | R/G/B EDIT | *absent* | ddx 1, handlers 0 | ddx 1, handlers 0 | ddx 1, handlers 0 |
+
+**Two id collisions make this worth checking rather than assuming**, and both
+would give the opposite answer if the dialog were dropped:
+
+- Dialog **139** reuses 1040, 1041 and 1042 as `MIDDLE CLICK`, `FORWARD` and
+  `BACK`, each with a live `BN_CLICKED` handler in all four tools.
+- Dialog **135** reuses them again as unnamed trackbars and an EDIT, and there
+  1042 has a live `code 768` (`EN_CHANGE`) handler — cfg107 `0x0040ff70`.
+
+§7.30 documents the same trap from the other end. And note where the ONE live
+LED-ish control actually lives: 1066 `Disable LED on Lift-Off` is on dialog
+**135**, the sensor page, not on 137 — handler cfg107 `0x00410000`. That is the
+already-named `led-on-liftoff` field, and it is not evidence that 137 is live.
+
 **It is `[G]` and it stays `[G]`.** The bytes are `[O]`; the grouping into
 five-byte entries is an inference from a trailing index; the colour reading is a
 guess from three bytes that happen to look like RGB. §1.3 is absolute here:
@@ -3471,15 +3541,61 @@ What would settle it, in order of cost, none of it requiring a write:
 constancy, so a future capture that moves it fails the suite instead of passing
 unnoticed.
 
-## 7.25 Record `0x6f` decides what `lod` means, and on this mouse it says "eleven"  [D]+[O]
+## 7.25 Record `0x6f` is **Sensor Glass Mode**, and it decides what `lod` means  [D]+[O]
 
-The last unnamed byte outside the CPI and button blocks. It is `[D]`, it is
-**read-only from the host's side**, and it is load-bearing for a field the tool
-already offers.
+The last unnamed byte outside the CPI and button blocks. It has a name, a
+caption and a checkbox, and it is load-bearing for a field the tool already
+offers.
 
-cfg107 never writes it. It compares it to `1` in three places, all on the
-Advanced Sensor page, all governing the **Lift-off Distance** combo box whose
-value is record `0x09` (§7.18):
+**How it was nearly got wrong.** The first version of this section was written
+from cfg107 alone, where the byte is only ever *read*, and concluded it was a
+device-reported capability flag. Checking the other three config tools took ten
+minutes and produced a different answer: **cfg100, cfg101 and cfg104 all WRITE
+it**, from the `BN_CLICKED` handler of an `AUTOCHECKBOX` whose caption is
+`Glass Mode` (1.00, 1.01) / `Sensor Glass Mode` (1.04, 1.07).
+
+| tool | object base | the gate byte | writes it? |
+| --- | --- | --- | --- |
+| cfg100 | `0x5dbf40` | `0x5dbf6b` | **yes** — `0x4134b8` `movb $0x1`, `0x4134d3` `movb $0x0` |
+| cfg101 | `0x57f2b0` | `0x57f2db` | **yes** — `0x411764` / `0x411785` |
+| cfg104 | `0x57e210` | `0x57e23b` | **yes** — `0x411824` / `0x411845` |
+| cfg107 | `0x57f210` | `0x57f23b` | **no** — three `cmpb $0x1` and nothing else |
+
+Every one of the four serialises record `0x6f` from object `+0x2b`
+(`recmap.py`), and each base above is recovered independently from that tool's
+own `movl $imm, %reg` loads of the settings object, not assumed from cfg107.
+
+cfg104's handler, which is the clearest, at `0x411800`:
+
+```
+41180e: movl 0x7b0(%edi), %eax      ; the checkbox's m_hWnd (DDX member +0x790 + 0x20)
+411814: pushl $0xf0                 ; BM_GETCHECK
+41181a: calll *%esi                 ; SendMessageW
+41181e: je   0x41183d
+411824: movb $0x1, 0x57e23b         ; TICKED  -> gate = 1
+41182b: CB_SETCURSEL(lod combo, 0)  ;         and force the combo to entry 0
+41183d: movzbl 0x57e2a6, %eax       ; UNTICKED-> restore the remembered index
+411845: movb $0x0, 0x57e23b         ;         and gate = 0
+```
+
+`ctlchain.py cfg104` names the control: **1031, `BUTTON /AUTOCHECKBOX`,
+`'Sensor Glass Mode'`, DDX member `+0x790`, `BN_CLICKED` handler `0x00411800`.**
+
+### cfg107 still SHOWS the checkbox. Clicking it does nothing.
+
+`ctlchain.py cfg107` finds the same control id, same caption, DDX member
+`+0x130` — and its `BN_CLICKED` handler is **`0x413d90`, the single `retl`** of
+§7.21. `prediction-scores.md` #21 separately has it hidden at `OnInitDialog`.
+So in 1.07 the byte is unreachable by two independent mechanisms, which is
+exactly why all 82 captured records read `0`.
+
+**Which makes it a setting the vendor withdrew, not a flag the device reports.**
+The distinction matters for what we do about it — see below.
+
+### What it does, from the three readers cfg107 kept
+
+All three are on the Advanced Sensor page and all three govern the **Lift-off
+Distance** combo whose value is record `0x09` (§7.18):
 
 | site | VA | bytes | what it gates |
 | --- | --- | --- | --- |
@@ -3548,9 +3664,37 @@ exercised `lod` across all eleven values `0`–`10`. The eleven-entry scale is t
 one in force, `egg-config set lod 0..10` is correct, and the device's factory
 value is `3` = `1.0mm` (70 of the 82 records).
 
+It could hardly be otherwise: the only tool the owner has ever run against this mouse
+is 1.07, and 1.07 cannot set the byte. That is a fact about the *tool*, not
+about the mouse — an OP1 8k v2 configured once with 1.04 would carry whatever
+that checkbox was left at, and `factory-reset` is what clears it.
+
 `0x413db0`, cfg107's compiled-in default writer, leaves object `+0x2b`
 at the caller's zero fill — consistent, and §7.2c's cross-check therefore says
 nothing about it either way.
+
+### Why `glass-mode` is derived and still NOT offered
+
+It would be easy to add: the byte is `[D]`, and its two values are `[D]` from
+two compiled-in stores in each of three separate binaries (cfg100 `0x4134b8` /
+`0x4134d3`, cfg101 `0x411764` / `0x411785`, cfg104 `0x411824` / `0x411845`). §1.3 is satisfied. It is
+recorded in `kWithheld` instead, for reasons that are about the device rather
+than about the derivation:
+
+1. **No capture has ever seen this byte written.** Every other settable field is
+   scored against `windows-run`; this one cannot be, because the tool that
+   writes it is not the tool the captures were taken with.
+2. **What it does inside the firmware is `[G]`.** The name says the sensor is
+   being told it is looking at glass. The 1.07 UI's response — two coarse
+   lift-off choices and the control greyed — is `[D]` (cfg107 `0x40eeb6`,
+   `0x40f1e5`), but that is the *host's* response, not the sensor's.
+3. **Setting it silently changes what `lod` means**, and a person who does not
+   know that would read their lift-off distance wrong afterwards.
+4. **Endgame withdrew it.** Two mechanisms, both deliberate. Shipping a write
+   the vendor's current tool refuses to make is a deviation that needs a reason,
+   and "we could" is not one.
+
+`factory-reset` and `restore` both clear it, so nothing is lost by waiting.
 
 ### What the tool does about it — an off-wire refusal
 
@@ -3708,3 +3852,66 @@ live-CPI path the vendor assembles most of the record from a **host-side
 mirror**, not from a fresh device read. `egg-config` does read-modify-write off a
 fresh read every time (§4.1), which is stricter. That is a deliberate deviation
 from the vendor and it is in the safe direction.
+
+
+## 7.29 `lod` is written TWICE in cfg107, with two different encodings  [D]+[O]
+
+Object `+0x27` — record `0x09`, the lift-off distance — has **two** writers in
+cfg107, both dispatching an eleven-arm jump table off the same combo's
+`CB_GETCURSEL`, and they store completely different values.
+
+| writer | what it is | table | stores |
+| --- | --- | --- | --- |
+| `0x40ec20` | the page's APPLY collector, called from `0x413f08` | `0x40ee54` | `0x00`–`0x0a`, index == value |
+| `0x40fa70` | control 1024's own `CBN_SELCHANGE` handler | `0x40fb1c` | `0xc2 0xc4 0xc6 0xc9 0xca 0xcc 0xcd 0xd0 0xd4 0xd7 0xd9` |
+
+The second ladder is monotone and roughly linear in the millimetre value —
+about 2.3 counts per 0.1 mm across `0.7mm`–`1.7mm` — which is the shape of a
+**sensor register value** rather than a UI index. What it is is `[G]` and
+nothing here depends on it. `0x40fb0d`, the `1.0mm` arm, doubles as the `ja`
+default, so an out-of-range index lands on `0xc9`.
+
+**The one that reaches the device is the APPLY collector's.** That is `[O]` and
+not an inference: across all 82 captured records, record `0x09` only ever holds
+`0x00`–`0x0a`, and `windows-run/02-basic` swept all eleven. `0xc2`–`0xd9` has
+never been on the wire. The selection handler's value is overwritten before the
+frame is built — `0x413f08` calls `0x40ec20`, then `0x413f1e` snapshots and
+`0x413f2f` writes (§7.27) — and its own tail jumps to the dirty-check at
+`0x4144c0`, which is all it is there for.
+
+**Why this is written down rather than left as trivia.** "Who writes `lod`?" has
+two answers in one binary, with encodings 200 apart, and the wrong one is the
+one a reader meets first if they start from the dialog rather than from APPLY.
+Writing `0xc9` for `1.0mm` would be well formed and would verify against
+read-back. `Tests/test_lod.py` asserts both ladders, so a future reader finds
+the pair already resolved instead of resolving it the other way.
+
+## 7.30 What ELSE did Endgame take away? Four controls, no new fields  [D]
+
+§7.25 found a named record byte behind a control cfg107 had deadened, so the
+obvious next question is whether there are others. `Tools/ghidra-export/uidiff.py`
+answers it mechanically: every control an older config tool attaches real code
+to, that cfg107 either does not handle or points at `0x413d90` (§7.21's `retl`).
+
+**Ten rows, four distinct controls, and every one resolves.**
+
+| IDC | caption | older handler (cfg104) | what it writes | record | verdict |
+| --- | --- | --- | --- | --- | --- |
+| 1031 | `Sensor Glass Mode` | `0x411800` | object `+0x2b` = 0 or 1 | **`0x6f`** | §7.25 — named, withheld |
+| 1065 | `Ripple Control` | `0x40dfa0` | object `+0x29`, `setne` | `0x0b` | already named (§7.9 packs `smoothing` + `cpi-downshift` there) |
+| 1061 | *(combo, 4 items)* | `0x4119f0` | object `+0x06` ← `8, 4, 1, 2` | `0x05` | already named — it is `polling` (§7.5's `8000/rate`: 1000, 2000, 8000, 4000 Hz). cfg107 replaced this four-item combo with a seven-item one and dropped the control |
+| 1044 | `X:` | cfg100 `0x408c60` | nothing in the record | — | **an ID collision, not a control**: in cfg100 id 1044 is a `SCROLL DOWN` pushbutton on the button-mapping page; in cfg107 it is a static label on the sensor page. `movl $0x7, 0x3e0(%esi)` sets an in-app selection |
+
+**So: no new settable field, and the search that would find one has been run.**
+That is worth having as a bounded negative rather than an impression, because
+"look at the older tools' UI" is otherwise an open-ended suggestion that would
+be made again by every future session.
+
+**Stated with its blind spots, per §1.2a.** The method keys on control ID, and
+row 1044 is the proof that IDs are reused across dialogs — so each row is a
+candidate, settled by reading its handler, not a finding. It also cannot see a
+control whose ID CHANGED between versions, or one whose messages a base class
+handles rather than the dialog's own map. What it does cover is every entry in
+every `AFX_MSGMAP` `ctlchain.py` resolves, in all four config tools.
+
+**Reproduce:** `python3 Tools/ghidra-export/uidiff.py`.
