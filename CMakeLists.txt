@@ -95,11 +95,14 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t button_map citations config_replay cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config lod manifest recmap undo_loadable usbpcap)
+  foreach(t button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endforeach()
+  # coverage re-runs coverage.py over nine binaries, loading every export each
+  # time; ~40s locally, so it needs more than ctest's default.
+  set_tests_properties(coverage PROPERTIES TIMEOUT 600)
   # Plain scripts that print their own PASS/FAIL and exit non-zero on failure.
   # They are NOT unittest modules, which is why `unittest discover` reported
   # them as import errors -- a loader complaint, never a test result.
@@ -116,7 +119,18 @@ if(Python3_FOUND)
   add_test(NAME audit_claims_strict
            COMMAND ${Python3_EXECUTABLE} Tools/ghidra-export/auditclaims.py --strict)
   set_tests_properties(audit_claims_strict PROPERTIES
-                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 600)
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 600
+                       RESOURCE_LOCK notes_tree)
+
+  # WHY THE LOCK. Tests/test_auditclaims.py measures the checker by PLANTING a
+  # defective claim as a real file in notes/ -- it has to be the real tree, or
+  # the tool would resolve cross-references against a copy and the plants would
+  # test the copy. Under `ctest -j4` that put a deliberately-bad file in front
+  # of audit_claims_strict, which duly failed. A gate that fails at random gets
+  # ignored, which is worse than not having it, so the two are serialised
+  # against each other by name. Add any future test that GLOBS notes/*.md to
+  # this lock; tests that open a named file under notes/ do not need it.
+  set_tests_properties(auditclaims PROPERTIES RESOURCE_LOCK notes_tree)
 
   add_test(NAME blob_census
            COMMAND ${Python3_EXECUTABLE} Tools/pe/blobcensus.py --check)
@@ -153,6 +167,15 @@ if(SWIFTC_EXECUTABLE)
                        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 300)
 endif()
 
+# Is a planted mutant sitting in the tree? Safe as a ctest entry because
+# `mutants` is RUN_SERIAL -- nothing else runs while the source is mutated on
+# purpose -- so a hit here means a run died, or one got staged by hand.
+add_test(NAME no_mutants COMMAND Tools/no-mutants.sh)
+# notes_tree as well: the guard also refuses a leftover notes/zzz-planted-*.md,
+# and test_auditclaims.py has one on disk for as long as it runs.
+set_tests_properties(no_mutants PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                     RESOURCE_LOCK notes_tree)
+
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)
 set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
@@ -169,5 +192,13 @@ set_tests_properties(flash_backup PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DI
 # else may be compiling or running a built binary while it does. Its EXIT trap
 # restores the tree and rebuilds, so it leaves no mutant behind even if killed.
 add_test(NAME mutants COMMAND Tests/mutants.sh)
+# TIMEOUT is 3600, not ctest's default and not the 900 it used to be. A short
+# timeout on THIS test is not a mild inconvenience: mutants.sh edits the real
+# source tree, so being killed part-way leaves a planted mutant behind. That
+# happened on 2026-09-06 -- the suite had grown to 81 mutants and ~25 minutes,
+# and 900s killed it with `// MUTANT: no high clamp` still in ConfigRecord.cpp,
+# which removes the CPI ceiling. The run was ALSO reported as a failure, so the
+# short timeout cost a red suite and a corrupted tree at once.
+# Raise this before adding a batch of mutants, not after.
 set_tests_properties(mutants PROPERTIES
-                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} RUN_SERIAL TRUE TIMEOUT 900)
+                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} RUN_SERIAL TRUE TIMEOUT 3600)

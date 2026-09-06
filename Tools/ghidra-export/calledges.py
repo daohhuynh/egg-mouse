@@ -52,7 +52,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 class PE:
     def __init__(self, path):
         self.path = path
-        self.buf = open(path, "rb").read()
+        with open(path, "rb") as fh:      # `open(...).read()` leaks the handle,
+            self.buf = fh.read()          # which coverage.py now trips 9x a run
+
         b = self.buf
         if b[:2] != b"MZ":
             raise SystemExit("not a PE: %s" % path)
@@ -83,11 +85,28 @@ class PE:
                                       rptr=rptr, rsize=rsize, chars=chars))
 
     def rva_to_off(self, rva):
+        # VIRTUAL SIZE DECIDES OWNERSHIP; the raw size only bounds what is
+        # actually present in the file. Those are different questions and
+        # conflating them is a real bug this project has already shipped once:
+        # a section map built on max(vsize, rsize) resolved .rdata VAs into
+        # .text and turned twelve instruction sequences into plausible-looking
+        # "strings" (Tests/test_lod.py documents that incident in full).
+        #
+        # No .exe here is affected -- checked 2026-09-06 across all nine in
+        # TAGS, zero section pairs overlap under the max() rule -- so this
+        # changes no existing output. It is here because `ingest.py` and
+        # `ingest_config.py` take .exe files this project has never seen, and
+        # a silent wrong answer on one of those is worth more than the two
+        # lines it costs to prevent.
         for s in self.sections:
-            if s["vaddr"] <= rva < s["vaddr"] + max(s["vsize"], s["rsize"]):
+            if s["vaddr"] <= rva < s["vaddr"] + s["vsize"]:
                 d = rva - s["vaddr"]
-                if d < s["rsize"]:
-                    return s["rptr"] + d
+                return s["rptr"] + d if d < s["rsize"] else None
+        # Nothing claims it virtually. Fall back to the file-backed extent,
+        # which is how a section with vsize == 0 (some linkers) stays readable.
+        for s in self.sections:
+            if s["vaddr"] <= rva < s["vaddr"] + s["rsize"]:
+                return s["rptr"] + (rva - s["vaddr"])
         return None
 
     def cstr(self, rva):

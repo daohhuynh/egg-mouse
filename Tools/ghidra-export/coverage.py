@@ -30,6 +30,18 @@ Evidence sets, weakest last:
   M  byte match  - normalised body occurs in another product's binary (see
                    classify.py, whose premise is an assumption, not a proof)
   N  Ghidra FID  - named by Ghidra's FunctionID signature database, ALONE
+  I  sibling read  - THE SAME BYTES, at the same VA, in a binary whose .text
+                   is byte-for-byte identical to this one, and READ there
+                   (added 2026-09-06). CLAUDE.md 6.1 already grants this for
+                   1.06/1.07 against 1.10 -- "1.10's work covers their code by
+                   construction" -- and this makes the grant checkable instead
+                   of asserted. Note the deliberate inversion: a >90%-sharing
+                   sibling is EXCLUDED from M and ADMITTED for I, because the
+                   two sets claim different things. M claims "this body also
+                   occurs in an unrelated product, so it is probably library",
+                   which self-matching would fake. I claims only "somebody read
+                   these exact bytes", which is true no matter which file they
+                   were read out of.
 
 Exit status is 1 if anything is unaccounted, so this can gate a commit.
 
@@ -51,6 +63,8 @@ The completeness evidence is elsewhere and is byte-level:
 Use this tool to find things to check. Never to conclude nothing is there.
 """
 import json, sys, os, hashlib, collections
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from calledges import TAGS, PE          # noqa: E402  (path set above)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXP  = os.path.join(ROOT, ".analysis", "export")
@@ -76,7 +90,90 @@ def bodyhash(r):
         return None
     return hashlib.sha256(norm(bytes.fromhex(bh))).hexdigest()
 
-def readset(tag):
+def text_of(tag):
+    """(sha256 of the raw .text bytes, its VA, the raw bytes) or None."""
+    rel = TAGS.get(tag)
+    if not rel:
+        return None
+    try:
+        pe = PE(os.path.join(ROOT, rel))
+    except Exception:
+        return None
+    for s_ in pe.sections:
+        if s_["name"] == ".text":
+            raw = pe.buf[s_["rptr"]:s_["rptr"] + s_["rsize"]]
+            return hashlib.sha256(raw).hexdigest(), pe.image_base + s_["vaddr"], raw
+    return None
+
+
+def sibling_read(tag, byadr, already):
+    """Evidence set I. Addresses whose bytes were read in a binary with an
+    IDENTICAL .text. Two conditions, both proofs rather than inferences:
+
+      1. the sibling's raw .text hashes to the same SHA-256, so the code is
+         the same code, and
+      2. the sibling's export has a function at the SAME VA with the SAME
+         size, and
+      3. this function's own bytes at that VA compare equal.
+
+    (2) is the one that is easy to leave out and wrong to. A read list is a
+    list of ADDRESSES; what was actually read is a BODY. If Ghidra split the
+    sibling differently -- a tail-call turned into its own function, say -- an
+    address could appear in the sibling's read list while covering half of what
+    this binary calls that function. Identical `.text` makes that unlikely and
+    does not make it impossible, and "unlikely" is not the standard for
+    something that lets thousands of functions count as read.
+
+    `already` is the set this adds nothing to (the tag's own R). It is passed
+    in rather than subtracted afterwards so the per-sibling count printed below
+    is the number of functions that sibling ACTUALLY ADDS. The first version
+    printed the sibling's whole read list -- 6009 where the true contribution
+    was 764 -- which is precisely the "numbers written in prose" failure this
+    file's own docstring warns about, committed inside the tool that warns.
+
+    Returns (set, [note, ...]) so the caller can print what it leaned on. A
+    silent set here would be the same defect as a silent reference exclusion.
+    """
+    mine = text_of(tag)
+    if mine is None:
+        return set(), ["no .exe for this tag -- I is empty"]
+    my_h, my_va, my_raw = mine
+    out, notes = set(), []
+    for t in TAGS:
+        if t == tag:
+            continue
+        other = text_of(t)
+        if other is None or other[0] != my_h:
+            continue
+        o_h, o_va, o_raw = other
+        if o_va != my_va:
+            notes.append(f"  I: {t} has identical .text bytes but a different "
+                         f"VA ({o_va:#x} vs {my_va:#x}) -- not used")
+            continue
+        their_R = readset(t, quiet=True)
+        their_size = {int(x['entry'], 16): x['size'] for x in load(t)}
+        n = mismatched = 0
+        for a, r in byadr.items():
+            if a in out or a in already or a not in their_R:
+                continue
+            if their_size.get(a) != r["size"]:
+                mismatched += 1
+                continue
+            off, sz = a - my_va, r["size"]
+            if off < 0 or off + sz > len(my_raw):
+                continue
+            if my_raw[off:off+sz] == o_raw[off:off+sz]:
+                out.add(a); n += 1
+        if mismatched:
+            notes.append(f"  I: {t} read {mismatched} addresses whose function "
+                         f"SIZE differs here -- not counted")
+        notes.append(f"  I: {t} .text is byte-identical (sha256 "
+                     f"{my_h[:16]}...); it ADDS {n} functions "
+                     f"beyond what is already read here")
+    return out, notes
+
+
+def readset(tag, quiet=False):
     """Every address any workflow actually read, unioned. Add files here as
     more reading happens -- a missing file is a silent under-count, so this
     warns rather than skipping quietly."""
@@ -86,7 +183,8 @@ def readset(tag):
                f"read_{tag}.json"):
         p = os.path.join(AN, fn)
         if not os.path.exists(p):
-            print(f"  (no {fn})")
+            if not quiet:
+                print(f"  (no {fn})")
             continue
         for x in json.load(open(p)):
             out.add(int(x, 16) if isinstance(x, str) else x)
@@ -129,15 +227,19 @@ def main():
 
     M = {a for a, r in byadr.items() if bodyhash(r) in lib}
     N = {a for a, r in byadr.items() if not r['name'].startswith('FUN_')}
+    I, inotes = sibling_read(tag, byadr, R)
+    for ln in inotes:
+        print(ln)
 
-    acc  = R | S | M | N
+    acc  = R | S | M | N | I
     resid = ALL - acc
     print(f"\n{tag}: {len(ALL)} functions;  refs actually used: {','.join(refs)}")
     print(f"  R read ................. {len(R)}")
+    print(f"  I identical-.text read . {len(I)}")
     print(f"  S microread settled .... {len(S)}")
     print(f"  M cross-binary match ... {len(M)}")
     print(f"  N Ghidra FID name ...... {len(N)}")
-    print(f"  accounted (R|S|M|N) .... {len(acc)}")
+    print(f"  accounted (R|S|M|N|I) .. {len(acc)}")
     print(f"  UNACCOUNTED ............ {len(resid)}")
 
     # SCOPE. Everything above partitions GHIDRA'S FUNCTION LIST, not the binary.
@@ -163,7 +265,7 @@ def main():
     print( "         A residue of 0 here means the LIST is accounted for. It is")
     print( "         not a claim about the binary. See CLAUDE.md 6 and 1.2b.")
 
-    weak = N - M - R - S
+    weak = N - M - R - S - I
     big  = sorted(a for a in weak if byadr[a]['size'] >= 32)
     print(f"\n  resting on Ghidra's name ALONE ... {len(weak)}"
           f"  (>=32 bytes: {len(big)})")

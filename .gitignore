@@ -53,3 +53,9 @@ __pycache__/
 # belongs in a commit message, the 76-line transcript does not.
 mutants-run.log
 mut*.log
+
+# Fixtures Tests/test_auditclaims.py plants in the real notes/ tree to measure
+# the citation checker. Deleted in a `finally`, which a kill does not run --
+# so they are ignored here too, and Tools/no-mutants.sh refuses a commit while
+# one is present. A planted DEFECT reaching a commit is the failure mode.
+notes/zzz-planted-*.md
