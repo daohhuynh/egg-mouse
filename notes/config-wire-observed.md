@@ -221,6 +221,31 @@ restore` wrote all 1024 payload bytes, the mouse was unplugged for 8.6 s
 `prediction-restore.md`. So `a0 11` writes storage that outlives loss of bus
 power — `[O]`, n=1, ~9 s off.
 
+**AND THE DURATION HYPOTHESIS IS NOW DEAD FOR FOUR OF THE FIVE REVERTS.**
+Repeated the same test with a long unplug: **1706.8 s — 28.4 minutes** — off
+power (kernel log 18:54:04.299 → 19:22:31.094). Result again **0 of 1024
+payload bytes differ**, sha256 `23141790…` on both sides, checked directly
+against the file as well as through `egg-config diff`.
+
+Line that up against the capture gaps:
+
+```
+reverted   231 s   388 s   648 s   958 s   5501 s
+held       124 s                                    <- capture 03 -> 04
+held         9 s                                    <- ours, 2026-09-05
+held      1707 s                                    <- ours, 2026-09-05  ** 28.4 min **
+```
+
+1707 s is longer than **four of the five** gaps across which the vendor's
+settings vanished. So "the record decays with time off power" cannot explain
+those four, and the only reverting gap it does not straddle is the 5501 s one.
+Combined with the earlier findings — power loss does not revert, re-enumeration
+did not occur, launch-time writes are ruled out with coverage — **there is no
+surviving mechanism in which the device does this to itself.**
+
+What is left is the vendor's software or the tester's own actions, and the
+latter has still not been checked with the one person who knows.
+
 That resolves what the paragraph asked for and **deepens the problem it
 describes.** The reverts above were being explained by power cycling; power
 cycling demonstrably does not revert. Combined with the USB-address finding
