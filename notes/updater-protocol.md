@@ -612,6 +612,61 @@ Caveats, so this is not over-read:
 - This says nothing about a device presenting **neither** PID. For that the
   button (`bootloader-observed.md` §1) is the answer, and it is `[O]`.
 
+#### 5.1a.1 Re-verified forward from raw bytes, 2026-09-05 [D]
+
+Checked again because the mouse is **actually stuck in `0x1977` right now** and
+this section is what a recovery trip would rest on. Re-read with `dis.sh` and an
+`E8 rel32` sweep of the whole file; no Ghidra view used (§1.2b).
+
+```
+403456  e8 a5 fd ff ff   call 0x403200      ; load FWFILE 140
+40345b  85 c0            test eax,eax
+40345d  75 36            jne  0x403495      ; loaded OK; else "Loading firmware file failed"
+403495  8d 4d f0         lea  ecx,[ebp-0x10]
+403499  e8 62 01 00 00   call 0x403600      ; only NOW is the device searched for
+40349e  83 f8 01         cmp  eax,1
+4034a1  75 77            jne  0x40351a      ; finder must have found *a* device
+4034a3  8b 45 f0         mov  eax,[ebp-0x10]; the mode code
+4034a6  83 f8 01         cmp  eax,1
+4034a9  75 55            jne  0x403500
+403500  83 f8 02         cmp  eax,2         ; mode 2 = bootloader
+403503  75 15            jne  0x40351a
+40350e  68 10 2f 40 00   push $0x402f10
+403513  e8 ce 91 00 00   call 0x40c6e6      ; AfxBeginThread
+402f10  55 8b ec 8b 4d 08 e8 45 0a 00 00    ; push ebp; mov ebp,esp;
+                                            ; mov ecx,[ebp+8]; call 0x403960
+```
+
+And at `0x4036c4`: `push $0x1977` → `call 0x401000` → `cmp eax,1` →
+`je 0x403712` → `0x403717 movl $0x2,(%eax)`, i.e. **mode 2 is written on a
+`0x1977` hit** and the function returns 1.
+
+**Two facts that make the recovery path real rather than merely present:**
+
+1. **The firmware image is loaded BEFORE the device search**, so the mode-2 path
+   holds a valid image. Had the load been on the mode-1 branch, mode 2 would
+   flash whatever happened to be in the buffer.
+2. **Mode 2 skips the version read.** `FUN_004011f0` has exactly one `E8` caller
+   in the whole file, `0x4034ab`, which is on the mode-1 branch. A `0x1977`
+   device cannot answer a version query, and the path never asks it one.
+
+Caller sweep method and its blind spot, per §1.2a: every `E8 rel32` in all
+1,154,048 bytes, target computed as `va(site)+5+rel32`. **It cannot see indirect
+calls or `E9` tail-jumps into these functions**, so the "exactly one caller"
+claims are `[D]` for direct near calls and `[G]` beyond that. The claim that
+matters here — that mode 2 reaches `0x403960` — is a *forward* trace and does not
+depend on any absence.
+
+Full caller map from that sweep:
+
+| function | callers |
+| --- | --- |
+| `0x403200` load `FWFILE` | `0x403456` |
+| `0x403960` flash | `0x402f16`, `0x40390f` |
+| `0x403750` enter-then-flash | `0x402f07` |
+| `0x403580` whole-image checksum | `0x40338e` |
+| `0x4011f0` version read | `0x4034ab` |
+
 ### 5.2 Find the device — `FUN_00403600` @ `0x00403600` [D]
 - Try PID `0x1978`. Found → `mode = 1`.
 - Else `CloseHandle`, clear flags, retry PID `0x1978` with `Sleep(d)`,
