@@ -1937,8 +1937,11 @@ only by `0x41201b`, from dialog 140's IDC 1032. So the byte that differed is
 §7.6 derived the range 1..4 but left the *meaning* `[G]`. `0x40edf0`–`0x40ee4c`
 is four `BM_GETCHECK`s on dialog-135 members `0x13f4`, `0x1468`, `0x14dc`,
 `0x1550`, each storing a literal **0, 1, 2, 3** to object `0x0a` → record
-`0x0d`. Four mutually-exclusive checkboxes storing an index is a radio group:
-these are **the four unlabelled radio buttons** in `log.txt` 02 lines 34–37.
+`0x0d`. Four mutually-exclusive checkboxes storing an index is a radio group.
+
+~~these are the four unlabelled radio buttons in `log.txt` 02 lines 34–37~~ —
+struck 2026-09-06 under §1.1a. The derivation never needed it: the ordering is
+the vendor's own control ids, and §7.18.4 restates it with the addresses.
 
 ### The CPI block is record `0x23`–`0x36`, and §7.3 had the phase wrong
 §7.3's structure table reads the CPI block as `0x24`–`0x37`, "two 16-bit LE
@@ -2013,10 +2016,30 @@ trusting this column.
 `0x411b19` pushes `$0x400` = `TBM_GETPOS`, and `0x411b25` stores the **raw
 return byte** into object `0x2c` with no clamping, no offsetting and no
 `setne` — `movb %al, 0x2c(%ebx)`. So whatever the control's range is, the record
-byte is that number as a byte. Whether negatives arrive as two's complement is
-the one thing this cannot settle, because the trackbar's own range lives in a
-`TBM_SETRANGE` elsewhere; `log.txt` 03 lines 5–7 (20, −45, maximum) decide it,
-and −45 is the only line that can.
+byte is that number as a byte.
+
+**Two's complement is now `[O]`, from the bytes alone** (re-derived 2026-09-06,
+§1.1a). `03-sensor.pcapng` writes 3, 4 and 5 each move record `0x70` and NOTHING
+else, to `0x14`, `0xd3` and `0x7f` — 20, **−45**, and 127. `0xd3` is −45 in
+two's complement and is not a plausible unsigned angle, so the encoding is
+settled without needing to know which UI action produced it.
+
+**The RANGE is `[D]` too, and it is in §7.16, not here.** `0x411f62`–`0x411f8a`
+is a signed clamp to −127…+127 followed by a byte truncation into object `0x2c`.
+
+Recording the near-miss, because it is the §7 failure mode in miniature: the
+first version of this paragraph said the range was *not* derived, on the grounds
+that the vendor "reads `TBM_GETPOS` and never clamps" — written on 2026-09-06,
+hours after §7.16 had derived the clamp, and contradicting it. Two lessons, both
+already rules. §1.2a: "never clamps" is an ABSENCE claim, and the search behind
+it was a scan for `pushl $0x406` that finds only MFC control-binding ids at
+`0x4118e7` — a search that cannot see a clamp done with `cmpl`/`jge` at all.
+§1.7: trust the written record over recollection when they disagree.
+
+The consequence reached the code. `encodeSensorAngle` accepted −128, which the
+vendor clamps to −127, so `egg-config` could emit a byte the vendor's UI cannot
+produce — `[G]` under §1.3, on the one mouse there is. Narrowed to −127…+127 on
+2026-09-06 and asserted in `Tests/test_citations.py`.
 
 ### Object `0x29` packs two combos, and preserves its high nibble
 Both tuning combos land in one byte. `CB_GETCURSEL` on the **Smoothing** combo
@@ -2270,8 +2293,12 @@ the record. §7.7's evidence is that `obj[0x30 + 8k]` and `obj[0x32 + 8k]` — e
 its keycode and its modifier byte there. From the baseline, mask `0x10` is
 FORWARD, which is entry 3, which is **records `0x4c`–`0x52`**.
 
-`log.txt` 05 lines 10–12 map Forward to keyboard A with no modifier, with CTRL,
-and with CTRL+SHIFT. Predicted modifier byte, somewhere in records `0x4e`–`0x51`:
+~~`log.txt` 05 lines 10–12 map Forward to keyboard A...~~ — the LABELS are void
+under §1.1a; the BYTES they were labelling are not. `05-buttonmapping.pcapng`
+writes 10, 11 and 12 move entry 3 to `02 00 04`, `02 01 04` and `02 03 04`, and
+`0x03` being the bitwise OR of `0x01` and `0x02` is what makes the modifier a
+bitfield — a property of the three byte triples, independent of what anyone
+clicked. Predicted modifier byte, somewhere in records `0x4e`–`0x51`:
 
     line 10   no modifier      0x00
     line 11   CTRL             0x01
@@ -2350,9 +2377,17 @@ weighed rather than arriving at it fresh and reading it as a solution.
 capture lands", and §7.12 wrote a prediction to be scored "when
 `05-buttonmapping` is diffed". `windows-run/05-buttonmapping.pcapng` (30,768
 bytes) was uploaded with the rest of the run on 2026-09-05 and had never been
-diffed. It holds **12 `A0 11` writes**, and `windows-run/log.txt` lines 1–12
-label every one of them. This is the best-instrumented capture in the project:
-one labelled action per write, each moving 1–6 bytes.
+diffed. It holds **12 `A0 11` writes**, each moving 1–6 bytes of one button
+entry.
+
+~~and `windows-run/log.txt` lines 1–12 label every one of them~~ — struck
+2026-09-06 under §1.1a. **The labels are void; the twelve writes are not.**
+What survives, and it is enough: fourteen distinct button-entry states appear
+across the baseline read and the twelve writes, and `Tests/test_button_map.py`
+requires `egg-config` to reproduce all fourteen byte-for-byte without ever
+asking which action produced which write. That is a stronger test than a
+labelled list, because it also fails if our table can emit a state the vendor
+never could.
 
 Recorded here as a lesson as much as a finding: two sections deferred work to
 evidence already sitting in the repo. **Before writing "`[G]` until X lands",
@@ -2678,3 +2713,125 @@ pair. Nothing in the button-mapping path is `[G]` any more, so §1.3 no longer
 blocks exposing the whole menu — subject to the usual read-modify-write and
 diff-verify, and noting `+2`/`+4` must be zeroed for the non-payload actions
 because the vendor zeroes them.
+
+---
+
+## 7.18 The two writable fields that cited nothing, and what auditing them found  [D]
+
+Written 2026-09-06, from `Tools/ghidra-export/auditclaims.py`, which was built
+to enforce §1.2 — "traced to a specific location in an `.exe`. Cite the
+address." — against the 486 `[D]` markers in `notes/`. That rule had never been
+checked by anything. The audit's first real hit was not in the notes at all: it
+was in the shipping code.
+
+**`egg-config` could write two fields that cited no address whatsoever.** `lod`
+(record `0x09`) and `cpi-stage` (record `0x0d`). Their ranges came from counting
+`A0 11` writes in a capture and from line numbers in the repo-root `log.txt`,
+which §1.1a quarantined. Both are now derived from cfg107, and one of them
+turned out to be more interesting than the number it was defending.
+
+### 7.18.1 `lod` — record `0x09` ← object `0x27`
+
+    cfg107 0x40ec62  cmpl $0xa, %eax          bound check: eleven items
+    cfg107 0x40ec65  ja   0x40ec9e            out of range -> the 0x03 arm
+    cfg107 0x40ec67  jmpl *0x40ee54(,%eax,4)  eleven-entry jump table
+
+The eleven arms each do one `movb $imm, 0x27(%edi)`, and the immediates are
+exactly `0x00`–`0x0a`:
+
+    0x40ec6e -> 00   0x40ec56 -> 01   0x40ec5c -> 02   0x40ec9e -> 03
+    0x40ec74 -> 04   0x40ec7a -> 05   0x40ec80 -> 06   0x40ec86 -> 07
+    0x40ec8c -> 08   0x40ec92 -> 09   0x40ec98 -> 0a
+
+They appear in jump-table order, not numeric order, which is why a scan for a
+contiguous run of stores finds nothing and why this was missed before. The SET
+is what matters, and it is exactly `{0..10}` — the same range `encodeLod`
+already enforced, now for a reason rather than by a count.
+
+`[O]` agrees, and adds the default: across every settings frame in `windows-run`
+record `0x09` is `00`–`0a` and nothing else, and it is `03` in `01-baseline`,
+after `A1 13`, and after the firmware flash.
+
+### 7.18.2 The list length is CONDITIONAL, and nothing had noticed
+
+    cfg107 0x40ec42  cmpb $0x1, 0x57f23b      object 0x2b  ->  record 0x6f
+    cfg107 0x40ec4c  jne  0x40ec62            ... to the eleven-item branch
+
+When object `0x2b` is `1`, control never reaches the bound check. The dropdown
+collapses to **two** items: index 0 stores `1`, index 1 stores `2`, and the
+fallthrough default is `1`. The values `0` and `3`–`10` are then unreachable
+through the vendor's own UI.
+
+Record `0x6f` reads `0x00` on this device in every capture — before and after
+`A1 13`, and after the flash — so the eleven-value branch is the live one here
+and `encodeLod` is correct for this mouse. **It is not unconditionally correct.**
+If a future device or firmware reports `0x01` at record `0x6f`, writing anything
+but `1` or `2` is a byte the vendor could not have produced, which is `[G]`
+under §1.3. `egg-config` does not refuse it today; that is recorded as a live
+caveat rather than silently assumed away.
+
+Record `0x6f` was the entry in `recmap`'s hand-derived table marked
+"unattributed, but its source is known". It has a name now: it selects which
+lift-off-distance list the UI offers.
+
+### 7.18.3 A SECOND encoding writes the same byte, and has never been seen
+
+    cfg107 0x40fa7a  pushl $0x147             CB_GETCURSEL
+    cfg107 0x40fa89  cmpl $0xa, %eax          also eleven items
+    cfg107 0x40fa8e  jmpl *0x40fb1c(,%eax,4)
+    cfg107 0x40fa95..0x40fb0d                 eleven `movb $imm, 0x57f237`
+
+`0x57f237` is `0x57f210 + 0x27` — the same object byte, written absolutely
+rather than through `%edi`. The eleven immediates are
+
+    c2  c4  c6  c9  ca  cc  cd  d0  d4  d7  d9
+
+and **not one of them has ever appeared on this device**, in any capture, in any
+firmware, before or after a factory reset.
+
+§1.2a governs what may be said about that. The search space here is a
+whole-file scan for the 32-bit literal `0x0057f237` plus every `0x27(%reg)`
+displacement form, so the two writers are the two that exist *in cfg107*; that
+says nothing about cfg100/101/104, and nothing about why this path is not taken.
+So: **not "dead code", not "another product".** What is `[D]` is that a second
+CB_GETCURSEL handler writes the same byte a different way, and what is `[O]` is
+that this mouse has never held one of its values.
+
+The useful consequence is that **the two ranges are disjoint**. `0x00`–`0x0a`
+and `0xc2`–`0xd9` cannot be confused, so a settings record showing `0xc2` there
+is positive evidence that something other than the eleven-item list wrote it.
+`Tests/test_citations.py` asserts the disjointness, so if a future config
+version narrows the gap the test says so rather than the property quietly
+lapsing.
+
+### 7.18.4 `cpi-stage` — record `0x0d` ← object `0x0a`
+
+    cfg107 0x40edf0-0x40ee4c   four BM_GETCHECK (message 0xf0) calls
+
+    control 0x13f4 -> 0x40edfd  movb $0x0, 0xa(%edi)
+    control 0x1468 -> 0x40ee17  movb $0x1, 0xa(%edi)
+    control 0x14dc -> 0x40ee31  movb $0x2, 0xa(%edi)
+    control 0x1550 -> 0x40ee4c  movb $0x3, 0xa(%edi)
+
+Four mutually exclusive checkboxes storing an index is a radio group, so the
+range is `0..3` and the value is the ACTIVE stage. §7.6 had derived the range
+1..4 for `cpi-levels` (record `0x0e`) and left this one's *meaning* `[G]`; the
+earlier note closed it but sourced the ordering to "the four unlabelled radio
+buttons clicked top to bottom", read out of the quarantined log. The ordering is
+now the vendor's own control ids, which is both stronger and independent of it.
+
+### 7.18.5 What the audit tool does and does not decide
+
+`auditclaims.py` reports, from raw bytes: a `[D]` claim citing no address; an
+address mapped in no vendor binary; an address unmapped in the binary the prose
+names but real in another; an address in `.text` that a linear sweep does not
+decode; and a claim whose only source is the quarantined log. It does **not**
+decide whether the instruction there means what the note says. That is a
+reading, and a script cannot check a reading.
+
+Its own blind spot, stated because §1.2a requires it: instruction boundaries
+come from `objdump`'s linear disassembly, which desynchronises after data
+embedded in code. It desynchronises in this very region — it renders `0x40865a`
+(`movb $0x2, %cl`, the KEYBOARD action type) inside a bogus `addb`. So
+"not a boundary" is a reason to look, never a proof of error, and
+`Tests/test_citations.py` works from raw bytes instead (§1.2b).

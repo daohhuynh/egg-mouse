@@ -132,29 +132,97 @@ bool encodeBool(long v, std::uint8_t& out) {
     return true;
 }
 
-// config-protocol.md §7.9. Record 0x70 is the Sensor Angle Tuning trackbar
-// position, stored raw by `movb %al` at cfg107 0x411b25 -- so a negative angle
-// is two's complement. The RANGE is not derived: the vendor reads TBM_GETPOS
-// and never clamps, so the bound lives in a TBM_SETRANGE we have not read. This
-// encoder therefore accepts the full signed byte and says so, rather than
-// inventing a limit that would silently reject a legal angle.
+// config-protocol.md §7.9 and §7.16. Record 0x70 <- object 0x2c is the Sensor
+// Angle Tuning position, stored as a signed byte.
+//
+// NARROWED 2026-09-06 from -128..127 to -127..127, by the citation audit.
+//
+// The old bound was reasoned as follows: the value is stored raw by `movb` at
+// cfg107 0x411b25, the vendor "never clamps", the real bound must live in a
+// TBM_SETRANGE we have not read, and so the honest thing is to accept the whole
+// signed byte rather than invent a limit. Every step of that is wrong except
+// the first. The vendor DOES clamp, twenty lines further on:
+//
+//   0x411f62  83 f8 81               cmpl $-0x7f, %eax        SIGNED compare
+//   0x411f65  7d 0a                  jge  0x411f71            jge, not jae
+//   0x411f67  c7 86 74 03 .. 81ffffff movl $0xffffff81, 0x374(%esi)   -> -127
+//   0x411f71  b8 7f 00 00 00         movl $0x7f, %eax
+//   0x411f7c  7e 06                  jle  0x411f84            jle, not jbe
+//   0x411f7e  89 86 74 03 00 00      movl %eax, 0x374(%esi)          -> +127
+//   0x411f84  8a 96 74 03 00 00      movb 0x374(%esi), %dl    truncate
+//   0x411f8a  88 15 3c f2 57 00      movb %dl, 0x57f23c       -> object 0x2c
+//
+// A signed clamp to a symmetric +/-127 followed by a byte truncation. The
+// SIGNED jump forms are the load-bearing detail: an unsigned field would use
+// jae/jbe and could not clamp at a negative bound at all.
+//
+// So 0x80 (-128) is a value the vendor's own UI cannot produce. Emitting it
+// would be writing a byte whose meaning is [G] to a mouse there is only one of,
+// which §1.3 forbids. Accepting it was not caution; it was a guess wearing
+// caution's clothes -- and the comment that justified it asserted an absence
+// ("never clamps") that no search had established, which is exactly what §1.2a
+// exists to catch.
 bool encodeSensorAngle(long deg, std::uint8_t& out) {
-    if (deg < -128 || deg > 127) return false;
+    if (deg < -127 || deg > 127) return false;
     out = static_cast<std::uint8_t>(static_cast<signed char>(deg));
     return true;
 }
 
-// The LOD options the capture exercised were 0..10 inclusive, eleven of them,
-// one APPLY each (windows-run/02-basic.pcapng lines 19-29). The dropdown has
-// eleven entries and the twelfth slot in the log found nothing to select.
+// config-protocol.md §7.18. Record 0x09 <- object 0x27. Was the only writable
+// field with no address citation at all; its range came from counting writes in
+// a capture and reading a log that is now quarantined (CLAUDE.md §1.1a). It is
+// now [D], and the derivation is better than the count was:
+//
+//   cfg107 0x40ec62  cmpl $0xa, %eax ; ja 0x40ec9e   bound check, 11 items
+//   cfg107 0x40ec67  jmpl *0x40ee54(,%eax,4)         11-entry jump table
+//   cfg107 0x40ec6e..0x40ec9e                        eleven `movb $imm, 0x27(%edi)`
+//                                                    with imm exactly 0x00..0x0a
+//
+// The eleven arms are in jump-table order, not numeric order, which is why a
+// scan for a contiguous run finds nothing; the SET is what matters and it is
+// exactly {0..10}. [O] agrees: record 0x09 takes 00..0a and nothing else across
+// every settings frame in windows-run, default 0x03.
+//
+// TWO THINGS THIS BYTE DOES THAT THE OLD COMMENT DID NOT KNOW, both found by
+// auditing the citation rather than by looking for them.
+//
+// 1. THE LIST LENGTH IS CONDITIONAL. cfg107 0x40ec42 tests `cmpb $0x1,
+//    0x57f23b` -- object 0x2b, which recmap maps to record 0x6f -- and when it
+//    is 1 the dropdown collapses to TWO items storing only 1 and 2. This device
+//    reads 0x00 there in every capture, before and after a factory reset and
+//    after a firmware flash, so the eleven-value branch is the live one. If a
+//    future device or firmware reports 0x01 at record 0x6f, the values 0 and
+//    3..10 become unreachable through the vendor's own UI and writing one would
+//    be [G]. `set` refuses nothing here today, deliberately -- see §7.18 -- but
+//    that is a live caveat, not a settled question.
+// 2. A SECOND ENCODING WRITES THE SAME BYTE. cfg107 0x40fa95-0x40fb0d is
+//    another CB_GETCURSEL (0x147) mapping eleven indices to 0xc2, 0xc4, 0xc6,
+//    0xc9, 0xca, 0xcc, 0xcd, 0xd0, 0xd4, 0xd7, 0xd9 into the same object 0x27.
+//    Not one of those values has ever appeared on this device. That does NOT
+//    make it dead code (§1.2a: absence of observation is not absence), and the
+//    two ranges are disjoint, so a byte in 0xc2..0xd9 is a positive signal that
+//    something other than the eleven-item list wrote it. We never emit one.
 bool encodeLod(long v, std::uint8_t& out) {
     if (v < 0 || v > 10) return false;
     out = static_cast<std::uint8_t>(v);
     return true;
 }
 
-// The active CPI stage, 0-based. Observed 0,1,2,3 as the four unlabelled radio
-// buttons were clicked top to bottom (windows-run/06-cpi-stage.pcapng).
+// config-protocol.md §7.18. Record 0x0d <- object 0x0a. Also had no address
+// citation; also now [D]. cfg107 0x40edf0-0x40ee4c is four BM_GETCHECK calls
+// (message 0xf0) on dialog-135 controls 0x13f4, 0x1468, 0x14dc and 0x1550,
+// each storing a literal 0, 1, 2 or 3 to 0xa(%edi):
+//
+//   0x40edfd  movb $0x0, 0xa(%edi)      control 0x13f4
+//   0x40ee17  movb $0x1, 0xa(%edi)      control 0x1468
+//   0x40ee31  movb $0x2, 0xa(%edi)      control 0x14dc
+//   0x40ee4c  movb $0x3, 0xa(%edi)      control 0x1550
+//
+// Four mutually exclusive checkboxes storing an index is a radio group, so the
+// range is 0..3 and the value is the ACTIVE CPI STAGE. The old comment said the
+// same thing sourced to "the four unlabelled radio buttons clicked top to
+// bottom", which was a label read out of the quarantined log; the ordering is
+// now the vendor's own control ids instead.
 bool encodeCpiStage(long v, std::uint8_t& out) {
     if (v < 0 || v > 3) return false;
     out = static_cast<std::uint8_t>(v);
@@ -195,7 +263,7 @@ const Settable kSettable[] = {
      "config-protocol.md §7.9, cfg107 0x411ad1 setne -> obj 0x2a, serialised 0x404306"},
     {"force-max-fps", 0x71, encodeBool, "0 or 1",
      "config-protocol.md §7.9, cfg107 0x411b0b setne -> obj 0x2d, serialised 0x4045cf"},
-    {"sensor-angle", 0x70, encodeSensorAngle, "-128 to 127 (degrees, two's complement)",
+    {"sensor-angle", 0x70, encodeSensorAngle, "-127 to 127 (degrees, two's complement)",
      "config-protocol.md §7.9, cfg107 0x411b19 TBM_GETPOS / 0x411b25 -> obj 0x2c"},
     // NAMED AFTER THE BYTE, NOT AFTER THE CHECKBOX, and that is deliberate.
     // The vendor's control is captioned "Disable LED on Lift-Off" and stores
@@ -213,11 +281,12 @@ const Settable kSettable[] = {
     // already derived and cited; what changed is that each was then seen to
     // move the predicted byte to the predicted value on the real device.
     {"lod", 0x09, encodeLod, "0 to 10 (eleven lift-off distance steps)",
-     "notes/config-wire-observed.md §3; 11 writes, windows-run/02-basic lines 19-29"},
+     "config-protocol.md §7.18, cfg107 0x40ec62 bound / 0x40ec6e-0x40ec9e "
+     "eleven stores of 0x00-0x0a; scored against windows-run/02-basic"},
     {"cpi-stage", 0x0d, encodeCpiStage,
      "0 to 3 -- which CPI stage is ACTIVE, not how many exist (that is cpi-levels)",
-     "notes/config-wire-observed.md §4; windows-run/06-cpi-stage, four radio "
-     "buttons with APPLY never pressed"},
+     "config-protocol.md §7.18, cfg107 0x40edf0-0x40ee4c four BM_GETCHECK "
+     "storing 0/1/2/3; scored against windows-run/06-cpi-stage"},
     {"slamclick-filter", 0x06, encodeBool, "0 or 1",
      "config-protocol.md §7.8, cfg107 0x40677a/0x406786; scored against "
      "windows-run/04-buttons line 1, which flipped bit 0 and held the rest",
@@ -300,7 +369,13 @@ const ButtonAction kButtonActions[] = {
     {"browser",      "media", 0x18, 0x96, ButtonPayload::None, "cfg107 0x408160"},
     {"explorer",     "media", 0x18, 0x94, ButtonPayload::None, "cfg107 0x40820a"},
     // KEYBOARD and DISABLE.
-    {"key",          "keyboard", 0x02, 0x00, ButtonPayload::Key, "cfg107 0x408690"},
+    // 0x40865a sets the action type (`movb $0x2, %cl`) and 0x408690 stores it
+    // plus the modifier byte assembled by the orb chain at 0x40866f-0x408689.
+    // The type immediate is invisible to a linear disassembly here -- objdump
+    // desynchronises and renders 0x40865a inside a bogus instruction -- which
+    // is why Tests/test_citations.py works from raw bytes (§1.2b).
+    {"key",          "keyboard", 0x02, 0x00, ButtonPayload::Key,
+                                 "cfg107 0x40865a/0x408690"},
     {"disable",      "disable",  0xFF, 0x00, ButtonPayload::None, "cfg107 0x4082b4"},
 };
 const std::size_t kButtonActionCount =
