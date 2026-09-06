@@ -236,6 +236,47 @@ no length and no payload. The zero-write test of that claim is §4.4 stage 3 —
 `A0 07` read-back of blocks `0x34`–`0x74` compared against `FWFILE` 140, which
 is firmware 1.10 and is what this mouse runs (`bcdDevice 0x0110`, this same log).
 
+### 5b.3 The latch is most likely an UPDATE-IN-PROGRESS INTERLOCK  [G]
+
+Stated as `[G]`. It is an inference from three `[O]` facts, not derived from any
+binary, and **no design decision may rest on it** — §4.2's never-return rule
+stands unchanged and §2's "assume the device does not validate the image it is
+given" stands unchanged.
+
+The vendor's sequence (`updater-protocol.md` §5.4) is:
+
+```
+A1 3A  ->  A0 03  ->  65 x A0 06  ->  A1 08 checksum  ->  A1 09  ->  reboot
+```
+
+Given that (a) `A1 3A` sets a flag that survives power loss, (b) `A1 09` returns
+the vendor's own success value and does **not** clear it, and (c) the device
+nonetheless reboots on `A1 09` — the shape that fits is a flag meaning *an
+update is in progress; do not trust the application*, set at entry and cleared
+by the flash actually completing.
+
+**That is what a well-built updater does**, and the reason to write it down is
+what it implies about our own failure modes:
+
+- **An interrupted flash leaves the flag set, so the device boots to the
+  bootloader and stays recoverable.** Cable pulled, host crashed, our code
+  panicked mid-write — all land in the state this mouse is in right now, which
+  is annoying and reversible.
+- **The state we are in is therefore not damage. It is an uncommitted
+  transaction.** We set the flag and never performed the update.
+
+**Where this could be wrong, and it matters:** if the flag were cleared at the
+*start* of the flash (by `A0 03`) rather than at the end, a mid-write failure
+would leave a partial image marked valid — the dangerous case in §4 above. That
+reading is hard to square with `A1 09` failing to clear it, since `A1 09` is the
+tool's "we are finished" signal and would be the natural place to clear. But
+nothing observed rules it out, and **§4.2's never-return rule is what covers the
+case where this inference is wrong.**
+
+Do not upgrade this to `[D]` without an address, or to `[O]` without a device
+observation of an *interrupted* flash — which is not an experiment worth running
+deliberately.
+
 ### 5b.1 GAP: two `A1 09` sends produced ONE reset [O, unresolved]
 
 `leave-bootloader --yes` was run **twice**. Both sends were acknowledged, the
