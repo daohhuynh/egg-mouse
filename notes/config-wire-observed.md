@@ -541,3 +541,184 @@ not repeated: a first attempt read "baselines" by filtering transfers on
 `len(data) > 100`, which matched a **727-byte USB configuration descriptor**
 rather than the 1041-byte feature report, and produced nonsense values for
 `0x0b` and `0x06`. Filter on `is_get_report and len > 1000`.
+
+## 8. The firmware-1.10 capture run, 2026-09-06  [O]
+
+Seven captures in `windows-capture/`, taken by the owner on the Windows laptop against
+firmware **1.10** with config tool **1.07**. Predictions were pre-registered in
+`notes/prediction-capture-1.10.md` and committed at `8a25286`, before any file was
+opened. Decode with:
+
+    python3 Tools/capture/score110.py windows-capture/
+
+`score110.py` diffs consecutive settings records inside one capture and names an
+action only from §7.17's table, printing `UNKNOWN` otherwise. It never guesses.
+
+### 8.1 The stage-4 CPI flag bug is REAL, observed twice  [O]
+
+The headline. §7.8 derived from cfg107 that stage 4's `X != Y` flag is computed
+from **stage 3's** edit boxes -- a copy-paste bug in the vendor's collect pass.
+Never testable before, because stages 3 and 4 had never been written.
+
+`13-cpi-stage34.pcapng`, factory defaults at the open (400/800/1600/3200, every
+flag `00`):
+
+| seq | user action | flags after |
+| --- | --- | --- |
+| 4 | CPI3 X 1600 -> **1200** | `0x2d` -> `01` **and `0x32` -> `01`** |
+| 6 | CPI3 Y 1600 -> 2400 | unchanged |
+| 8 | CPI4 X 3200 -> 3000 | unchanged |
+| 10 | CPI4 Y 3200 -> **3000** | `0x32` **stays `01`** |
+
+Both ends of the bug are visible:
+
+- **seq 4 sets stage 4's flag while stage 4 is still 3200/3200, equal.** Nothing
+  about stage 4 changed. The only thing that changed is stage 3.
+- **seq 10 leaves stage 4's flag at `01` after stage 4 becomes 3000/3000, equal.**
+  It is not cleared, because stage 3 is 1200/2400 and still unequal.
+
+So the flag byte at `0x32` tracks stage 3, exactly as `0x40edde` says. `[D]`
+became `[O]`, and the prediction (`prediction-capture-1.10.md` §3) was a HIT.
+
+**Consequence for us: `0x32` is not a field we can compute from stage 4.** A
+read-modify-write preserves whatever the vendor left, which is correct behaviour
+and requires no change. Writing `0x32` from our own `X != Y` test would produce a
+record the vendor tool never produces.
+
+### 8.2 All eight MEDIA actions confirmed; §7.15's bar is lifted  [O]
+
+§7.15 barred writing any MEDIA value but `0xe9`, because BROWSER and EXPLORER have
+HID Consumer usages (`0x0196`, `0x0194`) too wide for the single byte `+1` that
+VOLUME UP occupies -- so either they spilled into `+2`-`+3`, or `+1` was never a
+raw usage and VOLUME UP matching one was a coincidence.
+
+`15-media.pcapng` settles it. Seven writes, each moving only button 2's `+0`/`+1`,
+`+2`-`+5` staying zero:
+
+| action | predicted (§7.17) | observed | seq |
+| --- | --- | --- | --- |
+| BROWSER | `18 96` | **`18 96`** | 4 |
+| EXPLORER | `18 94` | **`18 94`** | 6 |
+| PLAY/PAUSE | `20 cd` | `20 cd` | 8 |
+| NEXT | `20 b5` | `20 b5` | 10 |
+| PREVIOUS | `20 b6` | `20 b6` | 12 |
+| MUTE | `20 e2` | `20 e2` | 14 |
+| VOLUME DOWN | `20 ea` | `20 ea` | 16 |
+
+Eight of eight are now `[O]` (VOLUME UP `20 e9` from `05-buttonmapping.pcapng`
+seq 12 on 1.07). **Neither hypothesis in §7.15 was right in the form it was
+posed:** the wide usages do not spill into `+2`-`+3`, which stay zero. `+0`
+changes instead, `18` for those two against `20` for the other six. So `+0` is not
+a constant "media" tag -- it varies within the group -- and `+1` is a byte-sized
+selector whose relationship to HID usage is not established by this capture. Our
+table is correct either way, being `[D]` from the eight `movb` immediates at
+cfg107 `0x407d76`, `0x407e1d`, `0x407ec4`, `0x407f6b`, `0x408012`, `0x4080b9`,
+`0x408160` and `0x40820a`, and now `[O]` on the wire for all eight. The *meaning*
+of `18` versus `20` stays `[G]`, and §1.3 keeps us from inventing values that are
+not in §7.17's table.
+
+### 8.3 FIXED CPI: X and Y are independent, and the order is ours  [O]
+
+`14-fixed-cpi.pcapng`. The first `[O]` FIXED CPI payload where X != Y:
+
+    seq 4   0c 00 c4 09 c4 09    X = 2500, Y = 2500
+    seq 6   0c 00 ce 09 90 01    X = 2510, Y = 400
+
+`+2`/`+3` carries **X** and `+4`/`+5` carries **Y**, confirming §7.31's read of
+`0x00407c7e` (member `0x300` -> entry `+2`) and `0x00407ca0` (member `0x304` ->
+entry `+4`). `encodeButtonEntry`'s separate stores are right, and the `1600x800`
+argument syntax stands.
+
+**The normaliser is confirmed too.** the owner typed `2505`; the box showed `2510` and
+the wire carries `ce 09` = 2510, never `c9 09` = 2505. That is `0x00401e70`
+clamping to `[10, 30000]` then rounding to 10 with ties up, and it is the first
+`[O]` on the domain whose uncited `26000` bound was the shipping bug found on
+2026-09-06.
+
+The owner performed two applies rather than the three the steps asked for. It does not
+matter: one apply with X != Y and two distinct values determines the order by
+itself.
+
+### 8.4 The KEYBOARD KEY dialog is VK-driven, and it sets modifiers itself  [O]
+
+`16-keys.pcapng`, all on button 2:
+
+| seq | key pressed | observed | predicted | |
+| --- | --- | --- | --- | --- |
+| 4 | Left Shift | `02 **02** e1` | `02 **00** e1` | usage HIT, **modifier MISS** |
+| 6 | Keypad `+` | `02 02 **57**` | `02 02 57` or `02 02 2e` | **HIT, and the good branch** |
+| 8 | `Fn`+F5, WIN ticked | `02 08 3e` | `02 08 3e` | HIT |
+| 10 | Print Screen | `02 00 46` | `02 00 46` | HIT |
+
+**Keypad `+` reached the record as HID usage `0x57`, keypad-plus.** Not `0x2e`
+(`=`). So the dialog resolves the VIRTUAL KEY through §7.32's jump table and does
+**not** re-express the keypress as a character. The five keypad names §7.32 added
+(`kp-slash`, `kp-star`, `kp-minus`, `kp-plus`, `kp-dot`) are reachable through the
+vendor UI, and the worry that they might not be is closed.
+
+**The modifier prediction was wrong, and the two misses share one cause.** I
+predicted Left Shift would give `+1 = 00`, on the reasoning that a modifier
+pressed AS a key is distinct from one ticked as a checkbox. It gave `+1 = 02`.
+The owner had already reported the same thing on the keypad: *"it automatically ticked
+SHIFT alongside it"*. So **the dialog sets the modifier bits from the keyboard
+state at the moment of the press**, independently of which key it records. Left
+Shift ticks SHIFT because shift is down; the keypad `+` ticked SHIFT on his laptop
+for the same reason.
+
+Both bytes are still fully determined and our encoder is unaffected -- it takes an
+explicit modifier argument rather than inferring one. What is now `[O]` is that
+**the vendor tool cannot record Left Shift with no modifier**, so a record we
+produce with `02 00 e1` is one the vendor UI cannot make. That is allowed (§7.17
+gives `+1` as a plain HID modifier byte) but worth knowing before comparing our
+output to a vendor capture.
+
+The confounder raised before the run -- that an `Fn`-overlay numpad might have
+sent Shift+`=` in hardware -- is closed by the usage byte itself: hardware sending
+`=` could not produce `0x57`.
+
+### 8.5 1.10's factory record differs from 1.07 in exactly one byte  [O]
+
+`13-cpi-stage34.pcapng` opens immediately after a factory reset, so its first
+`A1 12` response is firmware 1.10's factory-default record. Against
+`01-baseline.pcapng` (1.07), over all 115 bytes:
+
+    0x71   1.07 = 01   1.10 = 00        (the ONLY difference)
+
+This is an independent confirmation of `CLAUDE.md` §5, which recorded the same
+single byte from the mid-run flash on 2026-09-05. The record LAYOUT is stable
+across 1.07 -> 1.10 by measurement, twice, and `0x71` (Force max Sensor fps, §7.8)
+is the one default that moved. **`CLAUDE.md` §5's "never hardcode a default
+vector" still stands** -- two versions differing by one byte is exactly the shape
+that tempts hardcoding.
+
+### 8.6 Prediction 5c answered as a side effect: the mirror is edit-time  [O]
+
+Written off before the run as untestable, on the grounds that the owner factory-resets
+between captures so every section would open on X == Y. He reset between most, but
+**not between `13-cpi-stage34` and `14-fixed-cpi`** -- the latter opens on
+CPI3 = 1200/2400 and CPI4 = 3000/3000, carried straight over.
+
+That is exactly the input the question needed. `14-fixed-cpi`'s two `A0 11` writes
+move only bytes `0x45`-`0x4a`, button 2's own entry. **The CPI block is untouched,
+and CPI3 is still 1200/2400 after both writes.**
+
+So the tool does **not** mirror Y onto X when it loads a record where they differ;
+the mirroring is an edit-time behaviour of the control. `A0 11` writing all 115
+bytes from the in-memory model is therefore safe for bytes the user did not touch,
+which was the hazard. Predicted outcome, confirmed.
+
+### 8.7 Two smaller observations
+
+**Opening the tool writes nothing, on 1.10 as on 1.07.** `11-open-1.10.pcapng` is
+four frames: `A1 02`, `A1 12`, and their responses. No `A0 11`. This is the first
+1.10 capture of the opening exchange and of a vendor settings read.
+
+**`12-reset-1.10.pcapng` shows no re-read after the reset**, unlike 1.07's
+`07-factory-reset.pcapng` which is `A1 02`, `A1 12`, `A1 13`, `A1 02`, `A1 12`.
+Here it stops at `A1 13`. Recorded as observed, **not** interpreted: the capture
+may simply have been stopped before the tool settled, and nothing distinguishes
+that from a version difference. Do not cite this as a 1.10 behaviour change.
+
+`11-open` and `12-reset` both open on **800/1200/2000/3200**, which is the owner's own
+CPI configuration rather than factory defaults -- the reset in `12-reset` is what
+returns the mouse to 400/800/1600/3200 for everything after.

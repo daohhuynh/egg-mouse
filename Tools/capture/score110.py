@@ -95,7 +95,9 @@ def report(path):
         print("\n  [seq %d] %s  -- %d byte(s) changed" % (f.seq, tag, len(d)))
         for i in d:
             note = ""
-            if BTN <= i < BTN + NBTN * BTNLEN:
+            if 0x01 <= i <= 0x04 and prev[i] == 0x80 and r[i] == 0x00:
+                note = "vendor zeroes 0x01-0x04 on write (7.4) -- not a setting"
+            elif BTN <= i < BTN + NBTN * BTNLEN:
                 note = "button %d  +%d" % ((i - BTN) // BTNLEN, (i - BTN) % BTNLEN)
             elif CPI <= i < CPI + NCPI * CPILEN:
                 note = "CPI stage %d  %s" % ((i - CPI) // CPILEN + 1,
@@ -131,12 +133,25 @@ def summary(paths):
                 # An ACTION change is (+0,+1) moving.  Comparing whole entries is
                 # wrong: 04-buttons.pcapng only ever moves +6, the multiclick
                 # filter, leaving the action untouched.
-                hand = r[0x01] != prev[0x01]
-                for i, e in enumerate(entries(r)):
-                    o = entries(prev)[i]
-                    if (e[0], e[1]) != (o[0], o[1]):
-                        written.setdefault((e[0], e[1]), []).append(
-                            (os.path.basename(p), f.seq, i, bytes(e).hex(" "), hand))
+                # 7.20: Left-handed Mode has NO record byte of its own -- it
+                # rewrites entries 0 and 1 together and is inferred from them.
+                # Record 0x01 is NOT the signal: 7.4 has the vendor zeroing
+                # 0x01-0x04 on the first write of every capture.
+                moved = [i for i in range(NBTN)
+                         if entries(r)[i][:2] != entries(prev)[i][:2]]
+                hand = set(moved) == {0, 1}
+                for i in moved:
+                    e = entries(r)[i]
+                    # KEYBOARD KEY carries its usage in +2, so (+0,+1) alone
+                    # collapses distinct keys onto one bucket.
+                    key = tuple(e[:3]) if e[0] == 0x02 else (e[0], e[1])
+                    written.setdefault(key, []).append(
+                        (os.path.basename(p), f.seq, i, bytes(e).hex(" "), hand))
+                for i in range(NBTN):
+                    e, o = entries(r)[i], entries(prev)[i]
+                    if e[0] == 0x02 and e[:2] == o[:2] and e[2] != o[2]:
+                        written.setdefault(tuple(e[:3]), []).append(
+                            (os.path.basename(p), f.seq, i, bytes(e).hex(" "), False))
             prev = r
     print("\nMEDIA actions written (prediction-capture-1.10.md 5, from 7.17):")
     for k, name in sorted(MEDIA_PREDICTED.items()):
@@ -147,14 +162,18 @@ def summary(paths):
     if unknown:
         print("\n  *** action pairs written that 7.17 does not name: %s"
               % ", ".join("%02x %02x" % k for k in sorted(unknown)))
-    print("\nKEYBOARD KEY entries written:")
+    print("\nKEYBOARD KEY entries written (usage lives in +2, so keyed on +0..+2):")
     for k, v in sorted(written.items()):
-        if k[0] == 0x02:
-            for src, seq, b, hexs, _hand in v:
-                print("  %s  %s seq%d btn%d" % (hexs, src, seq, b))
+        if k[0] == 0x02 and len(k) == 3:
+            mods = [n for b, n in MODNAME.items() if k[1] & b] or ["none"]
+            for src, seq, b, hexs, _h in v:
+                print("  %s   usage=0x%02x mods=%-6s  %s seq%d btn%d"
+                      % (hexs, k[2], "+".join(mods), src, seq, b))
     print("\nMOUSE actions whose (+0,+1) was ever CHANGED by a write:")
-    print("  (a write that also moves record 0x01 is the Left-handed Mode swap,")
-    print("   which rewrites entries programmatically -- NOT a menu pick.)")
+    print("  (a write moving BOTH entry 0 and entry 1 and nothing else is the")
+    print("   Left-handed Mode MOVE of 7.20, which rewrites them programmatically")
+    print("   -- NOT a menu pick.  Record 0x01 is not the signal: 7.4 has the")
+    print("   vendor zeroing 0x01-0x04 on the first write of every capture.)")
     for k, name in sorted((k, v) for k, v in ACTION.items() if v.startswith("MOUSE")):
         hits = written.get(k, [])
         picks = [h for h in hits if not h[4]]
