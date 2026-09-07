@@ -1,11 +1,11 @@
 // Protocol.h -- every derived protocol constant, AS DATA.
 //
-// CLAUDE.md §3: "Protocol constants live in EGGCore as data tables, not
+// engineering-rules.md §3: "Protocol constants live in EGGCore as data tables, not
 // scattered through code." Nothing in this file is a guess. Every value cites
 // the notes section and the address it was derived from, so a reader can check
 // any of it against the binary without trusting this file.
 //
-// CLAUDE.md §1.2: only [O] and [D] reach the hardware. There are no [G] values
+// engineering-rules.md §1.2: only [O] and [D] reach the hardware. There are no [G] values
 // here. If you are tempted to add one, it belongs in a comment, not a constant.
 #pragma once
 
@@ -193,7 +193,7 @@ inline constexpr unsigned kDelaySmallQuery   = 50;
 inline constexpr unsigned kDelayReadRequest  = 80;
 inline constexpr unsigned kDelayFactoryReset = 1100;
 // A0 11's SLEEP IS 300 ms AND IT IS [D]. An earlier version of this comment
-// said it was not derivable, and was wrong in a way CLAUDE.md §1.2a names in so
+// said it was not derivable, and was wrong in a way engineering-rules.md §1.2a names in so
 // many words. It read:
 //
 //   "the caller does not push it as a literal -- `push $0x12c` appears nowhere
@@ -245,7 +245,7 @@ constexpr unsigned configDelayMs(std::uint8_t command) {
 // ---------------------------------------------------------------------------
 // config-protocol.md §1: "What is not shared is the command space." The framing
 // is common; the command numbers are not. Mixing them is a write with a [G]
-// meaning, which CLAUDE.md §1.3 forbids outright.
+// meaning, which engineering-rules.md §1.3 forbids outright.
 
 // config 1.07. [D] config-protocol.md §7.1 -- cmdscan.py over ALL of .text,
 // not just the device band, finds these four and no others.
@@ -312,7 +312,7 @@ inline constexpr const char* kButtonEntrySteps =
 inline constexpr const char* kButtonEntryReflashNote =
     "It can be re-flashed from there -- with --i-know-this-is-button-entered,\n"
     "because the buttons are not an A1 3A entry and egg-flash refuses a\n"
-    "bootloader it did not enter itself (CLAUDE.md 4.2b). The bootloader is\n"
+    "bootloader it did not enter itself (engineering-rules.md 4.2b). The bootloader is\n"
     "forced by hardware and does not depend on any firmware being valid.";
 
 }  // namespace egg

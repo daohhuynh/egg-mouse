@@ -1,6 +1,6 @@
 // Log.h -- every frame that crosses the wire, recorded.
 //
-// CLAUDE.md §3: the flasher is CLI-first so that "output is a log by
+// engineering-rules.md §3: the flasher is CLI-first so that "output is a log by
 // construction". §4.1 requires the diff of every write to be logged. This is
 // the one place that happens, so that a session can be replayed and diffed
 // against a golden capture (§4.3) without re-running anything.

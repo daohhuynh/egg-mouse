@@ -2,7 +2,7 @@
  "_comment": [
   "Predictions about the settings record, derived from the vendor binary",
   "BEFORE the capture that tests them. Kept in a separate file from",
-  "fieldmap.py on purpose: CLAUDE.md §7.1 deleted a previous tool because it",
+  "fieldmap.py on purpose: engineering-rules.md §7.1 deleted a previous tool because it",
   "carried its conclusions inside it, so anyone reading the tool inherited",
   "them. fieldmap.py must observe without expecting; this file expects; and",
   "score.py is the only place the two meet.",

@@ -4,7 +4,7 @@ manifest row for it.
 
 THE PROBLEM THIS SOLVES, stated so the safety argument is checkable.
 
-CLAUDE.md §1.4 says the firmware resource "must be a constant in our code --
+engineering-rules.md §1.4 says the firmware resource "must be a constant in our code --
 never a variable, never selected at runtime, never chosen from a list. Other
 resources in the binary may belong to other products." Updater 1.10 carries SIX
 FWFILE resources of identical length, and five of them would be accepted by the
@@ -252,7 +252,7 @@ def emit_row(r):
     struct, and needs no .exe to do it.
 
     `provenOnDevice` is emitted as `false` and this tool cannot make it anything
-    else. CLAUDE.md 5: a release is proven when it has been flashed onto the one
+    else. engineering-rules.md 5: a release is proven when it has been flashed onto the one
     mouse and verified, which is a fact about the past that no file can
     establish about itself.
     """
@@ -261,7 +261,7 @@ def emit_row(r):
     // FindResourceW call site, NOT from the resource table.
     //
     // provenOnDevice is false, and ingest.py cannot emit anything else: this
-    // image has not been flashed onto the mouse and verified (CLAUDE.md 5).
+    // image has not been flashed onto the mouse and verified (engineering-rules.md 5).
     {"%s",
      {%d, %d, %d, %d},
      "%s",
@@ -362,7 +362,7 @@ def main(argv):
             print("    3. leave provenOnDevice false until this image has actually")
             print("       been flashed onto the mouse and verified. Recording that")
             print("       later means moving the row to index 0 and updating")
-            print("       test_manifest.py's proven-row check -- CLAUDE.md §5.")
+            print("       test_manifest.py's proven-row check -- engineering-rules.md §5.")
             print("    4. rebuild, then run `ctest`.")
         print()
     return bad

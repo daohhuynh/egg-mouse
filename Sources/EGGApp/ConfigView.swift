@@ -183,7 +183,7 @@ struct ConfigView: View {
     /// different record regions through three different CLI verbs, so they are
     /// separate panels rather than one clever form -- and switching clears the
     /// preview, because a preview belongs to the exact command that produced it
-    /// (CLAUDE.md §4.2c: an approval is bound to the bytes it approves).
+    /// (engineering-rules.md §4.2c: an approval is bound to the bytes it approves).
     enum Editor: String, CaseIterable, Identifiable {
         case field = "One field", button = "Buttons", cpi = "CPI"
         case click = "Click filter", hand = "Handedness"
@@ -655,7 +655,7 @@ struct ConfigView: View {
     /// does NOT offer, and the app has parsed those into `model.withheld` since
     /// the day it shipped -- and never rendered them. So a user looking for
     /// `glass-mode`, `multiclick-filter` or the vendor's inverted "Disable LED
-    /// on Lift-Off" saw no trace of it and no explanation. CLAUDE.md §1.2a: an
+    /// on Lift-Off" saw no trace of it and no explanation. engineering-rules.md §1.2a: an
     /// absence is a claim, and that rule applies to our own UI.
     @ViewBuilder private var withheldList: some View {
         if !model.withheld.isEmpty {
@@ -926,7 +926,7 @@ struct ConfigView: View {
     /// whole frame plus the diff; the second is the only one that opens the
     /// device. Deliberately NOT modelled as a confirmation alert: an alert
     /// asks "are you sure" about a thing the user has not been shown, which is
-    /// the reflex CLAUDE.md 4.2c exists to refuse. Here the second click comes
+    /// the reflex engineering-rules.md 4.2c exists to refuse. Here the second click comes
     /// after the bytes are on screen.
     private func chooseRestore() {
         let p = NSOpenPanel()

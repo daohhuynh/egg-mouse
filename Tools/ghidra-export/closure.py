@@ -5,7 +5,7 @@ Answers one question: which functions can reach the device, and which functions
 can reach those? Structure only; it holds no belief about what any of them mean.
 
 METHOD. Raw bytes and raw call edges. Ghidra supplies function BOUNDARIES only,
-used as intervals, never as edges — CLAUDE.md 1.2b, after its call-graph field
+used as intervals, never as edges — engineering-rules.md 1.2b, after its call-graph field
 reported cfg107 0x404720 uncalled when 0x413faf is a direct `calll` to it.
 
   Seed, part 1: exhaustive 4-byte scan of every byte of .text for the address
@@ -249,7 +249,7 @@ def analyse(tag, edir):
     addrtaken_gap = sorted((taken & (seed | set(kseed))) - clo,
                            key=lambda x: int(x, 16))
     # Out-of-span is informational and must be ENUMERATED, not summarised away
-    # (CLAUDE.md 1.2a). In all seven binaries it is the CRT/ATL file classes,
+    # (engineering-rules.md 1.2a). In all seven binaries it is the CRT/ATL file classes,
     # whose handles come from CreateFile* on filesystem paths.
     addrtaken_outofspan = sorted(taken & set(kresidue), key=lambda x: int(x, 16))
 
@@ -272,7 +272,7 @@ def analyse(tag, edir):
             "in_band": (sum(1 for a in clo if b[0] <= int(a, 16) <= b[1]) if b else None)}
 
 
-# A planted positive, per CLAUDE.md 6.2: a harness that cannot produce a bad
+# A planted positive, per engineering-rules.md 6.2: a harness that cannot produce a bad
 # result is not evidence. These are the functions that caused the retracted
 # factory-reset conclusion -- 0x413f90 is the Factory Reset button's handler and
 # 0x404720 is the A1 13 sender it calls. NEITHER EXISTS IN GHIDRA'S EXPORT

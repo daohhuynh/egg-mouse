@@ -1,4 +1,4 @@
-// egg-flash -- CLI-first by design (CLAUDE.md §3): no window to close, no Dock
+// egg-flash -- CLI-first by design (engineering-rules.md §3): no window to close, no Dock
 // quit item, and the output is a log by construction.
 #include "egg/BootloaderEntry.h"
 #include "egg/Device.h"
@@ -38,7 +38,7 @@ static std::string versionOrRaw(std::uint16_t bcd) {
 // WHEN AN .exe DOES NOT MATCH THE SELECTED ROW, SAY WHAT IT ACTUALLY IS.
 //
 // The row is chosen by --version (default: the primary release) and the file
-// must then hash to it -- that is CLAUDE.md §1.4's compile-time constant, and
+// must then hash to it -- that is engineering-rules.md §1.4's compile-time constant, and
 // this function does not change it. It only reads the failure back to the user.
 //
 // It exists because `egg-flash help` claimed "The .exe you name is identified
@@ -563,7 +563,7 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
 
 
 // ---------------------------------------------------------------------------
-// §4.4 stage 3, and now also CLAUDE.md §4.2's precondition for ANY erase:
+// §4.4 stage 3, and now also engineering-rules.md §4.2's precondition for ANY erase:
 // "Never erase without a saved copy of what is being erased."
 //
 // Read-only. A0 07 carries a block index and nothing else -- no payload, no
@@ -1318,7 +1318,7 @@ int listReleases() {
         "\nA release is selected by --version, and the .exe you name must hash "
         "to the\nrow's updater SHA-256. An updater not in this table has no "
         "resource id here,\nand there is no path that guesses one "
-        "(CLAUDE.md \u00a71.4).\n\n"
+        "(engineering-rules.md \u00a71.4).\n\n"
         "To add a release:\n"
         "  python3 Tools/pe/ingest.py <updater.exe> --label 1.11\n");
     return 0;
@@ -1481,7 +1481,7 @@ int main(int argc, char** argv) {
                 "by this tool.\n\n"
                 "  Every [O] in this project -- every timing, every settings "
                 "byte, every\n"
-                "  bootloader observation -- came from %s. CLAUDE.md \u00a75: a "
+                "  bootloader observation -- came from %s. engineering-rules.md \u00a75: a "
                 "different\n"
                 "  firmware version is a different device until shown "
                 "otherwise.\n\n"

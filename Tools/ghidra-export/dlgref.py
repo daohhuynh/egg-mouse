@@ -8,7 +8,7 @@ linker kept and the program cannot show -- a different fact about the product
 than a dialog that is merely never seen in practice, and the two must not be
 confused.
 
-TWO INDEPENDENT METHODS, because CLAUDE.md 1.2a requires the encoding forms a
+TWO INDEPENDENT METHODS, because engineering-rules.md 1.2a requires the encoding forms a
 negative was searched under to be stated:
 
   A. objdump immediates. The whole file is disassembled (every section, not

@@ -28,7 +28,7 @@ add_library(EGGCore STATIC
 target_include_directories(EGGCore PUBLIC Sources/EGGCore/include)
 target_link_libraries(EGGCore PUBLIC PkgConfig::HIDAPI)
 
-# CLAUDE.md §3: two executables, never one. Config and flash have contradictory
+# engineering-rules.md §3: two executables, never one. Config and flash have contradictory
 # quit semantics (§4.2) and sharing a process makes "can the user quit now?" a
 # conditional on internal state -- the exact bug class being designed out.
 # §3 lists EGGConfigCore as "read-modify-write, diff-verify". Until 2026-09-05
@@ -97,7 +97,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t actionset adoption button_map citations config_replay coverage cpi crossrefs defaults gui_state handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
+  foreach(t actionset adoption button_map citations config_replay coverage cpi crossrefs defaults freshclone gui_state handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -190,7 +190,7 @@ set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # SKIP_RETURN_CODE 77 on every test that needs a vendor .exe. Those files are
 # gitignored and are on exactly one machine, so on a fresh clone these four used
 # to `exit 0` and ctest printed four green passes for four tests that asserted
-# nothing -- CLAUDE.md 6.2's "a harness that cannot produce a bad result is not
+# nothing -- engineering-rules.md 6.2's "a harness that cannot produce a bad result is not
 # evidence", in the four gates that stand between a mistake and a flash. They
 # now report Skipped, which is the true statement (2026-09-07).
 add_test(NAME flash_undo COMMAND Tests/test_flash_undo.sh)

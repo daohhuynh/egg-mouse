@@ -15,7 +15,7 @@ command anyone can rerun.
 
 None of those was reproducible. They were computed once, written down as prose,
 and cited to nothing -- which is how a number survives a context compaction
-looking like established fact (CLAUDE.md §6). This recomputes all of it from the
+looking like established fact (engineering-rules.md §6). This recomputes all of it from the
 .exe files in one pass and prints what §8 claims, so the claim and the check are
 the same command.
 

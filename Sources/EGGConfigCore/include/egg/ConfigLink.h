@@ -1,7 +1,7 @@
 // ConfigLink.h -- the one seam between the config session and the world.
 //
 // The flasher has had this since the beginning (BootloaderLink) and the config
-// tool did not, which meant every safety property CLAUDE.md §4.1 asks for --
+// tool did not, which meant every safety property engineering-rules.md §4.1 asks for --
 // "never write after a failed read", "validate a read is structurally plausible
 // before acting on it", "never let a reported success stand in for verifying
 // the data itself" -- lived in `int cmdSet(...)` inside main.cpp and could only

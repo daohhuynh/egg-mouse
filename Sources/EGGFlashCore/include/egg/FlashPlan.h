@@ -2,7 +2,7 @@
 // device's current image off before touching it, and binding an approval to the
 // exact bytes it approves.
 //
-// Deliberately not in WritePhase.cpp. CLAUDE.md §4.3: "Keep the write phase
+// Deliberately not in WritePhase.cpp. engineering-rules.md §4.3: "Keep the write phase
 // small and in one file. ~100 lines in one place can be audited by eye." This
 // is the code that runs BEFORE the point of no return, where abort is always
 // correct (§4.2), so it must not share a file with the code that may never
@@ -22,7 +22,7 @@ namespace egg::fw {
 // ---------------------------------------------------------------------------
 // Read the device's application region back, block by block, with A0 07.
 //
-// CLAUDE.md §4.2, added 2026-09-05: "Never erase without a saved copy of what
+// engineering-rules.md §4.2, added 2026-09-05: "Never erase without a saved copy of what
 // is being erased. No A0 03 until the current application region has been read
 // back block by block, written to disk, and the file re-read and checked."
 //
@@ -110,7 +110,7 @@ BackupCheck checkBackupFile(const std::string& path);
 std::vector<Frame> plannedFrames(const Image& img);
 
 // ---------------------------------------------------------------------------
-// CLAUDE.md §4.2c: "an approval must be bound to the exact bytes it approves."
+// engineering-rules.md §4.2c: "an approval must be bound to the exact bytes it approves."
 //
 // SHA-256 over the concatenation of plannedFrames(), truncated to something a
 // person will actually retype. If the image changes, or the block range

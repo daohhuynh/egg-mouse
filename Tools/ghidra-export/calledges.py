@@ -5,7 +5,7 @@ Recover call/jump edges for a vendor binary from RAW BYTES, independently of any
 Ghidra-exported call-graph field.
 
 Structure only. This tool records where control transfers go; it holds no belief
-about what any function, address, or import means (CLAUDE.md 7.1). Nothing is
+about what any function, address, or import means (engineering-rules.md 7.1). Nothing is
 executed: the binary is opened read-only and parsed as a file.
 
 Method

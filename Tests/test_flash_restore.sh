@@ -10,7 +10,7 @@
 # Image::loadFromBackup directly and prove the gate works. They cannot prove the
 # CLI reaches it: a verb that never calls the loader, or calls it after the
 # device is touched, passes every one of them. Every case below runs with no
-# mouse attached, which is the property CLAUDE.md §4.2b actually requires --
+# mouse attached, which is the property engineering-rules.md §4.2b actually requires --
 # everything that can fail happens before A1 3A.
 #
 # It also pins the sidecar FORMAT from the outside. test_flash.cpp round-trips
@@ -22,7 +22,7 @@ cd "$(dirname "$0")/.."
 BIN=./build/egg-flash
 EXE="Endgame Gear OP1 8k v2 Firmware Updater 1.10.exe"
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
-# 77, not 0. CLAUDE.md 6.2: a harness that cannot produce a bad result is not
+# 77, not 0. engineering-rules.md 6.2: a harness that cannot produce a bad result is not
 # evidence. This used to `exit 0`, so on any machine without Endgame's binaries
 # -- a fresh clone, CI, anyone but the owner -- ctest printed a green pass for a test
 # that had asserted nothing. CMakeLists sets SKIP_RETURN_CODE 77 so the run says

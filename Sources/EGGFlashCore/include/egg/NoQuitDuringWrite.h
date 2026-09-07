@@ -1,7 +1,7 @@
 // NoQuitDuringWrite.h -- the erase-through-verified-image unit cannot be asked
 // to stop.
 //
-// CLAUDE.md §3: "Trap SIGINT/SIGTERM explicitly during the write phase."
+// engineering-rules.md §3: "Trap SIGINT/SIGTERM explicitly during the write phase."
 //
 // NEVER IMPLEMENTED UNTIL 2026-09-05, when an adversarial audit noticed the
 // rule had no code behind it. It is not hypothetical: earlier the same day the owner

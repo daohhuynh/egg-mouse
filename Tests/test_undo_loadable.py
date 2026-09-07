@@ -11,7 +11,7 @@ The consequence was not cosmetic. `egg-config factory-reset --yes` reads, saves
 egg-before-reset.bin, wipes the settings, and tells the user to run
 `egg-config restore egg-before-reset.bin --yes` if anything went wrong. That
 restore would have refused the file. So would the vault at
-~/.egg-mouse-known-good.bin, which CLAUDE.md §4.1 calls the undo. The undo
+~/.egg-mouse-known-good.bin, which engineering-rules.md §4.1 calls the undo. The undo
 existed, was written correctly, and could not be used.
 
 It survived the whole suite because nothing round-tripped a saved record through

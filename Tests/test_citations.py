@@ -1,7 +1,7 @@
 """Tests/test_citations.py -- every byte egg-config can write, checked against
 the vendor binary it was derived from.
 
-CLAUDE.md 1.2 requires a [D] claim to cite an address in an .exe. Nothing has
+engineering-rules.md 1.2 requires a [D] claim to cite an address in an .exe. Nothing has
 ever enforced that. The button table in ConfigRecord.cpp carries a cfg107
 address on each of its nineteen rows, the settable-field table carries one on
 each of its thirteen -- thirty-two citations that were checked once, by eye,
@@ -9,7 +9,7 @@ by a session that is gone, and never again.
 
 This checks them from RAW BYTES, on every run.
 
-WHY RAW BYTES AND NOT A DISASSEMBLER (CLAUDE.md 1.2b: derived views are evidence,
+WHY RAW BYTES AND NOT A DISASSEMBLER (engineering-rules.md 1.2b: derived views are evidence,
 never ground truth). objdump's linear sweep desynchronises after data embedded in
 code. It desynchronises in exactly this region: it renders 0x40865a as part of a
 bogus `addb %cl, -0x7d(%eax)` and hides the `movb $0x2, %cl` that sets the
@@ -54,7 +54,14 @@ OBJ_PAYLOAD = 0x57F240
 
 
 def load_text():
-    """cfg107's .text as (bytes, virtual address of byte 0)."""
+    """cfg107's .text as (bytes, virtual address of byte 0).
+
+    Returns (None, 0) when the vendor binary is absent. It is deliberately not
+    in the repository -- it is Endgame Gear's, not ours to redistribute -- so a
+    clone WILL lack it, and the honest answer is "skipped", not a traceback.
+    """
+    if not os.path.exists(CFG107):
+        return None, 0
     with open(CFG107, "rb") as f:
         data = f.read()
     i = data.find(b".text\x00")
@@ -68,8 +75,8 @@ def load_text():
     return data[rawoff:rawoff + rawsize], base + rva
 
 
-TEXT, TEXT_VA = load_text(), 0
-TEXT, TEXT_VA = TEXT[0], TEXT[1]
+TEXT, TEXT_VA = load_text()
+HAVE_CFG107 = TEXT is not None
 
 
 def at(va, n):
@@ -127,7 +134,7 @@ def reg_holds(va, window_before, reg, want):
     Zero is reached by `xor r,r` (33 /r or 31 /r with mod=11 and reg==rm); any
     other value by `movl $imm32, r32` (b8+r). Both forms are what the vendor's
     compiler emits here, and both are checked from raw bytes rather than from a
-    disassembler that desynchronises in this region (CLAUDE.md 1.2b).
+    disassembler that desynchronises in this region (engineering-rules.md 1.2b).
     """
     blob = at(va - window_before, window_before + 24)
     if want == 0:
@@ -162,6 +169,8 @@ def parse_button_table():
     return rows
 
 
+@unittest.skipUnless(HAVE_CFG107,
+                     "cfg107 not present; see notes/binaries.md")
 class TheButtonTableMatchesTheBinary(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -338,6 +347,8 @@ class TheButtonTableMatchesTheBinary(unittest.TestCase):
         self.assertEqual(0x20, by["mute"]["b0"])
 
 
+@unittest.skipUnless(HAVE_CFG107,
+                     "cfg107 not present; see notes/binaries.md")
 class TheSettableFieldCitationsResolve(unittest.TestCase):
     """The thirteen writable fields. Weaker than the button check -- their
     citations name a mnemonic rather than an immediate -- so this verifies what
@@ -356,7 +367,7 @@ class TheSettableFieldCitationsResolve(unittest.TestCase):
                                re.findall(r"0x([0-9a-f]{6})", m.group(1))]
 
     def test_every_writable_field_cites_an_address(self):
-        """CLAUDE.md 1.2, enforced rather than assumed.
+        """engineering-rules.md 1.2, enforced rather than assumed.
 
         This is what the audit actually caught: `lod` and `cpi-stage` were
         writable, shipping, and cited NOTHING -- their ranges came from counting
@@ -371,7 +382,7 @@ class TheSettableFieldCitationsResolve(unittest.TestCase):
             name = r.split('"')[0]
             self.assertTrue(
                 re.search(r"cfg1\d\d[^\"]*?0x[0-9a-f]{6}", r),
-                "settable field %r cites no cfg1xx address -- CLAUDE.md 1.2 "
+                "settable field %r cites no cfg1xx address -- engineering-rules.md 1.2 "
                 "says a [D] claim must cite one, and every byte this table can "
                 "write reaches a mouse there is only one of" % name)
 

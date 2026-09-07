@@ -2,7 +2,7 @@
 """test_cpi.py -- the CPI stage writer, scored against cfg107's raw bytes and
 against the vendor's own captured records.
 
-CLAUDE.md §1.3 forbids writing a byte whose meaning is [G]. For CPI that meant
+engineering-rules.md §1.3 forbids writing a byte whose meaning is [G]. For CPI that meant
 two things had to be [D] before `egg-config cpi` could exist: the LAYOUT (which
 §7.8 settled) and the LEGAL VALUES (which nothing had, until §7.19).
 
@@ -171,7 +171,7 @@ class TheBoundsComeFromTheVendorsOwnNormaliser(unittest.TestCase):
         """SetRange(1, 0x578, FALSE) -- push 0; push 0x578; push 1.
 
         This was written expecting EIGHT sites (four X and four Y on the CPI
-        page) and found TEN. CLAUDE.md 1.2a: a count is an absence claim about
+        page) and found TEN. engineering-rules.md 1.2a: a count is an absence claim about
         everywhere you did not look, so the two extra were chased rather than
         absorbed into the number. They are the FIXED CPI popup (dialog 150,
         caption 'FIXED CPI', two trackbars 1077/1080), the dialog behind the

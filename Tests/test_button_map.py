@@ -7,7 +7,7 @@ check that exists on our encoder: the .exe told us what the bytes SHOULD be
 (config-protocol.md 7.17), and the capture shows what they actually WERE.
 
 DELIBERATELY LABEL-FREE. The capture's per-write labels lived in a log file that
-was lost, and the surviving copy is single-sourced (CLAUDE.md 1.1a). So nothing
+was lost, and the surviving copy is single-sourced (engineering-rules.md 1.1a). So nothing
 here depends on knowing which action produced which write. Instead: every button
 entry state the vendor ever wrote must be reproducible by SOME action in our
 table, and the bytes must match exactly. That is a stronger claim than matching

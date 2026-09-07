@@ -1,7 +1,7 @@
 #!/bin/bash
 # mutants.sh -- do test-flash and test-config actually catch anything?
 #
-# CLAUDE.md §6.2: "A harness that cannot produce a bad result is not evidence.
+# engineering-rules.md §6.2: "A harness that cannot produce a bad result is not evidence.
 # If the planted positives never fail and no verdict is ever rejected, the
 # harness is measuring nothing. Report its failure rate; a rate of zero is a red
 # flag, not a pass."
@@ -121,7 +121,7 @@ NQ=Sources/EGGFlashCore/src/NoQuitDuringWrite.cpp
 DV=Sources/EGGCore/src/Device.cpp
 
 # The bootloader-entry state machine. Every [O] fact about A1 3A came off this
-# path, and CLAUDE.md §4.2b puts the LATCHED window's opening here rather than
+# path, and engineering-rules.md §4.2b puts the LATCHED window's opening here rather than
 # at the erase -- so a bug in it costs the mouse before a single firmware byte
 # has been sent. It had no mutants until 2026-09-07 despite test_flash.cpp
 # driving `enterBootloaderAndConfirm` thirteen times.
@@ -365,7 +365,7 @@ mutate kill "whole-image checksum truncated to 16 bits" "$FW" \
     for (std::uint8_t b : image) sum = static_cast<std::uint16_t>(sum + b);
     return sum;  // MUTANT'
 
-# CLAUDE.md §4.3 lists four invariants to assert, and the fourth is "the
+# engineering-rules.md §4.3 lists four invariants to assert, and the fourth is "the
 # firmware resource identifier is never anything but the single hardcoded
 # constant". Nothing measured it until now. Updater 1.10 carries six FWFILE
 # resources, all 66,560 bytes, all 65 blocks; id 142 is the nastiest wrong
@@ -848,7 +848,7 @@ mutate kill "sub-byte writes clobber the rest of the byte" "$CR" \
 # The CPI encoder. config-protocol.md §7.19 derives the grid from cfg107
 # `0x40d880`; these ask whether the C++ that implements it is actually graded.
 # Every one of them produces a CPI the vendor's own tool would never store, and
-# CLAUDE.md §1.3 makes an ungrounded value a byte we may not write.
+# engineering-rules.md §1.3 makes an ungrounded value a byte we may not write.
 # --------------------------------------------------------------------------
 
 # The clamp stops protecting the low end: `cpi 1 0` would encode 0, and a mouse
@@ -1143,7 +1143,7 @@ mutate kill "hidKeyName loses the keypad zero, whose usage is out of run" "$CR" 
 # ---------------------------------------------------------------------------
 # bcdDevice -> the version Endgame's updater displays (EGGCore).
 # ---------------------------------------------------------------------------
-# CLAUDE.md §5: everything observed before 2026-09-05 07:53 is firmware 1.07 and
+# engineering-rules.md §5: everything observed before 2026-09-05 07:53 is firmware 1.07 and
 # everything after is 1.10, and DEFAULTS differ between them. A version display
 # that is confidently wrong mislabels every observation made under it.
 
@@ -1218,7 +1218,7 @@ mutate kill "the guard leaves the signals at their default" "$NQ" \
 '        prev_[i] = std::signal(kSignals[i], SIG_IGN);|||        prev_[i] = std::signal(kSignals[i], SIG_DFL);  // MUTANT'
 
 # ---------------------------------------------------------------------------
-# BootloaderEntry.cpp -- the LATCHED window opens here (CLAUDE.md 4.2b)
+# BootloaderEntry.cpp -- the LATCHED window opens here (engineering-rules.md 4.2b)
 # ---------------------------------------------------------------------------
 # Two of these are bugs this file ACTUALLY HAD against hardware, which is why
 # they are the first two.
@@ -1265,7 +1265,7 @@ mutate kill "a failed send is reported as a successful one" "$BE" \
 # command, and prediction #3 came back 0x03 on the device (a value in neither
 # capture). Nothing branches on it, so widening the guard that fills it in
 # cannot change any outcome. If this one is KILLED, something started gating on
-# the status byte and CLAUDE.md 4.2b's argument needs rewriting, not this line.
+# the status byte and engineering-rules.md 4.2b's argument needs rewriting, not this line.
 mutate equiv "the status byte is recorded from a longer reply" "$BE" \
 '    if (readOk && reply.size() >= 2) o.status = reply[1];|||    if (readOk && reply.size() >= 3) o.status = reply[1];  // MUTANT'
 

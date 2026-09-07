@@ -1,7 +1,7 @@
 """Tests/test_manifest.py -- the firmware manifest, checked against the .exe
 files by a completely separate implementation.
 
-THE RISK THIS COVERS. CLAUDE.md §1.4 says the firmware resource id must be a
+THE RISK THIS COVERS. engineering-rules.md §1.4 says the firmware resource id must be a
 compile-time constant, "never chosen from a list", because updater 1.10 carries
 six FWFILE resources of identical length and five of them would be accepted by
 the device -- right size, valid per-block checksums, reading back exactly as
@@ -274,7 +274,7 @@ class RefusingAnExeNamesWhatItActuallyIs(unittest.TestCase):
 
     IT SELECTS NOTHING, and that is asserted below: the refusal is still a
     refusal, the exit status is still non-zero, and the user still has to type
-    --version. CLAUDE.md §1.4 is untouched.
+    --version. engineering-rules.md §1.4 is untouched.
     """
 
     def setUp(self):
@@ -315,7 +315,7 @@ class RefusingAnExeNamesWhatItActuallyIs(unittest.TestCase):
 
         A suggestion naming some release for an arbitrary .exe would be worse
         than no suggestion: it is precisely the "guessing a resource id" shape
-        CLAUDE.md §2 says nothing downstream of us would catch.
+        engineering-rules.md §2 says nothing downstream of us would catch.
         """
         candidates = [os.path.join(ROOT, "XM1r_Flash_Upgrade_1.9.46.exe")]
         candidates += [os.path.join(ROOT, EXE[r["label"]]) for r in self.rows]

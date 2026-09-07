@@ -29,8 +29,9 @@ SWEEP, not about Ghidra.
 Here each DARK run is judged by re-disassembling from the preceding function's
 OWN start, which resyncs by construction.
 """
-import json,bisect,re,subprocess,sys
-R='<repo>'
+import json,bisect,re,subprocess,sys,os
+# The repo root, derived rather than hardcoded -- see cmdscan.py.
+R=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LINE=re.compile(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)*[0-9a-f]{2})\s*\t(.*)$')
 def dis(tag,a,b):
     out=subprocess.run([f'{R}/Tools/ghidra-export/dis.sh',tag,hex(a),hex(b)],

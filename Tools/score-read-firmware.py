@@ -171,7 +171,7 @@ def main():
     print(f"{good}/{testable} testable predictions HIT")
     if good == testable:
         print("Append this output to notes/prediction-scores.md BEFORE drawing")
-        print("any conclusion from the run (CLAUDE.md §7).")
+        print("any conclusion from the run (engineering-rules.md §7).")
     return 0 if good == testable else 1
 
 

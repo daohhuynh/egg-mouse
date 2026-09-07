@@ -77,7 +77,7 @@ came off the device:
 | --- | --- | --- |
 | out-of-register slug | (the one this sentence used to mean) | REFUTED |
 | `prediction-bootloader-entry.md` #3 | `resp[1] == 0x01` | **REFUTED — `0x03`** |
-| `prediction-bootloader-entry.md` #9 | returns to `0x1978` on a power cycle | **REFUTED — it latches**, and this is the single most consequential fact in the flash design (CLAUDE.md §4.2b) |
+| `prediction-bootloader-entry.md` #9 | returns to `0x1978` on a power cycle | **REFUTED — it latches**, and this is the single most consequential fact in the flash design (engineering-rules.md §4.2b) |
 | `prediction-capture-1.10.md`, the `16-keys` block | Left Shift records `+1 = 00` | **REFUTED — `02`**, the dialog sets modifiers from live keyboard state |
 
 They were invisible here because the scoreboard simply had no entry for the
@@ -269,7 +269,7 @@ keeping.
 - **#19 `cfg-basic-page-invisible-buttons`** (`Apply CPI settings` id 1059,
   `Surface Calibration` id 1061). **THE ROUTE IS VOID.** It was "two questions
   in `log.txt`'s ANSWERS block", and `./log.txt` is quarantined as evidence
-  (CLAUDE.md §1.1a). The replacement route needs no new capture and no new
+  (engineering-rules.md §1.1a). The replacement route needs no new capture and no new
   question: `windows-run/screenshots/*.png` are verified factory defaults
   (`config-wire-observed.md` §7) and show the basic page. Score it by looking,
   or ask the owner once, cleanly. This one has real weight: `Surface Calibration` would be a
@@ -346,7 +346,7 @@ Observer: me, 2026-09-06, same standard.
   command set observed across all sixteen is exactly
   `A0 11`, `A1 01`, `A1 02`, `A1 12`, `A1 13` plus standard descriptor
   requests — no flash command appears anywhere.
-- **Why it is load-bearing rather than trivia:** CLAUDE.md §3's two-executable
+- **Why it is load-bearing rather than trivia:** engineering-rules.md §3's two-executable
   split rests on the config tool having no flash path. If it had one, the
   contradictory-quit-semantics argument would need revisiting.
 - **Pinned:** `Tests/test_fwfile_set.py::PredictionFourteenConfigToolsCannotFlash`.
@@ -513,7 +513,7 @@ the frame went out. Full table in that file; the two that missed:
   general lesson is in that file and it is worth more than the prediction: a
   status gate on an undocumented byte manufactures false failures.
 - **#9 `returns to 0x1978 on a power cycle` — REFUTED, it latches.** This is
-  the most consequential refutation in the project. CLAUDE.md §4.2b's accepted
+  the most consequential refutation in the project. engineering-rules.md §4.2b's accepted
   cost, `egg-flash`'s help text, and the whole shape of the enter →
   read-firmware → flash sequence exist because of it.
 
@@ -566,7 +566,7 @@ those values, and nothing else moved. The device afterwards is byte-identical to
 `10-postflash-baseline` across all 1039 comparable bytes — our `a1 13` and
 Endgame's own produce the same record.
 
-Observer: the owner at the machine. **This cleared CLAUDE.md §4.1's gate**, which had
+Observer: the owner at the machine. **This cleared engineering-rules.md §4.1's gate**, which had
 blocked every config write since the captures showed section 07's reset test was
 vacuous.
 
@@ -720,7 +720,7 @@ Committed in `notes/config-protocol.md` §7.12 on 2026-09-05, from
 **RE-ANCHORED 2026-09-06, and it needed to be.** The original scoring line read
 *"scored against `windows-run/05-buttonmapping.pcapng` writes 9–11 (`log.txt`
 lines 10–12)"* — a `log.txt` citation, written the day before the quarantine
-(CLAUDE.md §1.1a) and still standing after it. It is removed, and the score is
+(engineering-rules.md §1.1a) and still standing after it. It is removed, and the score is
 re-derived from material that survives.
 
 The capture's own bytes, no labels anywhere. Every distinct button-entry state

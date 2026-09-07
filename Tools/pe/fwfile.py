@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List and extract the FWFILE resources of an Endgame firmware updater.
 
-WHY THIS IS CHECKED IN. CLAUDE.md §2: "nothing downstream of us catches a
+WHY THIS IS CHECKED IN. engineering-rules.md §2: "nothing downstream of us catches a
 wrong-but-well-formed image", and §6.1 ranks the FWFILE blobs highest because
 they are the only place a wrong-image guard could come from. Every updater
 carries several images of exactly the same length, and five of the six in 1.10

@@ -5,7 +5,7 @@ impossible, or just difficult but still possible". The answer shipped as
 Tools/pe/ingest_config.py: possible, by RE-DERIVING every byte egg-config can
 write from the new binary rather than assuming the layout held.
 
-A tool that says SAFE about everything is not evidence of anything (CLAUDE.md
+A tool that says SAFE about everything is not evidence of anything (engineering-rules.md
 §6.2). So this does two things:
 
   1. Requires all four shipped config tools to re-derive identically -- and

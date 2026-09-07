@@ -2,8 +2,8 @@
 """Review a NEW Endgame updater before letting egg-flash near it.
 
 WHAT THIS IS FOR. `egg-flash` pins the SHA-256 of the image it will write as a
-compile-time constant (CLAUDE.md §1.4, Sources/EGGFlashCore/include/egg/Firmware.h).
-That is deliberate: CLAUDE.md §2 says "nothing downstream of us catches a
+compile-time constant (engineering-rules.md §1.4, Sources/EGGFlashCore/include/egg/Firmware.h).
+That is deliberate: engineering-rules.md §2 says "nothing downstream of us catches a
 wrong-but-well-formed image", so the guard has to be ours and it has to run
 before the first byte goes out. The consequence is that a new firmware release
 does not work automatically -- somebody has to look at the new .exe and decide.
@@ -212,14 +212,14 @@ def main():
     print("MANIFEST ROW. Do NOT edit kExpectedSha256 in Firmware.h -- that")
     print("constant names the one release this build was derived against, the")
     print("release whose frames match the capture, and moving it would also")
-    print("move the --confirm token (CLAUDE.md §4.2c) without changing any plan")
+    print("move the --confirm token (engineering-rules.md §4.2c) without changing any plan")
     print("a person reviewed.")
     print()
     print(f"    python3 Tools/pe/ingest.py {os.path.basename(path)!r} --label <version>")
     print()
     print("prints a Release row, or refuses and says why. Paste it into")
     print("Sources/EGGFlashCore/src/FirmwareManifest.cpp, set the date, and")
-    print("LEAVE provenOnDevice false -- CLAUDE.md §5, a different version is a")
+    print("LEAVE provenOnDevice false -- engineering-rules.md §5, a different version is a")
     print("different device until shown otherwise.")
     print()
     print("For reference, the numbers a row needs, from this file:")

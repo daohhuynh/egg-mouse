@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_fieldmap.py -- prove fieldmap.py's REFUSALS actually fire.
 
-CLAUDE.md 6.2: "A harness that cannot produce a bad result is not evidence."
+engineering-rules.md 6.2: "A harness that cannot produce a bad result is not evidence."
 The valuable behaviour in fieldmap.py is not that it produces a field map. It is
 that it declines to produce one when the evidence cannot support it. A refusal
 path that has never been seen to trigger is an untested branch guarding the most

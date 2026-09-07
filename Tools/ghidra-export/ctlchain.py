@@ -2,7 +2,7 @@
 """ctlchain.py <tag> [--dialog N] [--control N] -- resolve MFC controls from the
 dialog resource to the code that handles them.
 
-WHAT IT RECORDS, and what it deliberately does not. CLAUDE.md §3.1: a tool here
+WHAT IT RECORDS, and what it deliberately does not. engineering-rules.md §3.1: a tool here
 records STRUCTURE and must not encode a belief about what the structure MEANS.
 This resolves MFC's own plumbing, which is structure and nothing else:
 

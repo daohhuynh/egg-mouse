@@ -2,7 +2,7 @@
 # test_flash_backup.sh -- `flash` must refuse without a valid firmware backup,
 # and must refuse BEFORE it sends anything.
 #
-# CLAUDE.md §4.2, added 2026-09-05: "Never erase without a saved copy of what is
+# engineering-rules.md §4.2, added 2026-09-05: "Never erase without a saved copy of what is
 # being erased." Until the same day, cmdFlash satisfied that itself by reading
 # all 65 blocks out with A0 07 immediately before A0 03. the owner's call was that
 # this is worse, not better: the vendor never sends A0 07 before A0 03, and
@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 BIN=./build/egg-flash
 EXE="Endgame Gear OP1 8k v2 Firmware Updater 1.10.exe"
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
-# 77, not 0. CLAUDE.md 6.2: a harness that cannot produce a bad result is not
+# 77, not 0. engineering-rules.md 6.2: a harness that cannot produce a bad result is not
 # evidence. This used to `exit 0`, so on any machine without Endgame's binaries
 # -- a fresh clone, CI, anyone but the owner -- ctest printed a green pass for a test
 # that had asserted nothing. CMakeLists sets SKIP_RETURN_CODE 77 so the run says

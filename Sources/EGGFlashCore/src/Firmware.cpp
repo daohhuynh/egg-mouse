@@ -288,7 +288,7 @@ bool Image::loadFromRelease(const std::string& exePath, const Release& rel,
                 std::string(rel.updaterSha256) +
                 "\n  Refusing. An updater whose bytes are not in the manifest "
                 "has no resource id, and guessing one is how a wrong-but-"
-                "well-formed image reaches the device (CLAUDE.md \u00a72).";
+                "well-formed image reaches the device (engineering-rules.md \u00a72).";
         return false;
     }
 

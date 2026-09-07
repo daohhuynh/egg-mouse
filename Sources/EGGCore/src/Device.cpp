@@ -39,7 +39,7 @@ bool initHid() {
     //   CreateFileW(path, 0xC0000000, 3, NULL, 3, 0, NULL)   [D]
     //   share mode 3 = FILE_SHARE_READ|FILE_SHARE_WRITE
     //   updater-protocol.md:101, config-protocol.md:207
-    // so CLAUDE.md §4.2's "mirror the vendor" points here, and hidapi's
+    // so engineering-rules.md §4.2's "mirror the vendor" points here, and hidapi's
     // exclusive default is the deviation. We exchange only FEATURE reports and
     // never read the input stream, so seizing buys us nothing and costs the
     // user their mouse for the duration.
@@ -131,14 +131,14 @@ std::unique_ptr<Device> Device::open(std::uint16_t productId, Log& log) {
     const Match& m = hits.front();
     hid_device* d = hid_open_path(m.path.c_str());
     if (!d) {
-        // CLAUDE.md §2: "Detect missing macOS permissions and say so rather
+        // engineering-rules.md §2: "Detect missing macOS permissions and say so rather
         // than failing silently." Enumeration needs no permission; opening a
         // device this OS considers an input device may.
         //
         // There is more than one cause and we do not know which is common, so
         // this lists them without ranking them. An earlier version of this
         // message said the cause "is usually Input Monitoring" -- that was a
-        // guess stated as a likelihood, and CLAUDE.md §1.2 does not allow it.
+        // guess stated as a likelihood, and engineering-rules.md §1.2 does not allow it.
         // Whether Input Monitoring is needed at all is still device-gated and
         // unverified (§5).
         log.warn("the interface was found but could not be opened.");

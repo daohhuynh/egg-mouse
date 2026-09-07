@@ -5,7 +5,7 @@ It is hand-pasted from `Tools/pe/ingest_config.py`'s output, so it can go stale
 or be mistyped in exactly the way a file nobody re-runs always can. This
 re-derives every row from the .exe it names.
 
-WHY IT MATTERS THAT THIS IS CHECKED RATHER THAN TRUSTED. CLAUDE.md §1.7's
+WHY IT MATTERS THAT THIS IS CHECKED RATHER THAN TRUSTED. engineering-rules.md §1.7's
 whole complaint about prose is that "a number written in prose survives a
 context compaction while the computation behind it does not, so it returns
 looking like established fact". An adoption record is that failure mode with a

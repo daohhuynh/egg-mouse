@@ -32,7 +32,7 @@ Evidence sets, weakest last:
   N  Ghidra FID  - named by Ghidra's FunctionID signature database, ALONE
   I  sibling read  - THE SAME BYTES, at the same VA, in a binary whose .text
                    is byte-for-byte identical to this one, and READ there
-                   (added 2026-09-06). CLAUDE.md 6.1 already grants this for
+                   (added 2026-09-06). engineering-rules.md 6.1 already grants this for
                    1.06/1.07 against 1.10 -- "1.10's work covers their code by
                    construction" -- and this makes the grant checkable instead
                    of asserted. Note the deliberate inversion: a >90%-sharing
@@ -263,7 +263,7 @@ def main():
     print(f"\n  SCOPE: the {len(ALL)} above are Ghidra's exported functions. They do")
     print(f"         NOT cover .text{extra}.")
     print( "         A residue of 0 here means the LIST is accounted for. It is")
-    print( "         not a claim about the binary. See CLAUDE.md 6 and 1.2b.")
+    print( "         not a claim about the binary. See engineering-rules.md 6 and 1.2b.")
 
     weak = N - M - R - S - I
     big  = sorted(a for a in weak if byadr[a]['size'] >= 32)

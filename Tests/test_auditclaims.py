@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_auditclaims.py -- can the citation audit still say "uncited"?
 
-CLAUDE.md §6.2: "A harness that cannot produce a bad result is not evidence."
+engineering-rules.md §6.2: "A harness that cannot produce a bad result is not evidence."
 
 This test exists because of HOW the uncited count reached zero on 2026-09-06.
 It went 87 -> 0, and only a handful of those were fixed by adding a citation to

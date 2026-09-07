@@ -8,7 +8,7 @@ device's own 1040-byte A1 12 reply, and `.gitignore` line 16 ignores `*.bin`
 under "Extracted firmware images". So the fixture is NOT in the repository, and
 on a fresh clone those five `cat` it, get nothing, and carry on comparing empty
 files -- `set -uo pipefail` without `-e` does not stop them. A gate that passes
-because its input vanished is worse than no gate (CLAUDE.md §6.2).
+because its input vanished is worse than no gate (engineering-rules.md §6.2).
 
 The fix is not to commit the file. Every byte of it is ALREADY committed, inside
 `windows-run/01-baseline.pcapng` -- and inside five other captures besides, all

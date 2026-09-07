@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """dlgdump.py <tag> [<tag>...] — every RT_DIALOG control and caption, verbatim.
 
-CLAUDE.md 1.2a: "Check the user-visible surface before concluding a capability
+engineering-rules.md 1.2a: "Check the user-visible surface before concluding a capability
 is missing: strings in both encodings, .rsrc dialogs and their control captions,
 menus, message maps. A feature the vendor ships has a button somewhere."
 

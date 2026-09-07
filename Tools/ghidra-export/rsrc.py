@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Enumerate every PE resource in a vendor binary.
 
-Belief-free by construction (CLAUDE.md 7.1). It walks the resource directory
+Belief-free by construction (engineering-rules.md 7.1). It walks the resource directory
 and reports what is there: type, name, language, RVA, size, SHA-256, Shannon
 entropy and a byte preview. It does not score, rank, filter, or label any
 resource as "the firmware". Which resource matters is a conclusion to be

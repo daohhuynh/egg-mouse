@@ -171,7 +171,7 @@ bool encodeSensorAngle(long deg, std::uint8_t& out) {
 
 // config-protocol.md §7.18. Record 0x09 <- object 0x27. Was the only writable
 // field with no address citation at all; its range came from counting writes in
-// a capture and reading a log that is now quarantined (CLAUDE.md §1.1a). It is
+// a capture and reading a log that is now quarantined (engineering-rules.md §1.1a). It is
 // now [D], and the derivation is better than the count was:
 //
 //   cfg107 0x40ec62  cmpl $0xa, %eax ; ja 0x40ec9e   bound check, 11 items
@@ -420,7 +420,7 @@ const Settable kSettable[] = {
     // Same byte as slamclick-filter, bit 4, and derived to the same standard:
     // written twice, by the click handler at 0x411e7a/0x411e86 and by the APPLY
     // collector at 0x411aeb/0x411af1, both agreeing on the bit. The `accepts`
-    // string carries the caveat rather than hiding it -- CLAUDE.md §1.2a's rule
+    // string carries the caveat rather than hiding it -- engineering-rules.md §1.2a's rule
     // that absence is a claim cuts both ways, and silently withholding a fully
     // derived field tells the user less than offering it with the warning.
     {"motion-jitter-filter", 0x06, encodeBool,

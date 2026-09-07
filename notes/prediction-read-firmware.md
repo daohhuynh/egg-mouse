@@ -29,7 +29,7 @@ command byte, different region, 65× the data.
 
 ---
 
-## 1. THE NECESSITY GATE (CLAUDE.md §4.2a), answered before proposing the send
+## 1. THE NECESSITY GATE (engineering-rules.md §4.2a), answered before proposing the send
 
 > **ENTRY CHANGED BEFORE THE RUN, 2026-09-05.** An earlier draft of this file
 > pre-registered a BUTTON entry. the owner overruled it before anything was sent —
@@ -262,7 +262,7 @@ sent a later session looking for the settings record inside a firmware image.
 **Where the mistaken reading came from, since that is the reusable part.** The
 row was written by reasoning about what a *typical* mouse firmware layout does
 with its last flash page, and typical-mouse-firmware reasoning is exactly what
-CLAUDE.md §1.2 names as the primary contamination risk. It carried no tag. Had
+engineering-rules.md §1.2 names as the primary contamination risk. It carried no tag. Had
 it been tagged it would have been `[G]`, and a `[G]` in a pre-registration is
 fine — it is a hypothesis — but it must be *labelled*, because an untagged
 plausible sentence is indistinguishable from a derived one three files later.

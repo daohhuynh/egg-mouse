@@ -14,7 +14,7 @@ The reference is again not something we produced: it is what Endgame's config
 tool 1.07 and their updater 1.10 actually sent to the owner's mouse on 2026-09-05.
 
 Scope, so it is not mistaken for more: host-to-device bytes only. It says
-nothing about what the device DOES with them -- see CLAUDE.md 1.2, the meaning
+nothing about what the device DOES with them -- see engineering-rules.md 1.2, the meaning
 of A1 13 is still [G] and only the frame is [O].
 """
 import os

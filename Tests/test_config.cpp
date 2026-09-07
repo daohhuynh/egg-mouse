@@ -1,4 +1,4 @@
-// test_config.cpp -- CLAUDE.md §4.1's safety properties, asserted as
+// test_config.cpp -- engineering-rules.md §4.1's safety properties, asserted as
 // invariants over randomised runs against a device that lies.
 //
 // §4.1 lists six requirements for the config tool. Until 2026-09-05 all six

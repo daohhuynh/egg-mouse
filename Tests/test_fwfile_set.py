@@ -7,7 +7,7 @@ neither of the others has. So a guard keyed on code identity would have accepted
 1.10 without noticing a new firmware blob had appeared inside it. The resources
 move independently of the code, therefore the resources are what gets pinned.
 
-The five wrong images are the hazard CLAUDE.md §2 describes: each is exactly
+The five wrong images are the hazard engineering-rules.md §2 describes: each is exactly
 66,560 bytes, each would produce valid per-block checksums, and each would read
 back exactly as written. Every check in the vendor's own protocol passes on the
 wrong image. Only knowing the id separates them, so a silent change to any entry
@@ -228,7 +228,7 @@ class PredictionThirteenAlternateUpdaterPayloads(unittest.TestCase):
 
 
 class PredictionFourteenConfigToolsCannotFlash(unittest.TestCase):
-    """CLAUDE.md §3's two-executable split assumes the config tool has no flash
+    """engineering-rules.md §3's two-executable split assumes the config tool has no flash
     path. If it had one, the contradictory-quit-semantics argument would need
     revisiting -- so this is load-bearing, not trivia."""
 

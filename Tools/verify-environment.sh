@@ -2,9 +2,9 @@
 # verify-environment.sh -- is this machine still able to build and trust the
 # tools that talk to the mouse?
 #
-# WHY THIS EXISTS. Written 2026-09-05, before the owner upgraded macOS an earlier macOS
-# to a newer macOS  . The worry was that a major OS jump would invalidate the
-# project. It should not: the whole OS surface is three dylibs, two of them
+# WHY THIS EXISTS. Written before a major macOS version upgrade on the machine
+# this project is developed on. The worry was that such a jump would invalidate
+# the project. It should not: the whole OS surface is three dylibs, two of them
 # Apple's most ABI-stable, and nothing in the derivation, the captures, the
 # vendor binaries or the mouse's firmware depends on the host OS at all.
 #

@@ -12,7 +12,7 @@
 # So this test anchors the whole decoder to something outside the code:
 # `frames/01-baseline-003-in-01.bin`, the device's own A1 12 reply from the
 # vendor's capture, decoded and compared line by line against the sixteen
-# settings visible in windows-run/screenshots/*.png. CLAUDE.md §1.1a: those
+# settings visible in windows-run/screenshots/*.png. engineering-rules.md §1.1a: those
 # screenshots are factory defaults, and notes/config-wire-observed.md §7 shows
 # all sixteen agree with this record byte for byte. This test says the SAME
 # sixteen survive the trip through `show` and come out in words.

@@ -5,7 +5,7 @@ WHAT IT IS FOR. `Tools/pe/ingest.py` reads an Endgame updater nobody has read
 and proposes a manifest row for it. At that moment there is no pinned
 whole-image SHA-256 to check against -- the row being proposed is what would
 create it -- so the pinned hash cannot help by construction. That is exactly
-when CLAUDE.md §1.4's warning is live: "other resources in the binary may
+when engineering-rules.md §1.4's warning is live: "other resources in the binary may
 belong to other products", and updater 1.10 carries SIX FWFILE resources of
 identical length, five of which the device would accept (right size, valid
 per-block checksums, and they read back exactly as written). §2 assumes the
@@ -18,7 +18,7 @@ times, and its value is constant per resource NAME across all four updaters --
 21 blobs, six distinct values, zero collisions between names.
 
 WHY THIS TEST AND NOT JUST "1.10 PASSES". A fingerprint that accepts the right
-answer proves nothing on its own; CLAUDE.md §6.2 is explicit that a harness
+answer proves nothing on its own; engineering-rules.md §6.2 is explicit that a harness
 which cannot produce a bad result is not evidence. So the test that matters is
 the NEGATIVE one: every OTHER FWFILE resource in every updater we hold must be
 REJECTED. Those are the five images an operator could plausibly end up holding

@@ -1,7 +1,7 @@
 // test_flash.cpp -- the seven invariants of updater-protocol.md §10.3, the
 // derived byte maps, and the flasher driven against an adversarial device.
 //
-// CLAUDE.md §4.3: "Assert invariants, not examples, over randomised runs." The
+// engineering-rules.md §4.3: "Assert invariants, not examples, over randomised runs." The
 // examples here exist only to pin the byte maps, which ARE examples by nature.
 // Everything about behaviour is an invariant checked over many seeds.
 //
@@ -322,7 +322,7 @@ static void testDeterminismAndIdentity() {
 
     std::string e;
     Image none;
-    ok("a non-PE file is refused", !none.loadFromExecutable("CLAUDE.md", e), e);
+    ok("a non-PE file is refused", !none.loadFromExecutable("README.md", e), e);
     ok("a missing file is refused", !none.loadFromExecutable("no-such.exe", e));
 
     // THE IDENTITY GUARD, and this is the test that gives it teeth.
@@ -330,7 +330,7 @@ static void testDeterminismAndIdentity() {
     // Updaters 1.04, 1.06 and 1.07 each ship their own FWFILE resource 140.
     // Every one is 66560 bytes, exactly 65 blocks, remainder zero -- so every
     // structural check in the loader passes on all of them. They are
-    // wrong-but-well-formed images in the precise sense CLAUDE.md §2 means,
+    // wrong-but-well-formed images in the precise sense engineering-rules.md §2 means,
     // and the SHA-256 comparison is the ONLY thing that separates them from
     // the right one. §2: "nothing downstream of us catches a wrong-but-well-
     // formed image. Every guard against flashing the wrong firmware has to be
@@ -1877,7 +1877,7 @@ static void testNoQuitDuringWrite() {
         return false;
     }());
 
-    ok("CLAUDE.md §3's own two are covered, and SIGHUP with them", [&] {
+    ok("engineering-rules.md §3's own two are covered, and SIGHUP with them", [&] {
         bool i_ = false, t = false, h = false;
         for (std::size_t i = 0; i < n; ++i) {
             if (sigs[i] == SIGINT)  i_ = true;

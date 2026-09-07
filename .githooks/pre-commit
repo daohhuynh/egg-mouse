@@ -2,13 +2,13 @@
 # Refuse any commit that stages a planted mutation-test marker.
 #
 # WHY THIS EXISTS. Twice on 2026-09-06 a `// MUTANT` reached a commit -- once
-# into the FLASH WRITE PHASE, an unbounded A1 09 retry in the one path CLAUDE.md
+# into the FLASH WRITE PHASE, an unbounded A1 09 retry in the one path engineering-rules.md
 # §4.2 says must never spin without reporting an unrecoverable state. Both times
 # the cause was `git add -A` while `Tests/mutants.sh` was running: it plants a
 # mutant, builds, tests, restores, and anything staged mid-cycle catches one.
 #
 # working-memory.md had already recorded the hazard in prose, twice, and prose
-# did not prevent the second one. CLAUDE.md §6.2's rule applies to the committer
+# did not prevent the second one. engineering-rules.md §6.2's rule applies to the committer
 # as much as to a reader: when the actor is unreliable, make the property
 # decidable without trusting it. Hence a hook rather than another reminder.
 #

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """filemap.py <tag> [--json PATH] — partition EVERY byte of a PE file.
 
-CLAUDE.md 6 wants coverage stated as a partition computed in one place, with the
+engineering-rules.md 6 wants coverage stated as a partition computed in one place, with the
 residue enumerated. coverage.py does that for Ghidra's function list and
 gapscan.py does it for .text bytes. Neither covers the FILE: headers, .rdata,
 .data, .rsrc and .reloc are simply outside both, so "exhaustively accounted"

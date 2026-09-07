@@ -3,7 +3,7 @@
 ## 0. Read this before using anything below
 
 **This file is about the Endgame Gear XM1r, not the OP1 8k v2.** Nothing in it
-may inform a byte written to the OP1. `CLAUDE.md` §1.4 exists for exactly this
+may inform a byte written to the OP1. `engineering-rules.md` §1.4 exists for exactly this
 hazard — "other resources in the binary may belong to other products" — and the
 risk here is larger, because this is a whole second protocol sitting in the same
 working set.
@@ -445,7 +445,7 @@ code path that accepts a frame whose checksum did not match**, selected by a fie
 unrelated to the integrity of the data. Verification present in the binary was not
 verification always applied.
 
-This is direct support for the OP1 posture recorded in `CLAUDE.md` §2 ("assume the
+This is direct support for the OP1 posture recorded in `engineering-rules.md` §2 ("assume the
 device does not validate the image it is given"), and it extends it: **do not
 assume a checksum in the vendor's protocol is enforced merely because the code to
 enforce it exists.** For our own flasher the rule is the stricter one — verification
@@ -521,7 +521,7 @@ Two transferable points, neither of which licenses an OP1 byte:
    here.
 2. **This binary matches the connected device against a runtime list of five
    hardware IDs from three different USB vendors** (`0x6452bf`–`0x645353`, each
-   gated on `obj+0x384`). It is precisely the pattern `CLAUDE.md` §1.4 forbids
+   gated on `obj+0x384`). It is precisely the pattern `engineering-rules.md` §1.4 forbids
    in our code: identity and image selection must be compile-time constants,
    never a search over a list. Here is a shipping vendor flasher that does the
    forbidden thing, and it flashes firmware.
@@ -643,7 +643,7 @@ above.
   returns**, having sent no data frame at all. The caller `0x6479a0` stores that
   return into global `0x72a5a4` (`0x647a42`) and carries on.
 
-We do not copy this. `CLAUDE.md` §4.2 already forbids treating a transport
+We do not copy this. `engineering-rules.md` §4.2 already forbids treating a transport
 success as a device success; this is the mirror-image defect — treating a
 transport *failure* as a completed operation — and it is the same root cause,
 a status flag that defaults to the good value and is only ever cleared.

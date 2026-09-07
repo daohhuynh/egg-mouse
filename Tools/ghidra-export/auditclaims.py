@@ -3,14 +3,14 @@
 auditclaims.py -- mechanically check every [D] citation in notes/ against the
 bytes of the binary it names.
 
-CLAUDE.md 1.2 says a [D] claim is "traced to a specific location in an .exe.
+engineering-rules.md 1.2 says a [D] claim is "traced to a specific location in an .exe.
 Cite the address." That is a rule nothing has ever enforced. Nearly five hundred
 [D] markers accumulated across nineteen note files, written over many sessions,
 and no pass has ever confirmed that the addresses in them are real -- that they
 land inside the named binary, that they land on an instruction boundary rather
 than mid-instruction, or that they exist at all.
 
-WHAT THIS DECIDES, AND WHAT IT CANNOT (CLAUDE.md 1.2a: state the blind spots).
+WHAT THIS DECIDES, AND WHAT IT CANNOT (engineering-rules.md 1.2a: state the blind spots).
 
   DECIDED mechanically, from raw bytes, reproducible with objdump and grep:
     - a [D] claim carries no CITATION OF ANY FORM           -> rule violation
@@ -25,7 +25,7 @@ WHAT THIS DECIDES, AND WHAT IT CANNOT (CLAUDE.md 1.2a: state the blind spots).
     - a claim's only source is the quarantined log (1.1a)   -> void
 
   WHAT COUNTS AS A CITATION, which is the part that changed on 2026-09-06.
-  CLAUDE.md 1.2 said "[D] ... Cite the address", which is written for a claim
+  engineering-rules.md 1.2 said "[D] ... Cite the address", which is written for a claim
   about code and under-specifies every other kind. Reporting a resource id or a
   SHA-256 as "no citation" was not merely noisy: the obvious way to silence this
   script would have been to bolt a plausible address onto a claim that never
@@ -97,7 +97,7 @@ BINARIES = {
 # and finding that most of them were cited perfectly well -- to a RESOURCE, a
 # FILE OFFSET, a HASH, or a reproducible command, none of which is an address.
 #
-# CLAUDE.md 1.2 said "[D] ... Cite the address", which is written for a claim
+# engineering-rules.md 1.2 said "[D] ... Cite the address", which is written for a claim
 # about code and under-specifies every other kind. Reporting those as rule
 # violations was not merely noisy: the obvious way to silence this script would
 # have been to bolt a plausible address onto a claim that never rested on one,
@@ -162,7 +162,7 @@ def blob(tag):
 def quoted_literal_in(tag, block):
     """A quoted string of 12+ chars that really occurs in the named binary.
 
-    Both encodings, because CLAUDE.md 1.2a's own example of a bad scan is one
+    Both encodings, because engineering-rules.md 1.2a's own example of a bad scan is one
     that looked in only one of them.
     """
     b = blob(tag)
@@ -319,7 +319,7 @@ def boundaries(tag):
     So SUSPECT is a low-precision signal by construction -- a reason to look,
     never a verdict -- and nothing safety-critical rests on it.
     Tests/test_citations.py checks the addresses that can reach the device, and
-    it reads raw bytes with no disassembler at all (CLAUDE.md 1.2b).
+    it reads raw bytes with no disassembler at all (engineering-rules.md 1.2b).
     """
     if tag in _BOUNDARY:
         return _BOUNDARY[tag]
@@ -575,7 +575,7 @@ def main():
 
     show("HARD: address is mapped in NO vendor binary", unmapped,
          lambda r: "%-40s %-7s 0x%08x  %s" % (r[0], r[1], r[2], r[3]))
-    show("HARD: cited to the quarantined log (CLAUDE.md 1.1a)", logsourced,
+    show("HARD: cited to the quarantined log (engineering-rules.md 1.1a)", logsourced,
          lambda r: "%-40s %s" % (r[0], r[1]))
     show("MIS-ATTRIBUTED: unmapped in the named binary, real in another", misattr,
          lambda r: "%-40s says %-7s (%s) 0x%08x -> %s | %s" %
@@ -587,7 +587,7 @@ def main():
     show("SUSPECT (low precision -- see boundaries()): not decoded by the sweep",
          misaligned,
          lambda r: "%-40s %-7s 0x%08x  %s" % (r[0], r[1], r[2], r[3]))
-    show("RULE VIOLATION: [D] with no address in its block (CLAUDE.md 1.2)",
+    show("RULE VIOLATION: [D] with no address in its block (engineering-rules.md 1.2)",
          uncited, lambda r: "%-40s %s" % (r[0], r[1]))
 
     hard = len(unmapped) + len(logsourced)

@@ -7,7 +7,7 @@
 //
 // What it CANNOT do, and says so on screen: adopt anything by itself. The
 // ingest tools print a manifest row, or a verdict about a config layout, and a
-// person commits it. CLAUDE.md §1.4 requires the firmware resource id to be a
+// person commits it. engineering-rules.md §1.4 requires the firmware resource id to be a
 // compile-time constant, and it stays one -- see FirmwareManifest.h for the
 // argument that a hash-keyed table preserves that rule.
 import SwiftUI
@@ -127,16 +127,27 @@ struct UpdatesView: View {
     /// The repository root, found by walking up from the app until a marker is
     /// seen. The ingest scripts are repo tools and read the checked-in binaries
     /// they compare against, so they need to run there.
+    ///
+    /// The marker is the script this screen is about to RUN, not a document.
+    /// It used to be `engineering-rules.md`, which stopped being committed on 2026-09-07
+    /// -- on any fresh clone that file is absent, so the old marker would have
+    /// reported "not in a repository" forever while the repository was right
+    /// there. A marker should be something the caller depends on anyway, so
+    /// that losing it is the same event as the feature not working.
+    private static let rootMarker = "Tools/pe/ingest.py"
+
     private func repoRoot() -> URL? {
+        func isRoot(_ d: URL) -> Bool {
+            FileManager.default.fileExists(
+                atPath: d.appendingPathComponent(Self.rootMarker).path)
+        }
         var d = Bundle.main.bundleURL.deletingLastPathComponent()
         for _ in 0..<6 {
-            if FileManager.default.fileExists(
-                   atPath: d.appendingPathComponent("CLAUDE.md").path) { return d }
+            if isRoot(d) { return d }
             d = d.deletingLastPathComponent()
         }
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        return FileManager.default.fileExists(
-            atPath: cwd.appendingPathComponent("CLAUDE.md").path) ? cwd : nil
+        return isRoot(cwd) ? cwd : nil
     }
 
     private func run() {

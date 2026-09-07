@@ -5,7 +5,7 @@
 namespace egg::fw {
 
 namespace {
-// SIGINT and SIGTERM are CLAUDE.md §3's own list. SIGHUP because closing the
+// SIGINT and SIGTERM are engineering-rules.md §3's own list. SIGHUP because closing the
 // terminal is the same mistake with less deliberation behind it than Ctrl-C.
 // SIGPIPE because the phase writes and a dead reader must not kill it -- see
 // the header.

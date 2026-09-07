@@ -1,6 +1,6 @@
 # Predictions, written BEFORE the device was ever observed
 
-**Committed before a single `[O]` was taken.** `CLAUDE.md` §7 makes the device
+**Committed before a single `[O]` was taken.** `engineering-rules.md` §7 makes the device
 the tiebreaker; a tiebreaker is worthless if the prediction is written after the
 answer. So this file is the register: every claim below is `[D]`, derived from
 the vendor's `.exe` files with a citation, and each has a stated way to be
@@ -29,7 +29,7 @@ as an opaque run of bytes with a vendor usage page and nothing more.
 
 Payload semantics are exactly what a Windows capture rig would have given us:
 run the vendor tool, tick every setting, diff the traffic. We cannot do that
-(`CLAUDE.md` §2 — no Windows, no VM, no capture), which is *why* the semantics
+(`engineering-rules.md` §2 — no Windows, no VM, no capture), which is *why* the semantics
 were derived statically from the `.exe` instead. The descriptor does not replace
 that work and cannot check it.
 
@@ -114,7 +114,7 @@ rate sits next to a 64-byte one that reports *something*.
 - **macOS handed all of this over with no permission prompt at all**, because
   `ioreg` reads the I/O Registry rather than opening a device. Whether *opening*
   the vendor collection needs Input Monitoring is still untested and remains on
-  `CLAUDE.md` §5's list.
+  `engineering-rules.md` §5's list.
 - macOS runs **Keyboard Setup Assistant** on plug-in, because collection 1 is an
   unrecognised keyboard. Quit is the correct answer; there is no keyboard to
   identify. Worth knowing before our own tool is blamed for it.
@@ -131,11 +131,11 @@ to what `hidobserve.py` prints, with no adjustment.
 
 - **Anything about the bootloader.** PID `0x1977` is a *different device mode*
   with, presumably, its own descriptor. Seeing it requires entering the
-  bootloader, which is stage 2 of `CLAUDE.md` §4.4 and is not free.
+  bootloader, which is stage 2 of `engineering-rules.md` §4.4 and is not free.
 - **Every command byte map** (§3), the block arithmetic (§10.1), the checksum
   (§3.5), the busy convention (`0x04`/2000 ms updater, `0x03`/1000 ms config),
   and which `FWFILE` is ours (§8.5a). None of these is in a descriptor.
-- **Whether the device validates the image it is given.** `CLAUDE.md` §2 assumes
+- **Whether the device validates the image it is given.** `engineering-rules.md` §2 assumes
   not, deliberately, and nothing observable here changes that.
 
 ## Result

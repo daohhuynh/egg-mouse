@@ -182,11 +182,38 @@ check(!Commands.requestRestoreToken(backup: "old.bin", current: "now.bin")
 // --------------------------------------------------------------------------
 // 4. Parsing, against the real tools' real output
 // --------------------------------------------------------------------------
+/// The 1040-byte factory-default record, REBUILT from the capture if absent.
+///
+/// `frames/` is not in the repository -- .gitignore excludes `*.bin` -- but
+/// every byte of it is committed inside `windows-run/01-baseline.pcapng`.
+/// `Tests/test_flash_undo.sh` has rebuilt rather than skipped since 2026-09-07;
+/// this file still skipped, so on a fresh clone three checks below quietly
+/// became no-ops and the run still said PASS. A check that did not run reads
+/// exactly like a check that passed, which is the failure this whole suite
+/// exists to avoid.
+func frameFixture() -> URL {
+    let p = repoRoot().appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    if !FileManager.default.fileExists(atPath: p.path) {
+        let t = Process()
+        t.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        t.arguments = ["python3", "Tools/capture/mkframes.py"]
+        t.currentDirectoryURL = repoRoot()
+        t.standardOutput = FileHandle.nullDevice
+        t.standardError = FileHandle.nullDevice
+        try? t.run()
+        t.waitUntilExit()
+    }
+    return p
+}
+
 func repoRoot() -> URL {
+    // CMakeLists.txt, not engineering-rules.md: the latter stopped being committed on
+    // 2026-09-07, so it is absent in a fresh clone and this would have walked
+    // past the real root and fallen back to the cwd.
     var d = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     for _ in 0..<4 {
         if FileManager.default.fileExists(
-            atPath: d.appendingPathComponent("CLAUDE.md").path) { return d }
+            atPath: d.appendingPathComponent("CMakeLists.txt").path) { return d }
         d = d.deletingLastPathComponent()
     }
     return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -303,7 +330,7 @@ if cs == -1 {
         check(f.record.hasPrefix("record 0x"),
               "field \(f.name) has a malformed record column", f.record)
         check(!f.accepts.isEmpty, "field \(f.name) has no accepts text")
-        // Every settable field must carry a citation (CLAUDE.md §1.2). The
+        // Every settable field must carry a citation (engineering-rules.md §1.2). The
         // CLI enforces this too; the GUI showing a blank there would hide it.
         check(f.cite.contains("cfg1"),
               "field \(f.name) shows no cfg1xx citation in the GUI", f.cite)
@@ -522,14 +549,14 @@ if dStatus == -1 {
 // --------------------------------------------------------------------------
 // Restore, driven against the real egg-config with NO DEVICE ATTACHED.
 //
-// This is the pair CLAUDE.md 4.1 asks for: the GUI could already factory-reset
+// This is the pair engineering-rules.md 4.1 asks for: the GUI could already factory-reset
 // the mouse and save a copy, and until 2026-09-06 it could not put the copy
 // back. The preview half is the interesting one to test, because it is the
 // half that must work with the mouse unplugged -- if `dryrun` ever needed the
 // device, the GUI's two-step flow would silently become one step.
 // --------------------------------------------------------------------------
 do {
-    let frame = repoRoot().appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    let frame = frameFixture()
     if let raw = FileManager.default.contents(atPath: frame.path) {
         var rec = [UInt8](raw)
         if rec.count < 1041 { rec += [UInt8](repeating: 0, count: 1041 - rec.count) }
@@ -584,7 +611,9 @@ do {
         let (jrc, _) = run("egg-config", Commands.previewRestore(record: junk.path))
         check(jrc != 0, "a 3-byte file must not preview as a restorable record")
     } else {
-        print("SKIP: frames/01-baseline-003-in-01.bin not present")
+        check(false, "frames/01-baseline-003-in-01.bin is missing AND could not "
+                   + "be rebuilt by Tools/capture/mkframes.py from the committed "
+                   + "windows-run/01-baseline.pcapng -- this used to print SKIP")
     }
 }
 
@@ -808,7 +837,7 @@ do {
     // `diff` on two identical files must succeed and say nothing differs --
     // this is the command the firmware screen's success text points people at.
     let root = repoRoot()
-    let cap = root.appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    let cap = frameFixture()
     let t1 = FileManager.default.temporaryDirectory
                  .appendingPathComponent("egg-diff-a-\(getpid()).bin")
     let t2 = FileManager.default.temporaryDirectory
@@ -841,7 +870,7 @@ do {
     // Tests/test_show.sh does. 1040 bytes as Windows saw it, plus the trailing
     // pad a 1041-byte record carries.
     let root = repoRoot()
-    let src  = root.appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    let src  = frameFixture()
     let tmp  = FileManager.default.temporaryDirectory
                    .appendingPathComponent("egg-show-\(getpid()).bin")
     if let d = try? Data(contentsOf: src), d.count == 1040 {

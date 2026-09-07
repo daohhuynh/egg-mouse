@@ -4,8 +4,11 @@ report id (0xA0/0xA1) to memory. Whole section, not the vendor band.
 objdump prints these signed -- movb $0xa1 shows as $-0x5f -- which is exactly how
 a text scan for "$0xa1" misses them. Normalise before comparing.
 """
-import json,re,subprocess,sys,bisect
-R='<repo>'
+import json,re,subprocess,sys,bisect,os
+# The repo root, derived rather than hardcoded: this was an absolute path
+# under one developer's home, which leaked the account name and made the
+# script unrunnable for anyone else.
+R=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 tag=sys.argv[1]
 LINE=re.compile(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)*[0-9a-f]{2})\s*\t(.*)$')
 recs=[json.loads(l) for l in open(f'{R}/.analysis/export/{tag}.jsonl')]

@@ -17,7 +17,7 @@
 // disagreed, in the paragraph the file calls "the whole safety argument".
 //
 // The claim was not merely false, it was the wrong argument. Closing this window
-// does not endanger a flash, because CLAUDE.md §3 puts the write phase in
+// does not endanger a flash, because engineering-rules.md §3 puts the write phase in
 // ANOTHER PROCESS. `egg-flash` is spawned, not embedded: when this app exits the
 // child is reparented and keeps running, and NoQuitDuringWrite ignores SIGINT,
 // SIGTERM, SIGHUP *and SIGPIPE* from erase to verified image -- SIGPIPE being
@@ -136,7 +136,7 @@ struct WritePhaseBanner: View {
 /// This is the state a user is most likely to reach and least likely to
 /// understand: a firmware backup or a flash enters the bootloader with `A1 3A`,
 /// and that entry LATCHES -- it survives unplugging and is cleared only by a
-/// COMPLETED flash (notes/bootloader-observed.md §5a, §5b; CLAUDE.md §4.2b
+/// COMPLETED flash (notes/bootloader-observed.md §5a, §5b; engineering-rules.md §4.2b
 /// calls the latched window the accepted cost of entering the vendor's way).
 /// So "I cancelled the backup and now my mouse does not work" is an expected
 /// outcome of using this app correctly, and the answer to it belonged in the

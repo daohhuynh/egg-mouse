@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_reconcile.py -- can the scoreboard reconciler produce a bad result?
 
-CLAUDE.md §6.2: "A harness that cannot produce a bad result is not evidence."
+engineering-rules.md §6.2: "A harness that cannot produce a bad result is not evidence."
 reconcile_scores.py passed on its first clean run, which is the shape §6.2 says
 to distrust. So each case here plants ONE defect of a kind the scoreboard has
 actually had -- a quoted denominator, a slug that resolves to nothing, one

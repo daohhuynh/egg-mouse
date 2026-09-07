@@ -13,7 +13,7 @@
 // corrected against the physical mouse on 2026-09-05 (the 1041-byte 0xA0 report
 // reading back 1040), and is the transport both executables already use. This
 // class delegates to it. One implementation of that rule, and no second copy to
-// drift out of agreement with the first -- the same argument CLAUDE.md §3 makes
+// drift out of agreement with the first -- the same argument engineering-rules.md §3 makes
 // for one repo, applied one level down.
 #pragma once
 

@@ -16,7 +16,7 @@ output, wrap it in a translation unit that includes the REAL header, and
 compile it. If the struct gains, loses or reorders a field, this fails.
 
 It also pins the two things a compiler cannot see:
-  - provenOnDevice is `false`, and only ever false. CLAUDE.md §5: proven means
+  - provenOnDevice is `false`, and only ever false. engineering-rules.md §5: proven means
     flashed onto the one mouse and verified, which no file can say about itself.
   - the row carries a real date, not the literal "<date>" the old version
     emitted and told the user to go and fix by hand.

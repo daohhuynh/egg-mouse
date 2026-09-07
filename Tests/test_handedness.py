@@ -191,7 +191,7 @@ class ScoredAgainstTheVendorsOwnLeftHandedRecord(unittest.TestCase):
         # than a flag, so the tool cannot say what it would write without
         # knowing what is there. `egg-config handedness left` therefore puts an
         # A1 12 on the wire, and a test that runs it is a test that talks to the
-        # mouse. This suite must never do that -- CLAUDE.md §4.2a: the question
+        # mouse. This suite must never do that -- engineering-rules.md §4.2a: the question
         # "what does this answer, and can it be answered without touching the
         # device?" has an answer here, and the answer is the three verbs below.
         #

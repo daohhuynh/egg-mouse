@@ -3,11 +3,11 @@
 
 Reports what each capture ACTUALLY did rather than asserting a step list: the owner
 worked chronologically while the steps were still being edited, so a section may
-predate the version of the steps that is now on disk (CAPTURE-STEPS.md).
+predate the version of the steps that is now on disk (docs/CAPTURE-STEPS.md).
 
 Every prediction checked here is cited to notes/prediction-capture-1.10.md or to
 notes/config-protocol.md 7.17.  Nothing in this file encodes a belief about what
-an UNKNOWN byte means -- it prints unknowns as unknown (CLAUDE.md 3.1).
+an UNKNOWN byte means -- it prints unknowns as unknown (engineering-rules.md 3.1).
 """
 import sys, os, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

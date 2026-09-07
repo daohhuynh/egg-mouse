@@ -1,6 +1,6 @@
 """Tests/test_crossrefs.py -- every file-qualified section reference resolves.
 
-CLAUDE.md §1.2 makes a citation load-bearing: a [D] claim is only as good as the
+engineering-rules.md §1.2 makes a citation load-bearing: a [D] claim is only as good as the
 thing a reader can go and check. A reference that points at no section, or at
 two different sections, is an uncheckable citation wearing the costume of a
 checkable one.
@@ -18,10 +18,10 @@ WHAT THIS FOUND WHEN IT WAS WRITTEN, 2026-09-07:
   - `bootloader-observed.md` had two §4s, two §5s and two §6s, because a second
     document was appended with its own numbering.
 
-SCOPE, STATED SO THE NEGATIVE IS HONEST (CLAUDE.md §1.2a). This checks
+SCOPE, STATED SO THE NEGATIVE IS HONEST (engineering-rules.md §1.2a). This checks
 references that NAME THEIR FILE -- "`notes/foo.md` §7.4", "foo.md section 4". It
 does NOT check bare "§7.4", because a bare reference in a notes file may mean
-that file, CLAUDE.md, or the file under discussion, and no rule distinguishes
+that file, engineering-rules.md, or the file under discussion, and no rule distinguishes
 them. So a bare reference to a section that does not exist still passes here.
 Making bare references checkable would mean adopting a convention this repo does
 not have; qualifying the reference is the cheaper fix and is what the two
@@ -53,7 +53,20 @@ def markdown_files():
             # ctest and the failure looks like a real dangling reference.
             if f.endswith(".md") and not f.startswith("zzz-planted-"):
                 out[f] = os.path.join(notes, f)
-    for f in ("README.md", "CLAUDE.md", "working-memory.md", "CAPTURE-STEPS.md"):
+    # docs/ holds engineering-rules.md (the rules, moved out of CLAUDE.md on
+    # 2026-09-07) and CAPTURE-STEPS.md. Scanning the DIRECTORY rather than a
+    # hardcoded list, because a hardcoded list beside the thing it tracks is
+    # how `reconcile` drifted -- a file added to docs/ and never added here
+    # would silently make every reference into it dangle.
+    docs = os.path.join(ROOT, "docs")
+    if os.path.isdir(docs):
+        for f in sorted(os.listdir(docs)):
+            if f.endswith(".md"):
+                out[f] = os.path.join(docs, f)
+    # working-memory.md is NOT committed (2026-09-07). It is still cross-checked
+    # when present, because it carries references worth keeping honest locally;
+    # its absence in a clone is expected and must not fail.
+    for f in ("README.md", "working-memory.md"):
         p = os.path.join(ROOT, f)
         if os.path.exists(p):
             out[f] = p

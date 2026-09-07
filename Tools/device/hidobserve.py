@@ -3,7 +3,7 @@
 
 STRICTLY READ-ONLY. It shells out to `ioreg`, which reads the I/O Registry and
 nothing else. **No HID device is opened, no report is sent, no byte reaches the
-mouse.** That is the whole point: CLAUDE.md §5 lists seven things that cannot be
+mouse.** That is the whole point: engineering-rules.md §5 lists seven things that cannot be
 settled without the hardware, and four of them are answerable by looking at what
 macOS already knows, before any of our code touches anything.
 
@@ -145,7 +145,7 @@ def main():
                       "  (0x%x)" % v if isinstance(v, int) and v > 9 else ""))
         if isinstance(ver, int):
             # The vendor's updater displays bcdDevice as a version; record both
-            # readings without choosing, per CLAUDE.md §1.2.
+            # readings without choosing, per engineering-rules.md §1.2.
             print("    %-22s BCD %x.%02x   raw/100 %.2f"
                   % ("VersionNumber reads as", ver >> 8, ver & 0xFF, ver / 100))
         print("    %-22s %d bytes" % ("ReportDescriptor", len(rd)))

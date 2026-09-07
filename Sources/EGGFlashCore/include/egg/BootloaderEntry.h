@@ -1,4 +1,4 @@
-// BootloaderEntry.h -- CLAUDE.md §4.4 stage 2: enter the bootloader, confirm
+// BootloaderEntry.h -- engineering-rules.md §4.4 stage 2: enter the bootloader, confirm
 // what we landed on, and send it NOTHING.
 //
 // This is deliberately not part of the write phase and shares no code with it.

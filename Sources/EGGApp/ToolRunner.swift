@@ -3,7 +3,7 @@
 // IT SHELLS OUT. Every device operation runs `egg-config` or `egg-flash` as a
 // subprocess. That is not laziness about linking; it is the design.
 //
-// CLAUDE.md §3: "A GUI DOES NOT INHERIT THIS. If one is built, the
+// engineering-rules.md §3: "A GUI DOES NOT INHERIT THIS. If one is built, the
 // contradictory quit semantics in §4 are the whole reason the two executables
 // are separate: a window has a close button, a Dock quit item and a
 // force-quit, none of which a post-erase write phase may honour. A GUI may

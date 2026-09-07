@@ -21,7 +21,7 @@ Clause 2 is sound for the purpose and NOT sound for the device question.
 classify.norm masks absolute VAs, so two functions with one hash can reference
 completely different globals; one could touch a HID slot where its twin touches
 a string. That is precisely why the device question is settled by `closure.py`
-per binary, mechanically, and never by anything a reader said (CLAUDE.md 6.2).
+per binary, mechanically, and never by anything a reader said (engineering-rules.md 6.2).
 This tool feeds coverage accounting only.
 
 SOURCES. Every `journal.jsonl` under the session's workflow transcript dirs,

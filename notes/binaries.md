@@ -70,7 +70,7 @@ old-config-executables/                               # 1.00, 1.01, 1.04
 old-firmware-executables/                             # v1.04, v1.06, 1.07
 ```
 
-Per CLAUDE.md 1.5, these are never executed. Static analysis only.
+Per engineering-rules.md 1.5, these are never executed. Static analysis only.
 
 ## Not an OP1 binary — kept here only so the file is complete
 
@@ -78,7 +78,7 @@ Per CLAUDE.md 1.5, these are never executed. Static analysis only.
 a different vendor's code base** (Ruling Technologies Sdn. Bhd., per the string
 table). Analysed in `notes/xm1r-flasher.md` under its own `[D-X]`/`[V]` tags so
 that nothing from it can be mistaken for an OP1 finding. The rule that governs
-this is `CLAUDE.md` **§1.2** (provenance tags on every protocol claim); an
+this is `engineering-rules.md` **§1.2** (provenance tags on every protocol claim); an
 earlier revision cited §1.4, which is about firmware-image selection and is not
 what keeps the two products apart.
 

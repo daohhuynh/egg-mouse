@@ -33,6 +33,27 @@ the mouse byte-identical to where theirs does.
 One device, no spare. Everything here was derived from static analysis; nothing
 was copied from any third-party implementation.
 
+### What is where
+
+| path | what it holds |
+| --- | --- |
+| `Sources/` | the two CLI tools, the three core libraries, and the SwiftUI app |
+| `Tests/` | the whole gate — `ctest` runs every item, including the mutation harness |
+| `Tools/` | capture decoding, PE/resource inspection, static-analysis tooling |
+| `notes/` | the derivation: what was observed, what was derived, what is still a guess |
+| `docs/` | [`engineering-rules.md`](docs/engineering-rules.md) — the rules the notes cite by section — and [`CAPTURE-STEPS.md`](docs/CAPTURE-STEPS.md) |
+| `windows-run/`, `windows-capture/` | the vendor's own USB traffic, two runs, two firmware versions |
+
+`docs/engineering-rules.md` is the one to read first if you want to know why any
+of this is shaped the way it is. Every `[O]`/`[D]`/`[G]` tag in `notes/` means
+what §1.2 there says it means, and the safety argument for the flasher is §4.2.
+
+**The vendor's `.exe` files are deliberately not in this repository.** They are
+Endgame Gear's, not ours to redistribute; `notes/binaries.md` pins the SHA-256
+of each build analysed, and the tools that need one say so and exit. The capture
+files carry the vendor's traffic only — the recording host's own metadata was
+redacted in place, byte-for-byte the same length, on 2026-09-07.
+
 ---
 
 ## If your mouse ever stops working
@@ -80,7 +101,7 @@ Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
 none of them needs the mouse, and the lot takes about two minutes. For the
 count, ask rather than trust this sentence: `ctest --test-dir build -N | tail
 -1`. It said "thirty" here for a day after the number was thirty-nine, which is
-CLAUDE.md §6's rule about quoting numbers instead of regenerating them, in the
+engineering-rules.md §6's rule about quoting numbers instead of regenerating them, in the
 one file a newcomer reads first.
 Dropping `-E mutants` adds the mutation run, which takes ~15 minutes because it
 rebuilds the tree once per planted bug.
@@ -228,7 +249,7 @@ opens a PE, so there is no resource for a file to suggest.
 
 ### The entry receipt
 
-CLAUDE.md §4.2b requires that everything touching firmware enters the bootloader
+engineering-rules.md §4.2b requires that everything touching firmware enters the bootloader
 by `A1 3A`, the vendor's own way — and nothing on the wire can tell that entry
 from a LEFT+RIGHT button entry, because PID, `bcdDevice` and the product string
 are identical either way.
@@ -511,7 +532,7 @@ egg-config set polling 1000         # dry run: says what it would write
 egg-config set polling 1000 --yes   # read, change one byte, write, verify
 ```
 
-**The list is short on purpose.** `CLAUDE.md` §1.3 forbids writing a byte whose
+**The list is short on purpose.** `engineering-rules.md` §1.3 forbids writing a byte whose
 meaning is a guess, so a field is settable only when its meaning was derived
 from the vendor's own binary and can be cited to an address — the tool prints
 that citation next to every field. The 115-byte settings record is fully
@@ -569,7 +590,7 @@ project rather than general preference:
 
 It is permissive, so nothing about it binds anyone — including this project,
 which is deliberately kept free of copyleft obligations it has not accepted
-(see `CLAUDE.md` §1.1 for why the two existing community projects are
+(see `engineering-rules.md` §1.1 for why the two existing community projects are
 quarantined rather than borrowed from).
 
 The licence governs **this code**. It says nothing about whether deriving the

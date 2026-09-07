@@ -15,7 +15,7 @@ question a script answers rather than a question someone remembers to ask.
 WHAT IT RECORDS.  Structure only: a record offset, the object offset that feeds
 it, and the address of the instruction pair that does it.  It holds no opinion
 about what any field MEANS, does not rank, and does not know the name of a
-single setting.  See CLAUDE.md 7.1 for why that matters -- the script this
+single setting.  See engineering-rules.md 7.1 for why that matters -- the script this
 replaces encoded prior conclusions and handed them to everyone who read it.
 
 THE SAFETY PROPERTY, and it is the whole point.  A partial map is more
@@ -26,7 +26,7 @@ complain: it silently missed record 0x72, whose store uses `movb` rather than
 required an explicit displacement.  Had either been a field that MOVED between
 versions, we would have written a wrong byte and been confident.
 
-So this tool follows CLAUDE.md 6's partition rule: the mapped set must cover
+So this tool follows engineering-rules.md 6's partition rule: the mapped set must cover
 0x00..max with no holes, computed in one place, residue enumerated, and
 `ok == False` on any residue.  It refuses rather than guesses.  A caller that
 ignores `ok` has defeated the only thing separating this from the prototype.

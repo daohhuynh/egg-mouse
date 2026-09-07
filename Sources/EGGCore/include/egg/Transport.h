@@ -20,7 +20,7 @@ namespace egg {
 // updater-protocol.md §3.4a records that the vendor's own send wrappers return
 // a byte the caller compares against 0x01 which, on their failure paths, does
 // not come from the device at all -- it comes from the request buffer or from a
-// literal. CLAUDE.md §4.1: "Never let a reported success stand in for verifying
+// literal. engineering-rules.md §4.1: "Never let a reported success stand in for verifying
 // the data itself."
 enum class Outcome {
     Ok,             // the device answered, and resp[1] == kStatusReady

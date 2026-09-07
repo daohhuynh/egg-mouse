@@ -16,7 +16,7 @@ reverse engineering at all.
 
 **Partial is fine. Stop whenever you want.** Every setting you get is mapped
 forever; every one you skip stays safe because read-modify-write preserves bytes
-we do not understand (`CLAUDE.md` §4.1). Nothing is wasted and nothing is
+we do not understand (`engineering-rules.md` §4.1). Nothing is wasted and nothing is
 all-or-nothing.
 
 ---
@@ -265,7 +265,7 @@ That is the whole job. Roughly one short line per change.
 ### How many values, and why it differs by control type
 
 **We can only ship a value we have observed.** Offering an unobserved one means
-writing a byte whose meaning is `[G]`, which `CLAUDE.md` §1.3 forbids. So:
+writing a byte whose meaning is `[G]`, which `engineering-rules.md` §1.3 forbids. So:
 checkbox → one click (both states seen); **dropdown → every option** (no formula
 exists, a skipped option is a feature we cannot ship); number → **three values**
 (a formula exists; two set it, the third proves it).

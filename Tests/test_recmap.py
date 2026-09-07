@@ -14,7 +14,7 @@ Two things are being protected here, and they are different in kind.
    PARTIAL map is worse than no script, because a partial map looks complete.
    The first prototype silently returned 108 of 111 offsets. So there is a
    deliberately broken parser below, and the test asserts it FAILS. A harness
-   that cannot produce a bad result is not evidence (CLAUDE.md 6.2).
+   that cannot produce a bad result is not evidence (engineering-rules.md 6.2).
 """
 import os
 import sys
@@ -67,7 +67,7 @@ class ExtractorAgreesWithTheHandDerivation(unittest.TestCase):
         # Protocol.h calls these kRecordUnknownFirst..kRecordUnknownLast. The
         # claim is that the config tool never writes them -- an ABSENCE claim,
         # so it is only worth anything because the extractor scanned the whole
-        # serializer body rather than failing to find a pattern (CLAUDE.md 1.2a).
+        # serializer body rather than failing to find a pattern (engineering-rules.md 1.2a).
         self.assertEqual([0x01, 0x02, 0x03, 0x04], self.r["unwritten"])
 
     def test_it_reproduces_every_hand_derived_offset(self):
@@ -105,7 +105,7 @@ class TheLayoutIsStableAcrossEveryShippedVersion(unittest.TestCase):
 
 
 class TheRefusalActuallyWorks(unittest.TestCase):
-    """CLAUDE.md 6.2: report the harness's failure rate; zero is a red flag.
+    """engineering-rules.md 6.2: report the harness's failure rate; zero is a red flag.
 
     These plant a defect in the extractor and require it to be caught. If these
     ever pass trivially, the completeness check has stopped checking.

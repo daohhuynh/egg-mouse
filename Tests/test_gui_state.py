@@ -20,7 +20,7 @@ right test and it cannot see a view. Nothing else in the suite reads the view
 layer at all, and SwiftUI state is exactly where "written but never read" hides:
 the compiler is happy, the app builds, the screen just quietly does nothing.
 
-SCOPE, so the negative is honest (CLAUDE.md §1.2a). This proves a property is
+SCOPE, so the negative is honest (engineering-rules.md §1.2a). This proves a property is
 MENTIONED outside its own declaration. It does not prove it is mentioned
 usefully -- `.disabled(m.busy)` and `let _ = m.busy` look the same from here.
 What it removes is the case where a guard was written, believed, and wired to

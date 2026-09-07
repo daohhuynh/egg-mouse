@@ -19,7 +19,7 @@ the number of write frames does not equal the number of numbered log lines, the
 off-by-one could be anywhere and every mapping after it would be wrong while
 looking perfectly reasonable. So it reports the mismatch and attributes NOTHING.
 A field map with one silently-shifted row is worse than no field map: it is a
-wrong byte written to the one mouse that exists (CLAUDE.md 1.3, 4.3).
+wrong byte written to the one mouse that exists (engineering-rules.md 1.3, 4.3).
 
 Likewise a diff touching several separate byte runs is reported in full and
 never reduced to whichever run looks likeliest. One setting CAN legitimately
@@ -38,7 +38,7 @@ The annotation also needs enough diffs to mean anything: with two APPLYs, every
 byte that moved trivially "moved on every APPLY". Below MIN_FOR_ALWAYS diffs it
 is not reported at all.
 
---emit WRITES THE FIELD MAP AS DATA, which is the deliverable. CLAUDE.md §3
+--emit WRITES THE FIELD MAP AS DATA, which is the deliverable. engineering-rules.md §3
 says protocol constants live in EGGCore "as data tables, not scattered through
 code", and the difference between this tool producing the table and a human
 retyping it into C++ is an hour of transcription against bytes where a

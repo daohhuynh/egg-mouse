@@ -21,7 +21,7 @@ little-endian dword and kept if it lands inside the image. Buckets:
   CODE            the target is inside .text but is not a function entry
                   (a jump table entry, or a false positive)
 
-WHAT IT CANNOT SEE, stated per CLAUDE.md 1.2a: an address computed at runtime
+WHAT IT CANNOT SEE, stated per engineering-rules.md 1.2a: an address computed at runtime
 (base + index), a string reached only through a resource id, and any pointer
 that never appears as a literal dword -- e.g. one loaded from a relocated table.
 Against that last one: .reloc is checked, and every relocation site inside the

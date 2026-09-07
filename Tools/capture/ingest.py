@@ -13,7 +13,7 @@ were never found). Auto-pairing would have shifted every label after the first
 gap and produced a table that looks complete and is wrong from line 9 onward.
 
 So the map is written by hand, and this tool refuses to run unless it accounts
-for every line as a partition (CLAUDE.md §6): mapped lines plus explicitly
+for every line as a partition (engineering-rules.md §6): mapped lines plus explicitly
 unmapped lines must equal the total, computed here in one place, with the
 residue named. A line left out is an error, not a default.
 

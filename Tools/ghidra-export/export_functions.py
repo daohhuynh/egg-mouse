@@ -4,7 +4,7 @@ Export every function from an already-analysed Ghidra program to JSONL.
 
 Purpose: record STRUCTURE. It deliberately holds no opinion about what any
 structure means -- no relevance score, no keyword list, no pattern for any
-particular byte, opcode, command shape or constant. See CLAUDE.md 7.1: the
+particular byte, opcode, command shape or constant. See engineering-rules.md 7.1: the
 previous extraction script was deleted because its scoring carried a prior
 session's conclusions inside it.
 

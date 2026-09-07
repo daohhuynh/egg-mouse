@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """verify_read.py <batchdir> <journal.jsonl> — check agent readers against the bytes.
 
-CLAUDE.md 1.6 says agents are useful, not authoritative, and the completion
+engineering-rules.md 1.6 says agents are useful, not authoritative, and the completion
 policy says a claim has to be checkable by someone who does not trust the person
 making it. A reading pass over thousands of function bodies is worthless if its
 error rate is unknown, so this recomputes -- from the same disassembly the agent
@@ -22,7 +22,7 @@ them. A 0% mechanical error rate is evidence the reader looked at the right
 bytes; it is NOT evidence the summary is right. Do not let this tool's output be
 quoted as if it were.
 
-PLANTED POSITIVES (`--plants PATH`). CLAUDE.md 6.2: a harness that cannot
+PLANTED POSITIVES (`--plants PATH`). engineering-rules.md 6.2: a harness that cannot
 produce a bad result is not evidence, so each run seeds batches with functions
 that ARE device-facing, unlabelled, and the miss rate on them is the measured
 false-negative rate for the judgement fields. PATH is a JSON object mapping the
@@ -195,7 +195,7 @@ def main():
         print(f"   imps   {fid} extra={extra} missed={miss}")
     if "--plants" in sys.argv:
         pp = json.load(open(sys.argv[sys.argv.index("--plants") + 1]))
-        print("\nPLANTED POSITIVES (CLAUDE.md 6.2) -- measured false-negative rate")
+        print("\nPLANTED POSITIVES (engineering-rules.md 6.2) -- measured false-negative rate")
         hit = seen = 0
         for pid, meta in sorted(pp.items()):
             fid = pid.strip().lower()

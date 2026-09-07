@@ -1,6 +1,6 @@
 // FirmwareManifest.h -- the set of firmware releases this build knows about.
 //
-// WHY THIS EXISTS, and why it does not break CLAUDE.md §1.4.
+// WHY THIS EXISTS, and why it does not break engineering-rules.md §1.4.
 //
 // §1.4: "Whichever firmware resource the official updater loads, it must be a
 // constant in our code -- never a variable, never selected at runtime, never
@@ -75,7 +75,7 @@ struct Release {
     std::uint32_t wholeImageChecksum;
 
     // Has THIS release been flashed onto the one mouse and verified? Exactly
-    // one row may honestly say true. CLAUDE.md §5: "A different version is a
+    // one row may honestly say true. engineering-rules.md §5: "A different version is a
     // different device until shown otherwise", and this is that distinction
     // made mechanical rather than left to a reader's memory.
     bool provenOnDevice;

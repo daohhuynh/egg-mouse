@@ -141,7 +141,7 @@ bool writeEntryReceipt(std::uint16_t bcdDevice, const std::string& product,
         "# it when they find the mouse ALREADY in the bootloader, because they\n"
         "# cannot otherwise tell an A1 3A entry from a LEFT+RIGHT button entry --\n"
         "# the PID, bcdDevice and product string are identical either way, and\n"
-        "# CLAUDE.md 4.2b says firmware work enters by A1 3A.\n"
+        "# engineering-rules.md 4.2b says firmware work enters by A1 3A.\n"
         "#\n"
         "# It is deleted after a completed flash, because a completed flash is\n"
         "# what clears the A1 3A latch.\n"

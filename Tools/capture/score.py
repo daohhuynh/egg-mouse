@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """score.py -- check the derived predictions against what a capture observed.
 
-WHY THIS IS A SEPARATE TOOL. CLAUDE.md §7.1 deleted a Ghidra extraction script
+WHY THIS IS A SEPARATE TOOL. engineering-rules.md §7.1 deleted a Ghidra extraction script
 because it "scored functions for specific hardcoded constants and
 pattern-matched a specific command shape, so it carried the prior conclusions
 inside it and anyone reading it inherited them". A differ that knows which byte

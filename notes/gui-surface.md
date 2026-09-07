@@ -1,6 +1,6 @@
 # The config tool's user-visible surface
 
-CLAUDE.md §1.2a requires the user-visible surface to be checked before any claim
+engineering-rules.md §1.2a requires the user-visible surface to be checked before any claim
 that a capability is missing. This is that check for the config tools, done
 properly on 2026-09-05 after three errors showed it had never been done at all.
 

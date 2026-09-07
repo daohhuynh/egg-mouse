@@ -2,7 +2,7 @@
 """usbpcap.py -- read a USBPcap .pcapng and pull out the HID traffic.
 
 WHAT THIS IS FOR. The vendor's Windows tools are the only place the protocol has
-ever been seen working. CLAUDE.md §2 recorded that no independent check on our
+ever been seen working. engineering-rules.md §2 recorded that no independent check on our
 derivation existed; a capture of Endgame's own software talking to Endgame's own
 hardware IS that check. This turns one into something we can diff against.
 

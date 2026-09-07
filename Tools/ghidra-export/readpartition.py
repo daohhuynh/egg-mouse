@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """readpartition.py [--queue PATH] — what has actually been READ, per binary.
 
-The question this exists to answer is the one CLAUDE.md 6 insists be stated as a
+The question this exists to answer is the one engineering-rules.md 6 insists be stated as a
 partition: for each binary, is every sized function either covered by a reading
 queue or settled mechanically, and if not, HOW MANY are neither and which.
 

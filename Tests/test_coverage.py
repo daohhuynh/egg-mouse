@@ -2,7 +2,7 @@
 """Gate: every Endgame binary's function list stays fully accounted for.
 
 `Tools/ghidra-export/coverage.py` has always been able to fail -- it exits 1 on
-a residue -- and until 2026-09-06 NOTHING RAN IT. CLAUDE.md 6 says to
+a residue -- and until 2026-09-06 NOTHING RAN IT. engineering-rules.md 6 says to
 regenerate coverage numbers rather than quote them, and the reason is exactly
 what running it after a long gap turned up: updater 1.06 and 1.07 each had a
 residue of 7 and 3 functions resting on a Ghidra FID name alone, while
@@ -14,13 +14,13 @@ CMakeLists.txt above `audit_claims_strict`, for the same reason).
 Two properties, both regenerated here, never read out of a file:
 
   1. UNACCOUNTED == 0.  total - (R|S|M|N|I) is empty, computed in one place.
-  2. "resting on Ghidra's name ALONE" == 0.  CLAUDE.md 1.2b: a FunctionID name
+  2. "resting on Ghidra's name ALONE" == 0.  engineering-rules.md 1.2b: a FunctionID name
      is one signature collision away from a guess, so a function whose ONLY
      evidence is that name is not accounted for in any sense this project
      accepts.  Property 1 alone would pass with N carrying thousands.
 
 `xm1r` is deliberately excluded and the exclusion is asserted, not assumed: it
-is the earlier product LINE (XM1r, 2022), it appears in no row of CLAUDE.md
+is the earlier product LINE (XM1r, 2022), it appears in no row of engineering-rules.md
 6.1's table, and its residue is a known, stated deferral rather than a
 regression.  Asserting that it still HAS a residue means this list cannot
 quietly grow to cover a binary that has stopped being checked.
@@ -104,7 +104,7 @@ class IdenticalTextIsProvedBeforeItIsUsed(unittest.TestCase):
                          f".text load VA differs across updaters: {vas}")
 
     def test_1_04_is_not_swept_in_by_it(self):
-        """1.04 is a SECOND CODE BASE (CLAUDE.md 6.1). If it ever hashed the
+        """1.04 is a SECOND CODE BASE (engineering-rules.md 6.1). If it ever hashed the
         same as 1.10 the whole per-binary standard would be wrong, so say so
         here rather than discovering it through a coverage number."""
         sys.path.insert(0, os.path.join(ROOT, "Tools/ghidra-export"))

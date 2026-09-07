@@ -40,7 +40,7 @@ These are ground truth. Ghidra's function list is not.
   DARK    none of the above. Bytes nothing accounts for.
 
 Structure only. It classifies bytes by provenance and holds no opinion about
-what any of them mean (CLAUDE.md 7.1).
+what any of them mean (engineering-rules.md 7.1).
 
 STATUS: FINDING-AID for the DARK class, EVIDENCE for the rest (2026-09-04).
 

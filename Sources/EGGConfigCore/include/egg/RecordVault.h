@@ -1,6 +1,6 @@
 // RecordVault.h -- §4.1: "Save a known-good blob to disk on first connect."
 //
-// That line was in CLAUDE.md from the beginning and was not implemented. What
+// That line was in engineering-rules.md from the beginning and was not implemented. What
 // existed was `egg-config read --save F`, which is a different thing: it saves
 // only when the user remembers to ask, and the moment it matters most is the
 // one time nobody thought to ask.

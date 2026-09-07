@@ -5,7 +5,7 @@ sites, the eleven `.rdata` millimetre strings in the order cfg107 adds them,
 and the eleven-arm jump table that stores 0x00..0x0a. Nothing is transcribed
 from the notes, so a wrong claim in §7.25 fails here rather than being restated.
 
-CLAUDE.md §1.2b: the decompiler and the xref lists are not admissible for a
+engineering-rules.md §1.2b: the decompiler and the xref lists are not admissible for a
 negative. The "cfg107 never writes 0x57f23b" check below is an exhaustive scan
 of the disassembly for the address, with its blind spot named in the test that
 asserts it.

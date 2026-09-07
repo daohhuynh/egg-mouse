@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """reconcile_scores.py -- make prediction-scores.md's tally a computation.
 
-CLAUDE.md §6: "a number written in prose survives a context compaction while the
+engineering-rules.md §6: "a number written in prose survives a context compaction while the
 computation behind it does not, so it returns looking like established fact:
 regenerate numbers, never quote them." That rule was written about coverage
 accounting and this file is the same failure one directory over. The scoreboard

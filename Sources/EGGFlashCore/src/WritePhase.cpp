@@ -1,6 +1,6 @@
 // WritePhase.cpp -- the erase-through-completion sequence, in ONE file.
 //
-// CLAUDE.md §4.3: "Keep the write phase small and in one file. ~100 lines in
+// engineering-rules.md §4.3: "Keep the write phase small and in one file. ~100 lines in
 // one place can be audited by eye. Spread across eight files with clever
 // abstractions, it cannot." So this file is deliberately flat. There is one
 // helper for a send-and-read round trip and no other indirection.

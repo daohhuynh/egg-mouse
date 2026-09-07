@@ -2,7 +2,7 @@
 
 Everything here was read off the physical device on 2026-09-04 with
 `Tools/device/pidwatch.py` and `ioreg -c IOHIDDevice -r -l -a`. **No HID device
-was opened and no byte was sent.** These are `[O]` under CLAUDE.md §1.2 — the
+was opened and no byte was sent.** These are `[O]` under engineering-rules.md §1.2 — the
 first `[O]` facts this project has about the bootloader.
 
 ## 1. There is a hardware-forced bootloader entry, and it works
@@ -35,7 +35,7 @@ one with known ones.
 
 ### Why this is the most important observation in the project
 
-CLAUDE.md §2's threat model is bugs in our own code, and the reason that mattered
+engineering-rules.md §2's threat model is bugs in our own code, and the reason that mattered
 is that the consequence was unbounded: one mouse, no spare, no way back. The
 recovery argument in `updater-protocol.md` §10.2 rested on a `[G]` — that the
 bootloader lives below block `0x34`, survives a failed update, and leaves the
@@ -64,7 +64,7 @@ application image** means:
 | `ProductID` | `0x1977` |
 | `VersionNumber` | `0x0006` |
 
-CLAUDE.md §4.2 requires: *"if the bootloader reports a version or an identity of
+engineering-rules.md §4.2 requires: *"if the bootloader reports a version or an identity of
 any kind, refuse anything unrecognised."* We now have that identity and it is
 unambiguous — a product string that literally reads `Bootloader`, and a version
 field distinct from the application's (`0x0107` on the 1.07 firmware this was
@@ -145,7 +145,7 @@ bootloader. `0` is the conventional value for that field.
 
 **This is not yet a finding either way.** The application-mode bytes were
 transcribed by hand into a note; the bootloader's were read programmatically
-from a plist. CLAUDE.md §1.2b says a derived view is never ground truth, and a
+from a plist. engineering-rules.md §1.2b says a derived view is never ground truth, and a
 hand transcription is a derived view. **Re-read the application-mode descriptor
 from the device programmatically and re-run the diff** before recording any
 conclusion. Recorded now, unresolved, per §1.7.
@@ -261,7 +261,7 @@ failed to (claim 1 above).
 
 This is the escape hatch the whole plan rests on, and it has now been exercised
 on this mouse rather than assumed. It also means the accepted cost in
-CLAUDE.md §4.2b is bounded by something real: the worst outcome of latching and
+engineering-rules.md §4.2b is bounded by something real: the worst outcome of latching and
 then stopping is "run the vendor's Windows updater again", which is a thing that
 has already worked here once.
 
@@ -368,7 +368,7 @@ device.
    (`PID 0x1977`, product `Bootloader`, `VersionNumber 0x0006`) was read from
    the 1.07 device and has since been re-observed under 1.10 unchanged, so it
    is safe; the rest of this file's application-mode numbers are 1.07's.
-   CLAUDE.md §5 says *"Every `[O]` in this project was taken from firmware
+   engineering-rules.md §5 says *"Every `[O]` in this project was taken from firmware
    1.10"*. That sentence is wrong in both directions and is corrected there.
 2. The cross-version drift this exposes has been **measured**, not assumed: a
    whole-record diff of `07-factory-reset` (1.07) against `10-postflash-baseline`
@@ -455,7 +455,7 @@ control and recovery works for a different reason. The one genuinely dangerous
 shape is a *partial* image whose first block is valid — block `0x34` holds the
 vector table and is written first — with garbage after it, which the bootloader
 would accept and jump to, and which could then hang before any button is read.
-**That is precisely the state CLAUDE.md §4.2's never-return rule exists to
+**That is precisely the state engineering-rules.md §4.2's never-return rule exists to
 prevent**, and it is why invariant 7 (no return from the post-`A0 03` phase
 without a verified image or a loud unrecoverable state) is load-bearing rather
 than decorative. Our flasher retries forever; the vendor's gives up after five
@@ -522,12 +522,18 @@ Endgame binary opens either.
 
 ```
 AppleUSBHostUserClient::openGated: failed to open Bootloader@00100000:
-provider is already opened for exclusive access by pid 613, Google Chrome
+provider is already opened for exclusive access by pid [REDACTED], [REDACTED]
 ```
 
+> The pid and the process name are redacted; everything else is verbatim. They
+> named an unrelated desktop application that happened to be running on the
+> author's Mac, which is host-session state rather than protocol evidence. What
+> the line establishes -- that a NON-privileged third-party process can hold
+> this device open exclusively -- does not depend on which one it was.
+
 Logged three times across the run, against **both** `Bootloader` and the
-application-mode device. Another process (Spotify) tried to open the mouse and
-the kernel refused it.
+application-mode device. Another ordinary userland process tried to open the
+mouse and the kernel refused it.
 
 **Operational consequence, and it must be handled before §4.4 stage 1:** if a
 browser holds the device when `egg-config` runs, our `hid_open_path` fails, and

@@ -5,7 +5,7 @@ Nothing here opens a HID device, claims an interface, or sends a byte. It shells
 to `ioreg`, which reports what the OS already enumerated. Safe to run against a
 mouse in any state, including one that is mid-recovery.
 
-WHY IT EXISTS. CLAUDE.md §2's worst case is a device with no valid application
+WHY IT EXISTS. engineering-rules.md §2's worst case is a device with no valid application
 image. Whether that state is recoverable turns on one question: can the
 bootloader be reached when the application is broken? The vendor updater has a
 code path for a device already sitting in the bootloader (updater-protocol.md

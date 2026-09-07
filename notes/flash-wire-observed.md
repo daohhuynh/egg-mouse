@@ -69,7 +69,7 @@ Timings are from 08; 09 matches to within jitter.
     -> 00 01 ...                     0.9 s later
 ```
 
-`a1 13` is the command §1.2a of CLAUDE.md remembers as the one that had no name
+`a1 13` is the command §1.2a of engineering-rules.md remembers as the one that had no name
 in the strings and was nearly written off as absent. Here it is, on the wire,
 last thing the updater does.
 

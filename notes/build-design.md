@@ -5,7 +5,7 @@ DOCUMENT.** It said "no code has been written" and "nothing here has touched
 hardware" for a day after both stopped being true, which is the worst thing a
 design document can say to the fresh reader who opens it first.
 
-All three libraries and both executables exist and are tested. `CLAUDE.md`
+All three libraries and both executables exist and are tested. `engineering-rules.md`
 §4.4's four staged bring-up steps all completed on 2026-09-05, on the device:
 read-only round trip, bootloader entry and exit, firmware read-back, and a real
 65-block flash. A SwiftUI front end drives both CLIs.
@@ -23,13 +23,13 @@ citation is a design choice, not a finding, and is marked as such.
 
 ## 0. What the derivation licenses us to build
 
-The flasher is the priority (`CLAUDE.md` §4.4) and it is buildable now, because
+The flasher is the priority (`engineering-rules.md` §4.4) and it is buildable now, because
 the parts it needs are `[D]`:
 
 | we know | from |
 |---|---|
 Every row states the binary it was derived from. A number without its scope is
-the failure mode `CLAUDE.md` §6 names, and this table is where it would do the
+the failure mode `engineering-rules.md` §6 names, and this table is where it would do the
 most damage.
 
 | we know | scope — which binary | from |
@@ -53,7 +53,7 @@ of this document.
 
 ## 1. Two executables, one core
 
-`CLAUDE.md` §3 fixes this and the derivation has not disturbed it. Restating only
+`engineering-rules.md` §3 fixes this and the derivation has not disturbed it. Restating only
 what changed:
 
 `EGGCore` carries the transport **and the device-selection predicate**, which is
@@ -90,7 +90,7 @@ The two tools disagree and both are `[D]`:
 | config `0x403920` | `0x01` | **`0x03`** | 1000 ms | 100 ms |
 
 `config-protocol.md` §1. A transport that hardcodes one is wrong for the other
-executable. These belong in the per-tool protocol table (`CLAUDE.md` §3: "as
+executable. These belong in the per-tool protocol table (`engineering-rules.md` §3: "as
 data tables, not scattered through code").
 
 ### 1.2 What `EGGCore` must refuse to do
@@ -108,7 +108,7 @@ data tables, not scattered through code").
 
 ### 2.1 Preflight — every one of these aborts, and abort is free
 
-Before erase nothing has changed on the device, so `CLAUDE.md` §4.2 makes any
+Before erase nothing has changed on the device, so `engineering-rules.md` §4.2 makes any
 single failure an abort with no partial-pass path.
 
 1. **Image identity, four checks, and they are cheap** — `updater-protocol.md`
@@ -126,7 +126,7 @@ single failure an abort with no partial-pass path.
    The last line pins the exact image; the third is the one that discriminates
    *product*, and it is the check that would catch resource 143 — the blob that
    appeared in 1.10, the same build whose PDB path names an EL1 project — being
-   substituted for 140. `CLAUDE.md` §2 says every guard against flashing the
+   substituted for 140. `engineering-rules.md` §2 says every guard against flashing the
    wrong firmware has to be ours and has to run before the first byte; this is
    that guard, and it is four comparisons.
 2. **Image size** matches the constant the block arithmetic expects (§3.8).
@@ -151,7 +151,7 @@ applies and **quitting is the bug**.
 
 ### 2.3 The write phase, in one file, ~100 lines
 
-`CLAUDE.md` §4.3. The sequence is fixed by §5.4 and §3.8 and must read as one
+`engineering-rules.md` §4.3. The sequence is fixed by §5.4 and §3.8 and must read as one
 list, not a call graph:
 
 ```
@@ -191,7 +191,7 @@ Two facts make this a real decision rather than a detail:
 
 ## 3. What actually protects against our own bugs
 
-`CLAUDE.md` §4.3 lists these; this section says what each one concretely
+`engineering-rules.md` §4.3 lists these; this section says what each one concretely
 contains, because "write a mock" is not a specification.
 
 ### 3.1 The mock bootloader — the highest-value artefact, and it needs no hardware
@@ -217,7 +217,7 @@ exactly the shapes that a real bootloader in a bad state produces.
 
 ### 3.2 Invariants, asserted over randomised runs — not examples
 
-`CLAUDE.md` §4.3's list, made checkable:
+`engineering-rules.md` §4.3's list, made checkable:
 
 1. No write is emitted unless preflight passed. (Assert on the emitted stream,
    not on a flag.)
@@ -247,7 +247,7 @@ input to the golden file.
 
 ## 4. Order of work
 
-Follows `CLAUDE.md` §4.4, with what is now known:
+Follows `engineering-rules.md` §4.4, with what is now known:
 
 1. **Mock + dry-run + golden + invariants.** No hardware. This is most of the
    work and all of it is possible today.
@@ -297,7 +297,7 @@ genuinely still open and is marked as such.
   update, deliberately: `A1 13` at the end of the flash wipes the settings, so
   starting without an undo means losing them with no way back.
 - **STILL OPEN. Whether the bootloader validates the image it is given.**
-  Assumed *not* (`CLAUDE.md` §2, decided 2026-09-03), and still `[G]`: a
+  Assumed *not* (`engineering-rules.md` §2, decided 2026-09-03), and still `[G]`: a
   successful flash of the RIGHT image tells you nothing about what the device
   would have done with a wrong one, and finding out costs the mouse. Every guard
   is therefore ours and runs before the first byte.

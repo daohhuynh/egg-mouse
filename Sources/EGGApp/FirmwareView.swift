@@ -1,6 +1,6 @@
 // FirmwareView.swift -- firmware backup and flashing.
 //
-// THIS SCREEN IS THE REASON THE APP SHELLS OUT. Read CLAUDE.md §3 and §4.2
+// THIS SCREEN IS THE REASON THE APP SHELLS OUT. Read engineering-rules.md §3 and §4.2
 // before changing anything here.
 //
 //   §3: "A GUI DOES NOT INHERIT THIS. ... a window has a close button, a Dock
@@ -35,7 +35,7 @@ final class FirmwareModel: ObservableObject {
     /// in, rather than by this app. egg-flash cannot tell the two apart -- the
     /// USB identity is byte-identical -- so it refuses to write to a bootloader
     /// it did not enter itself unless told. Separate from acknowledgeUntested on
-    /// purpose: they are different admissions (CLAUDE.md 4.2c's reasoning about
+    /// purpose: they are different admissions (engineering-rules.md 4.2c's reasoning about
     /// approvals given by reflex).
     @Published var buttonEntered = false
     // --- restore: writing a saved backup BACK to the mouse ------------------

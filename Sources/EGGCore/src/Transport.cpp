@@ -138,7 +138,7 @@ Reply Transport::receive(std::uint8_t reportId, const char* what,
         // This check demanded `want` and so failed every real read. It passed
         // the whole test suite because MockConfigDevice returns `want`: the
         // mock was built from the same wrong reading, which is exactly the
-        // limit CLAUDE.md decision #1 records ("if the derivation is wrong the
+        // limit engineering-rules.md decision #1 records ("if the derivation is wrong the
         // mock is confidently wrong in the same direction"). Caught 2026-09-05
         // by the first read from the real device.
         //

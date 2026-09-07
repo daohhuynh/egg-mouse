@@ -1,6 +1,6 @@
 // MockBootloader.h -- an ADVERSARIAL bootloader. It is not trying to help.
 //
-// CLAUDE.md §4.3 names this "the highest-value artefact in the project" and
+// engineering-rules.md §4.3 names this "the highest-value artefact in the project" and
 // says why: the dangerous failures -- wrong chunk boundary, wrong opcode,
 // trusting a reported success -- compile clean in any language. Only something
 // that behaves badly on purpose can find them, and this needs no hardware.

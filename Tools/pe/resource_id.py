@@ -2,7 +2,7 @@
 """resource_id.py -- recover, from raw bytes, WHICH firmware resource an
 Endgame updater's own code loads.
 
-CLAUDE.md §1.4: "Whichever firmware resource the official updater loads, it must
+engineering-rules.md §1.4: "Whichever firmware resource the official updater loads, it must
 be a constant in our code -- never a variable, never selected at runtime, never
 chosen from a list. Other resources in the binary may belong to other products."
 
@@ -131,7 +131,7 @@ def instruction_stream(path):
     objdump is used ONLY for SEQUENCING -- to know which instruction precedes
     which. Every operand VALUE is re-read from the file's own bytes below, so a
     decoder that desynchronises can cause a REFUSAL but never a wrong id
-    (CLAUDE.md §1.2b: derived views find things, they never decide them).
+    (engineering-rules.md §1.2b: derived views find things, they never decide them).
     """
     out = subprocess.run(["objdump", "-d", path], capture_output=True,
                          text=True).stdout

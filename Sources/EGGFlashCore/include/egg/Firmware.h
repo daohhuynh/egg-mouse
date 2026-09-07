@@ -1,6 +1,6 @@
 // Firmware.h -- the image, its blocks, and its two checksums.
 //
-// CLAUDE.md §1.4: "Whichever firmware resource the official updater loads, it
+// engineering-rules.md §1.4: "Whichever firmware resource the official updater loads, it
 // must be a constant in our code -- never a variable, never selected at
 // runtime, never chosen from a list. Other resources in the binary may belong
 // to other products."
@@ -40,7 +40,7 @@ inline constexpr std::size_t kExpectedImageSize = 66560;
 inline constexpr std::size_t kExpectedBlockCount = kBlockCount;  // 65
 
 // kBlockFirst / kBlockLast / kBlockCount live in EGGCore's Protocol.h and are
-// NOT redeclared here. CLAUDE.md §3 keeps protocol constants in one place
+// NOT redeclared here. engineering-rules.md §3 keeps protocol constants in one place
 // precisely so a second copy cannot drift; the first build of this header did
 // redeclare them, with a different width, and the compiler caught it.
 

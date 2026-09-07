@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """microread.py <tag> [--json PATH] — decide small functions MECHANICALLY.
 
-CLAUDE.md 6.1 (amended) requires every function of updater 1.10 to be read,
+engineering-rules.md 6.1 (amended) requires every function of updater 1.10 to be read,
 library code included. 8,640 of fw110's 9,076 were unread. Sending all of them
 to a language model is the least reliable way to do it: most are three
 instructions long, an LLM adds no information over the decoder, and every extra
@@ -29,7 +29,7 @@ tool must never say it does -- a partial explanation presented as a whole one is
 exactly the failure this project keeps hitting.
 
 This encodes no belief about the protocol: it names instruction shapes, not
-meanings (CLAUDE.md 7.1). "Returns constant 0x5444b4" is a fact about bytes.
+meanings (engineering-rules.md 7.1). "Returns constant 0x5444b4" is a fact about bytes.
 Whether 0x5444b4 matters is not this tool's business.
 """
 import json, os, re, subprocess, sys

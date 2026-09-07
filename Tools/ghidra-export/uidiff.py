@@ -9,7 +9,7 @@ rather than an afternoon.
 
 WHAT IT RECORDS. Structure only: control id, its caption from the resources, and
 the set of message-map handler addresses each binary attaches to it. It holds no
-opinion about what any control means and does not rank. CLAUDE.md 3.1.
+opinion about what any control means and does not rank. engineering-rules.md 3.1.
 
 THE BLIND SPOT, and it is not small (1.2a). Control IDs ARE REUSED ACROSS
 DIALOGS. cfg100's 1044 is a `SCROLL DOWN` pushbutton on the button-mapping page;

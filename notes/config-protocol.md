@@ -2,7 +2,7 @@
 
 Derived independently from the vendor `.exe` files, statically. Nothing here has
 touched hardware: there is **no `[O]` in this file**. Provenance tags per
-`CLAUDE.md` §1.2.
+`engineering-rules.md` §1.2.
 
 Scope: **all four configuration tools** — cfg107, cfg104, cfg101, cfg100. Claims
 state which binaries they were checked against. cfg100 is a **separate code
@@ -17,7 +17,7 @@ retracted section was left standing as live prose. Both are fixed below.
 
 ## 1. The headline: config and flasher share one transport [D]
 
-`CLAUDE.md` §4.4 says to *establish* whether the two tools share a transport
+`engineering-rules.md` §4.4 says to *establish* whether the two tools share a transport
 rather than assume it, and `notes/updater-protocol.md` §6.1 left it open. It is
 now settled for cfg107, and the answer is yes — the framing is shared, the
 command numbers are not.
@@ -36,7 +36,7 @@ command numbers are not.
 
 That is the same house code, not a coincidence of conventions. The practical
 consequence for us is direct: **one `EGGCore` transport serves both executables**,
-as `CLAUDE.md` §3 hoped but did not assume, and proving the transport once in
+as `engineering-rules.md` §3 hoped but did not assume, and proving the transport once in
 §4.4 stage 1 proves it for both.
 
 **What is *not* shared is the command space.** Updater commands are `0x03`,
@@ -82,7 +82,7 @@ a parameter, not a constant.
 > was hiding a live device-read channel nobody had noticed — §10.
 >
 > Both errors were "exhaustive scan of the wrong search space", which is the
-> failure `CLAUDE.md` §1.2a names. The scan was never wrong; the set it ran over
+> failure `engineering-rules.md` §1.2a names. The scan was never wrong; the set it ran over
 > was. Regenerate with `Tools/ghidra-export/closure.py`; do not quote these
 > numbers from prose.
 
@@ -256,7 +256,7 @@ compile-time constant `$0x1978`**:
 Each verified by disassembling at the site. **cfg107 has no bootloader
 awareness**: it cannot open PID `0x1977`, because nothing ever asks it to.
 
-This is a `CLAUDE.md` §1.2a case worth keeping as calibration — the original
+This is a `engineering-rules.md` §1.2a case worth keeping as calibration — the original
 negative was *stated over the wrong search space*. It happened to reach the
 right conclusion, which is the dangerous kind of near-miss.
 
@@ -291,7 +291,7 @@ Little-endian, so `$0x12a1` writes `a1 12 00 00`.
 >
 > **This matters for us.** Factory reset is not fire-and-forget on the config
 > side: the vendor waits 1.1 s and then requires an explicit ready status. Per
-> `CLAUDE.md` §4.2, "mirror whatever verification the vendor protocol provides,
+> `engineering-rules.md` §4.2, "mirror whatever verification the vendor protocol provides,
 > exactly" — so our factory reset must do the same and must not report success
 > on the send alone. Note the contrast with the *updater's* post-flash `A1 13`,
 > which genuinely is fire-and-forget (`notes/updater-protocol.md` §5.4a): same
@@ -352,7 +352,7 @@ deleted, for the same reason those are.
 > `Sources/egg-config/main.cpp` cited "§7.4" for the `A1 13` frame builder while
 > `Sources/EGGCore/include/egg/Protocol.h` cited "§7.4" for the `0x01`-`0x04`
 > zeroing. A citation that lands on the wrong section is worse than none
-> (CLAUDE.md §1.2), so the three with the fewest references moved.
+> (engineering-rules.md §1.2), so the three with the fewest references moved.
 >
 > **Old number -> new:** §7.3 (`A1 02` is a small query) -> **§7.1b**;
 > §7.4 (`A1 13` IS the factory reset) -> **§7.1c**; §7.5 (the retracted
@@ -365,7 +365,7 @@ deleted, for the same reason those are.
 > has not had since §2 was reorganised (see §7.1d, which mentions "an earlier
 > §2.3" for the same reason). Both meant §7.1c.
 
-Work-plan item 7. `CLAUDE.md` §4.1 requires factory reset to be implemented and
+Work-plan item 7. `engineering-rules.md` §4.1 requires factory reset to be implemented and
 confirmed **before any other write path**, on the grounds that it is the undo for
 bad config state. That requirement rests on a premise this section tests.
 
@@ -648,7 +648,7 @@ host-composed defaults blob is involved anywhere.
 
 **RETRACTED.** An earlier §2.3 argued that no factory-reset command existed, that
 any vendor reset must therefore be an `A0 11` write of a host-composed blob, and
-that `CLAUDE.md` §4.1 should be amended to replace factory reset with
+that `engineering-rules.md` §4.1 should be amended to replace factory reset with
 restore-from-blob.
 
 **Every part of that is withdrawn.** §4.1 stands exactly as written: factory
@@ -720,7 +720,7 @@ Two consequences, and the second is the one that bears on our design:
    real constraint is, **our flasher and our config tool can be running at the
    same time**, which the vendor's two tools also can. `[G]` whether that is
    safe; it is a question for the device, and it belongs on the device-gated
-   list in `CLAUDE.md` §5 rather than being designed around by guesswork.
+   list in `engineering-rules.md` §5 rather than being designed around by guesswork.
 
 ## 9. What the unique-body read of cfg107 / cfg104 / cfg101 produced
 
@@ -731,7 +731,7 @@ batches by `Tools/ghidra-export/mkbatches.py`, one reader per batch, each shown
 only raw objdump text.
 
 **Provenance, and it is not `[D]`.** What follows is what readers reported. It
-is a **lead inventory**, not a derivation. `CLAUDE.md` §1.2 applies without
+is a **lead inventory**, not a derivation. `engineering-rules.md` §1.2 applies without
 exception: nothing here may inform a write until it is re-derived from the bytes,
 and §1.3 forbids a `[G]` byte reaching the device regardless of how confident a
 summary sounds.
@@ -756,7 +756,7 @@ and `settings_relevant` are judgements and **nothing checks them**.
 
 ### 9.1 Two claims from the read, re-derived from the bytes  [D]
 
-Picked because both bear on `CLAUDE.md` §1.3 and on §6's open items.
+Picked because both bear on `engineering-rules.md` §1.3 and on §6's open items.
 
 **`0x0040e410` (cfg107, 91 bytes) is a DPI clamp and quantiser.** Read in full;
 the whole body is nine basic blocks and no call:
@@ -964,7 +964,7 @@ channel: the device volunteers its polling rate, unsolicited, as a one-hot byte
 in which **bit 0 is 8000 Hz and bit 6 is 125 Hz**. It is `[D]` and cited, and it
 is a read, not a write, so §1.3 is not engaged. It also retires the reading of
 this event as "profile / bank selection", which was a `[G]` that had begun to
-read like a finding — exactly the drift `CLAUDE.md` §7.1 warns about.
+read like a finding — exactly the drift `engineering-rules.md` §7.1 warns about.
 
 **`buf[1] == 0x02` — a four-way setting.** `0x0040f750` stores `buf[2]` to
 globals `0x0057f21a` / `0x0057f2aa`, bounds it to `0..3`, and drives four radio
@@ -984,7 +984,7 @@ function. Recorded as observed; do not build on it.
 2. **The mouse pushes state at the host unprompted.** Any read-modify-write in
    `EGGConfigCore` races a device-side change the user just made on the mouse
    itself. The vendor's answer is to poll and update the UI; ours has to be to
-   re-read before writing, which §4.1 of `CLAUDE.md` already requires.
+   re-read before writing, which §4.1 of `engineering-rules.md` already requires.
 3. **The flasher is unaffected.** No updater imports `DeviceIoControl`, none
    contains a `0xFF02` literal, and neither updater closure changed.
 4. **`0x0057f2a0` is the base of a byte-for-byte shadow of the settings
@@ -1034,7 +1034,7 @@ enumerated the other two. They are:
 | **`0x412d10`** | **`0x412d00`** | **§10.2, the event channel — unaccounted for until now** |
 | `0x507853` | `0x507847` | library code, coincidental constant |
 
-`CLAUDE.md` §6 says to state coverage as a partition with the residue
+`engineering-rules.md` §6 says to state coverage as a partition with the residue
 enumerated. Five of seven was stated as a fact and the two-function residue was
 not written down, so a whole device channel sat in plain sight for a day. This
 is the second time in this project that a correct count with an unenumerated
@@ -1104,7 +1104,7 @@ is a basis for a write.
 
 ## 12. The config tools' user-visible surface  [D]
 
-`CLAUDE.md` §1.2a's requirement, applied to the config tools the way §11 of
+`engineering-rules.md` §1.2a's requirement, applied to the config tools the way §11 of
 `notes/updater-protocol.md` applies it to the updaters. Produced with
 `Tools/ghidra-export/dlgdump.py` and `dlgref.py`.
 
@@ -1975,7 +1975,7 @@ on the Advanced Sensor page** — *"motion jitter filter and sensor glass mode a
 not seen anywhere on advanced sensor"*, 2026-09-05, scored as
 `cfg-advanced-sensor-hidden-controls` in `prediction-scores.md`. (**Re-anchored
 2026-09-06.** This cited `./log.txt` 03 line 2, which is quarantined by
-CLAUDE.md §1.1a. The observation itself is the owner's quoted words and stands; only
+engineering-rules.md §1.1a. The observation itself is the owner's quoted words and stands; only
 the pointer needed replacing.) So bit 4 is
 unreachable from the shipped UI and no capture can attribute it. Note this does
 not make bit 4 *unwritten*: `FUN_00411ab0` runs on every APPLY and clears the
@@ -2182,7 +2182,7 @@ down: that the config tool talks to the mouse **only** when APPLY is pressed.
 The capture procedure's core rule — "every numbered line = exactly one APPLY" —
 is that assumption in procedural form. It is false.
 
-*(That rule lived in `./log.txt`, quarantined 2026-09-06 under CLAUDE.md §1.1a.
+*(That rule lived in `./log.txt`, quarantined 2026-09-06 under engineering-rules.md §1.1a.
 Nothing in this section rests on it: the finding below is `[D]` from cfg107 and
 `[O]` from the capture bytes. The rule is named here only as the thing being
 refuted.)*
@@ -3046,7 +3046,7 @@ embedded in code. It desynchronises in this very region — it renders `0x40865a
 
 §7.8 settled the CPI block's LAYOUT — four entries of five bytes from record
 `0x23`, `flag, X lo, X hi, Y lo, Y hi`. That was enough to *read* a CPI and not
-enough to *write* one: CLAUDE.md §1.3 forbids emitting a byte whose meaning is
+enough to *write* one: engineering-rules.md §1.3 forbids emitting a byte whose meaning is
 `[G]`, and "which u16 values are legal" was `[G]`. `egg-config cpi` needed this
 section to exist.
 
@@ -3166,7 +3166,7 @@ multiclick filter defaults of §7.22, from a fourth place again.)*
 `lea disp(%esi),%ecx` and a call to `CSliderCtrl::SetRange` at `0x41c55a` —
 occurs **ten** times in cfg107, not the eight the CPI page needs.
 
-CLAUDE.md §1.2a: a count asserts something about everywhere you did not look,
+engineering-rules.md §1.2a: a count asserts something about everywhere you did not look,
 so the two extra were chased rather than absorbed into the number. The
 partition:
 
@@ -3988,7 +3988,7 @@ in hand.
 
 This is not a hypothetical. The value would be accepted, be well-formed, verify
 against read-back, and mean something else — the exact shape of failure
-`CLAUDE.md` §2 says nothing downstream of us catches.
+`engineering-rules.md` §2 says nothing downstream of us catches.
 
 **Reproduce:** `python3 -m unittest Tests.test_lod`.
 
@@ -4034,7 +4034,7 @@ It stores it.**
 `0x404180` has exactly two in-edges (§7.10's call/jump accounting: `0x413f2f`
 and `0x414356`) and **both start at `0x12c` = 300 ms.**
 
-`CLAUDE.md` §1.2a names this exact failure in its first numbered clause:
+`engineering-rules.md` §1.2a names this exact failure in its first numbered clause:
 
 > A scan for `push imm32` that finds nothing says nothing about `movl $imm32`.
 > That exact mistake was made on 2026-09-03.

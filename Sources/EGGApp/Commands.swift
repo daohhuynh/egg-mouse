@@ -6,7 +6,7 @@
 // pure functions over plain values and Tests/test_app_commands.swift drives
 // them against the real CLIs.
 //
-// The rules encoded here, each traceable to CLAUDE.md:
+// The rules encoded here, each traceable to engineering-rules.md:
 //   §4.1  a write is previewed before it is applied; --yes is never implicit
 //   §4.2  a flash requires a backup file that already exists
 //   §4.2c a flash carries a --confirm token the person typed, never one this
@@ -291,7 +291,7 @@ enum Commands {
     ///
     /// The Settings screen has been able to wipe the mouse and to save a copy
     /// since the day it shipped, and its own tooltip said "Your saved copy is
-    /// the way back" -- while offering no way back. CLAUDE.md 4.1 puts it the
+    /// the way back" -- while offering no way back. engineering-rules.md 4.1 puts it the
     /// other way round: implement the undo FIRST, then the thing it undoes.
     ///
     /// The preview is genuinely free. `egg-config dryrun REC` with no field

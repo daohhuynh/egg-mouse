@@ -17,7 +17,7 @@ It is answered by partitioning the 115 settings-record bytes into:
             it. No capture can ever attribute these, however many are taken.
 
 The partition is computed, not asserted, and it must be exhaustive:
-MOVED + REACHABLE + CLOSED == 115 or this exits non-zero. That is CLAUDE.md
+MOVED + REACHABLE + CLOSED == 115 or this exits non-zero. That is engineering-rules.md
 §6's rule about stating coverage as a partition rather than as arithmetic
 between separately-scoped numbers.
 

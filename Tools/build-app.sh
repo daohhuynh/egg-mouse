@@ -14,12 +14,12 @@ BIN="$APP/Contents/MacOS/EGG Mouse"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Deployment target is deliberately behind the SDK (15.5 here). macOS 14 is the
-# floor because SwiftUI's two-parameter onChange arrived there; going lower
-# means using the deprecated one-parameter form, and a build full of deprecation
-# warnings is a build whose real warnings get skimmed. Building against a newer
-# SDK costs nothing here and keeps the bundle running if it is ever copied to an
-# older Mac.
+# Deployment target is deliberately behind whatever SDK is installed. macOS 14
+# is the floor because SwiftUI's two-parameter onChange arrived there; going
+# lower means using the deprecated one-parameter form, and a build full of
+# deprecation warnings is a build whose real warnings get skimmed. Building
+# against a newer SDK costs nothing here and keeps the bundle running if it is
+# ever copied to an older Mac.
 swiftc \
   -target arm64-apple-macosx14.0 \
   -O -swift-version 5 \

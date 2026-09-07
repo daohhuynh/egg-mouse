@@ -22,7 +22,7 @@ a transient that a fast enough poll can catch. If the BOOTLOADER owns the check,
 0x1977 is the only identity that ever appears.
 
     SEEING 0x1978 BEFORE 0x1977 IS CONCLUSIVE -- the application owns it.
-    NOT SEEING IT IS NOT PROOF OF ANYTHING (CLAUDE.md §1.2a).
+    NOT SEEING IT IS NOT PROOF OF ANYTHING (engineering-rules.md §1.2a).
 
 The blind spot, stated because a negative result here is exactly the kind of
 absence-claim §1.2a warns about: firmware that checks the buttons BEFORE

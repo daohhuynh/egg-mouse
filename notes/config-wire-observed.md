@@ -369,7 +369,7 @@ answer, and still offers the unplug-replug check for anyone who wants it.
 > **THE LABELLING IN THIS SECTION IS VOID. Read §7 instead.**
 >
 > Everything below anchors on the repo-root `./log.txt`, which the owner quarantined
-> on 2026-09-06 (CLAUDE.md §1.1a: *"you cannot trust anything in the root
+> on 2026-09-06 (engineering-rules.md §1.1a: *"you cannot trust anything in the root
 > log.txt. much of it is wrong."*). §7 says so and replaces the anchor
 > with the factory-default screenshots; this banner was missing from §6's own
 > heading until 2026-09-07, so a reader arriving from the table of contents met
@@ -490,7 +490,7 @@ being worth waking anyone for.
 ## 7. The factory-default record, verified against the screenshots  [O]
 
 Supersedes §6's method. §6 reconciled the captures against the repo-root
-`./log.txt`; the owner quarantined that file on 2026-09-06 (CLAUDE.md §1.1a), so §6's
+`./log.txt`; the owner quarantined that file on 2026-09-06 (engineering-rules.md §1.1a), so §6's
 *labelling* is void. **Its byte-level observations stand** — they never depended
 on the log — and this section replaces the anchor with one that cannot lie.
 
@@ -551,7 +551,7 @@ Two consequences:
    changed; nothing moved. That is the strongest evidence yet that the config
    work derived from a 1.07-era capture set is valid on the owner's 1.10 device — and
    it is now evidence rather than an assumption.
-2. **Never hardcode a default vector.** CLAUDE.md §5's "anything a new firmware
+2. **Never hardcode a default vector.** engineering-rules.md §5's "anything a new firmware
    version changes" is no longer hypothetical: it has exactly one known
    instance, and a tool that shipped 1.07's defaults would silently re-enable a
    sensor setting on 1.10 that the vendor now ships off.
@@ -756,10 +756,10 @@ sent Shift+`=` in hardware -- is closed by the usage byte itself: hardware sendi
 
     0x71   1.07 = 01   1.10 = 00        (the ONLY difference)
 
-This is an independent confirmation of `CLAUDE.md` §5, which recorded the same
+This is an independent confirmation of `engineering-rules.md` §5, which recorded the same
 single byte from the mid-run flash on 2026-09-05. The record LAYOUT is stable
 across 1.07 -> 1.10 by measurement, twice, and `0x71` (Force max Sensor fps, §7.8)
-is the one default that moved. **`CLAUDE.md` §5's "never hardcode a default
+is the one default that moved. **`engineering-rules.md` §5's "never hardcode a default
 vector" still stands** -- two versions differing by one byte is exactly the shape
 that tempts hardcoding.
 

@@ -1,7 +1,7 @@
 # Firmware updater — derived protocol
 
 Scope: `Endgame Gear OP1 8k v2 Firmware Updater` 1.04 / 1.06 / 1.07 / 1.10.
-Every claim carries a `CLAUDE.md` §1.2 tag. `[D]` cites a VA in a named binary.
+Every claim carries a `engineering-rules.md` §1.2 tag. `[D]` cites a VA in a named binary.
 
 **Nothing here has touched hardware.** There is no `[O]` in this file yet, and
 until there is, §1.3 forbids acting on anything below that is `[G]`.
@@ -81,7 +81,7 @@ what the bytes say and `[G]` for why.
 
 **What it does establish, and this is the part that matters:** Endgame's build
 process permits one product's updater to be linked from another product's
-project. That is `CLAUDE.md` §1.4's hazard demonstrated on our own target rather
+project. That is `engineering-rules.md` §1.4's hazard demonstrated on our own target rather
 than argued from principle, and it means **"which `FWFILE` holds the OP1 8k v2
 image" is an open question, not a settled one.** The tool hardcodes 140 and says
 nothing about what 140 contains.
@@ -158,7 +158,7 @@ the enumerator `FUN_00401000` — `0x403608`, `0x403649`, `0x403696`, `0x4036c9`
 pushed argument is a literal, either `0x1978` or `0x1977`. There is no path that
 computes a PID, reads one from a resource, or takes one from a list.
 
-That matters for §1.4 of `CLAUDE.md` in the same way the `FWFILE` constant does:
+That matters for §1.4 of `engineering-rules.md` in the same way the `FWFILE` constant does:
 the device-identity search space is closed at two values, both compile-time
 constants, and ours should be too.
 
@@ -471,7 +471,7 @@ Two things follow that matter for our implementation:
    non-`0x01` status so a failure is at least diagnosable.
 2. **The `A0 07` read-back is the only way to get data out of the device**, and
    it returns the payload at `[16]`, the same offset the write command puts it.
-   That is what makes `CLAUDE.md` §4.4 stage 3 — flash read-back with zero
+   That is what makes `engineering-rules.md` §4.4 stage 3 — flash read-back with zero
    writes — possible.
 
 ### 3.8 Block numbering — the single most important derived fact
@@ -594,7 +594,7 @@ And the two thread entry points are three instructions each:
 updater — it is a supported starting state.** It skips `A1 3A` entirely, never
 reads a version, and goes straight to `A0 03` and the block loop.
 
-**Consequence, and it changes the risk calculus for `CLAUDE.md` §4.4 stage 2.**
+**Consequence, and it changes the risk calculus for `engineering-rules.md` §4.4 stage 2.**
 The worst plausible outcome of a software bootloader entry — the device sits in
 the bootloader and will not hand back — is recoverable with Endgame's own tool
 on any Windows machine, using a path they wrote for exactly this case. It does
@@ -1104,7 +1104,7 @@ Still open:
 - **What the device does with a `0xA0/0x06` whose `[2..3]` is outside
   `0x34..0x74`.** The vendor tool never sends one, so its behaviour is
   unconstrained by anything in the binary. Our flasher must never emit one.
-- **Everything in `CLAUDE.md` §5.** No `[O]` exists yet; the device is not in
+- **Everything in `engineering-rules.md` §5.** No `[O]` exists yet; the device is not in
   hand. Nothing above has been checked against hardware.
 
 ### 6.1 One question the binaries cannot answer, and it is a design input
@@ -1127,7 +1127,7 @@ explicit length and does no padding, so we must send exactly the right number of
 bytes and cannot rely on a driver being lenient.
 
 **Resolve it from the report descriptor when the device arrives** — that is
-already `CLAUDE.md` §5's first item, and this is the specific thing to look for:
+already `engineering-rules.md` §5's first item, and this is the specific thing to look for:
 whether `0xA0` and `0xA1` live in one collection or two, and what feature length
 each declares. Until then, the plan is to mirror the vendor exactly (`0x411` for
 `0xA0`, `0x40` for `0xA1`) and to treat a length mismatch as a preflight failure
@@ -1260,7 +1260,7 @@ calls the type is convention, and nothing downstream depends on the name.
 
 The 474 of §6.2.5 were the bodies unique to fw110. The remaining **4,343**
 distinct bodies each appear byte-identically in at least one other binary, which
-is what `classify.py` calls library code. `CLAUDE.md` §6.1 as amended says a
+is what `classify.py` calls library code. `engineering-rules.md` §6.1 as amended says a
 match is **no longer an alternative to reading it**, on the grounds that reading
 the matched set is the only empirical check on that classifier's premise. So
 they were read too — 64 batches, all 64 returned.
@@ -1295,12 +1295,12 @@ anything elsewhere — the classifier is now bounded from both sides.
 
 ### 6.2.5b Updater 1.10 is read — the partition [D]
 
-`CLAUDE.md` §6.1 requires every one of 1.10's functions to end in a known state,
+`engineering-rules.md` §6.1 requires every one of 1.10's functions to end in a known state,
 and §6 requires it stated as a partition computed in one place:
 
 > **CORRECTED 2026-09-04.** The second identity below was computed by
 > *subtraction* — "duplicates = 5232 − 4817" — and that is exactly the move
-> `CLAUDE.md` §6 forbids, in the section whose whole purpose is to show a
+> `engineering-rules.md` §6 forbids, in the section whose whole purpose is to show a
 > partition closing. The subtraction silently absorbed **39 functions that have
 > no normalised body hash at all**: `classify.py`'s `sigs()` skips bodies under
 > 16 bytes, so those 39 were never in the read queue and were never a
@@ -1384,7 +1384,7 @@ Of fw110's 5,232 functions that `microread.py` could not settle mechanically,
 the slice where vendor code, if any is left unfound, has to be. All 474 were
 read, in 22 batches, and every batch returned.
 
-**The readers were verified, not trusted** (`CLAUDE.md` §6.2). Each was required
+**The readers were verified, not trusted** (`engineering-rules.md` §6.2). Each was required
 to return two fields checkable against the bytes, and the prompt stated no
 expected answer, gave no protocol context, and told them the Ghidra names are
 sometimes wrong:
@@ -1470,7 +1470,7 @@ idiom**: `0x0040b0d9`, `0x004efbfc`, `0x004efc28`, `0x004efc54`, `0x004efc80`,
 handler that computes a bool from a member (`this+0x344` against 0…5,
 `this+0x13c`, `this+0x38c`) and calls `CCmdUI` vtable slot `+0x0` or `+0x4`.
 Each was disassembled; **none is in the device closure**. Precision of the flag
-on this run: **13 of 24**. `CLAUDE.md` §6.2 asks for the reader's error rate to
+on this run: **13 of 24**. `engineering-rules.md` §6.2 asks for the reader's error rate to
 be measured instead of assumed — this is it for the judgement field, and it is
 the number to quote, not the 0.6% mechanical one.
 
@@ -1749,7 +1749,7 @@ fails is one that is not being checked.
 
 ## 6.3 What was looked for and NOT found
 
-`CLAUDE.md` §6 forbids silent sampling, and the corollary is that a search which
+`engineering-rules.md` §6 forbids silent sampling, and the corollary is that a search which
 returns nothing is a result, not a non-event. This section collects the
 confirmed-nothings, because they are most of the evidence that the search was
 wide rather than lucky, and because they are the first thing that quietly
@@ -1798,7 +1798,7 @@ something our own tools must not quietly exceed: **Endgame's config tool and
 firmware updater are entirely offline programs.** They do not check for updates,
 do not fetch a firmware image, and do not report anything. Every firmware image
 they can install is compiled into the executable (§8), which is why §1.4 of
-`CLAUDE.md` is implementable at all — there is no download path to have to
+`engineering-rules.md` is implementable at all — there is no download path to have to
 reproduce, and a version of our tool that acquired one would be doing something
 the vendor's never did.
 
@@ -1812,7 +1812,7 @@ client, and this one is not even reachable.
 
 ## 6.4 Re-derivation log — which claims were re-proven, and how
 
-`CLAUDE.md` §7 requires this analysis to stand on its own, and §1.2b requires
+`engineering-rules.md` §7 requires this analysis to stand on its own, and §1.2b requires
 Ghidra's derived views never to decide anything. A claim first written from a
 decompiler view or from a function-list argument is not retired by being
 plausible; it has to be re-derived. This records what has been, by what route,
@@ -1869,7 +1869,7 @@ exist for the first to mean anything.
 
 ## 7. Scope of the search — what was read, and what was not
 
-`CLAUDE.md` §6 forbids silent sampling, so here are the numbers.
+`engineering-rules.md` §6 forbids silent sampling, so here are the numbers.
 
 ### Candidate sets
 
@@ -1900,7 +1900,7 @@ the overlap collapses to ~100. 1.04 therefore has only one useful reference
 binary instead of four.
 
 **The candidate set as a partition** — every candidate lands in exactly one cell,
-and the cells sum to the total, which is the form `CLAUDE.md` §6 requires:
+and the cells sum to the total, which is the form `engineering-rules.md` §6 requires:
 
 | | 1.10 | 1.04 |
 | --- | --- | --- |
@@ -2164,7 +2164,7 @@ Work-plan item 5. The question this had to settle: **which blob reaches the
 mouse, is it transformed on the way, and what happens when Endgame changes the
 set.** Method is `Tools/ghidra-export/rsrc.py`, which walks the PE resource
 directory and reports type/name/lang/RVA/size/SHA-256/entropy for every leaf. It
-ranks and filters nothing (CLAUDE.md §7.1).
+ranks and filters nothing (engineering-rules.md §7.1).
 
 ### 8.1 Census across the four updaters  [D]
 
@@ -2246,7 +2246,7 @@ compile-time constant in all four, but the scan cannot exclude it.
 ```
 
 **So 133, 135, 137, 142 and 143 are dead resources.** No code path in any of the
-four binaries can load them. This satisfies CLAUDE.md §1.4 by derivation rather
+four binaries can load them. This satisfies engineering-rules.md §1.4 by derivation rather
 than by assumption — and note it had to be *derived*: that 142 changes in
 lockstep with 140 is exactly the pattern that would tempt a reader into
 "the updater must use both".
@@ -2297,7 +2297,7 @@ unmodified**, exactly as the vendor's tool does.
 ```
 A **plain 32-bit additive sum of every byte of the image**. Not a CRC, not a hash.
 
-This is the code behind the posture in CLAUDE.md §2. The host computes the
+This is the code behind the posture in engineering-rules.md §2. The host computes the
 checksum from the same bytes it is about to send, so any device-side comparison
 can only ever establish **received == sent**. A wrong-but-well-formed image
 produces a perfectly matching checksum. Nothing downstream of us catches it.
@@ -2390,7 +2390,7 @@ filler ciphertext ⇒ different key" needs the premise that the filler
 and the lineage conclusion rests only on them.
 
 **A wrong-image guard that costs nothing and runs before the first byte**
-(`CLAUDE.md` §2 requires the guard to be ours):
+(`engineering-rules.md` §2 requires the guard to be ours):
 
 ```
 size == 66560                                   exactly 65 x 1024
@@ -2518,7 +2518,7 @@ already matches the vendor's 73 captured writes, and is one line to reverse.
 **Would not:** anything about whether the bootloader validates the image it is
 given. Blob block *i* is device block `0x34 + i` (§10.1), so the 65 blocks span
 `0x34`-`0x74` and **the bootloader, which lives below `0x34`, is in none of the
-21 blobs.** CLAUDE.md §2's load-bearing assumption stays untestable short of a
+21 blobs.** engineering-rules.md §2's load-bearing assumption stays untestable short of a
 flash, and every guard against a wrong image therefore stays ours. A previous
 note claimed the opposite; it was wrong.
 
@@ -2544,11 +2544,11 @@ note claimed the opposite; it was wrong.
 
 This is the "hay" argument. It finds no new protocol facts. Its whole purpose is
 to earn the right to say the protocol surface is *completely* enumerated, and it
-is stated as a partition so a hole cannot hide as a shortfall (§6 of CLAUDE.md).
+is stated as a partition so a hole cannot hide as a shortfall (§6 of engineering-rules.md).
 
 **Method.** Everything below is regenerated from **raw bytes and raw call
 edges**. Ghidra supplies function *boundaries* only, used as intervals, never as
-edges — `CLAUDE.md` §1.2b, and see the correction at the end of this section for
+edges — `engineering-rules.md` §1.2b, and see the correction at the end of this section for
 why that distinction had to be forced.
 
 1. **Seed — exhaustive 4-byte scan of every byte of `.text`** for the address of
@@ -2584,7 +2584,7 @@ done
 Member lists — not just counts — go to `.analysis/device_closure_rawedges.json`,
 so every number in this section is auditable rather than merely asserted.
 
-**The method carries a planted positive** (`CLAUDE.md` §6.2 — a harness that
+**The method carries a planted positive** (`engineering-rules.md` §6.2 — a harness that
 cannot produce a bad result is not evidence). `closure.py` asserts that cfg107's
 closure contains `0x413f90` and `0x404720`, and exits non-zero if it does not.
 Those two are the functions behind the retracted factory-reset conclusion:
@@ -2736,7 +2736,7 @@ finding. Matchers get whole API names, never substrings.
 
 ### 10.1 The block arithmetic is fully pinned  [D]
 
-This is the computation CLAUDE.md §4.3 names as a top failure mode ("wrong chunk
+This is the computation engineering-rules.md §4.3 names as a top failure mode ("wrong chunk
 boundary"), so it is derived end-to-end rather than inferred from the loop shape.
 
 In `FUN_00403960`:
@@ -2777,7 +2777,7 @@ source bytes `0` – `66559`: the whole image, exactly once, no remainder.
 ### 10.2 The erase boundary is still unknown — and it no longer blocks the design
 
 `A0 03` remains `[G]` (§6). There is no erase command among the seven, so
-CLAUDE.md §4.2's "before erase / after erase" split cannot be implemented
+engineering-rules.md §4.2's "before erase / after erase" split cannot be implemented
 literally: we cannot point at the instant the flash is destroyed.
 
 What removes the blockage is that **the recovery path is the same on both sides
@@ -2812,7 +2812,7 @@ non-abortable region starts.
 
 ### 10.3 Invariants this yields for `EGGFlashCore`
 
-Assertable without hardware, per CLAUDE.md §4.3 ("assert invariants, not
+Assertable without hardware, per engineering-rules.md §4.3 ("assert invariants, not
 examples"):
 
 1. `block_count == image_size >> 10` and `image_size % 1024 == 0`.
@@ -2920,7 +2920,7 @@ So the confinement argument the flasher rests on survives intact, and now rests
 on a test that would have caught the config tools' dynamic resolution had it been
 present. The error was confined to the config-tool rows.
 
-**Open gap, recorded 2026-09-04 rather than resolved** (`CLAUDE.md` §1.7). The
+**Open gap, recorded 2026-09-04 rather than resolved** (`engineering-rules.md` §1.7). The
 "every closure member has been read" check passes for the updaters and fails
 elsewhere. Against the regenerated closures, closure members with no mention
 anywhere in `notes/`:
@@ -2941,7 +2941,7 @@ proxy there — but it is not zero either, and it is not being claimed as read.
 None of this touches the flasher. It is config-side and XM1r-side work.
 ## 11. The user-visible surface — the other half of every negative in §6.3  [D]
 
-`CLAUDE.md` §1.2a: *"Check the user-visible surface before concluding a
+`engineering-rules.md` §1.2a: *"Check the user-visible surface before concluding a
 capability is missing: strings in both encodings, `.rsrc` dialogs and their
 control captions, menus, message maps. A feature the vendor ships has a button
 somewhere."*
@@ -3085,7 +3085,7 @@ computation by the fact that §11.1 finds no resource for one to reach.
 
 ### 6.2.10 The reader harness failed for the first time, and the number is 17%  [D]
 
-`CLAUDE.md` §6.2: *"A harness that cannot produce a bad result is not evidence.
+`engineering-rules.md` §6.2: *"A harness that cannot produce a bad result is not evidence.
 If the planted positives never fail and no verdict is ever rejected, the harness
 is measuring nothing. Report its failure rate; a rate of zero is a red flag, not
 a pass."*

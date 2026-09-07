@@ -57,7 +57,7 @@ public:
     // Exactly this defect shipped in the CONFIG transport and passed the whole
     // suite, because the mock returned what the wrong check expected. There is
     // no device-backed BootloaderLink yet; when one is written, this is the
-    // first thing to get right. See CLAUDE.md decision #1: a mock built from
+    // first thing to get right. See engineering-rules.md decision #1: a mock built from
     // our own understanding cannot catch an error in that understanding.
     virtual Io recv(std::uint8_t reportId, std::size_t len,
                     std::vector<std::uint8_t>& out) = 0;

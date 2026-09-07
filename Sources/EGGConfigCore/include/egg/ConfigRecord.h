@@ -212,7 +212,7 @@ struct Withheld { const char* name; const char* why; };
 // All 82 captured records report 0x6f == 0, so the eleven-step scale is the one
 // this mouse uses and `set lod 0..10` is correct for it. But a value written
 // under the other reading would be well formed, would verify against read-back,
-// and would mean a different physical distance -- CLAUDE.md §2's exact failure
+// and would mean a different physical distance -- engineering-rules.md §2's exact failure
 // shape: "nothing downstream of us catches a wrong-but-well-formed image".
 //
 // The guard is OFF-WIRE. Read-modify-write already has the byte in hand, so

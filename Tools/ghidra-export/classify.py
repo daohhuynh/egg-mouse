@@ -120,7 +120,7 @@ def main():
         json.dump(sorted(r['entry'] for r in un_left), f)
     lo = [r for r in un_left if int(r['entry'],16) < 0x410000]
     print(f"  of those, below 0x410000: {len(lo)}")
-    # State the partition, not a headline number: CLAUDE.md 6 requires the cells
+    # State the partition, not a headline number: engineering-rules.md 6 requires the cells
     # to sum to the total in one place, so a scope slip cannot hide in prose.
     tiny = [r for r in un_left if r['size'] < 16]
     sub  = [r for r in un_left if r['size'] >= 16]

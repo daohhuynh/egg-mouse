@@ -1,7 +1,7 @@
 # PRE-REGISTERED: what `egg-config factory-reset --yes` should do
 
 Written and committed BEFORE the command was run, 2026-09-05, so that
-scoring it afterwards is honest. CLAUDE.md §4.1 gates every config write on
+scoring it afterwards is honest. engineering-rules.md §4.1 gates every config write on
 factory reset being *confirmed*, and working-memory records why section 07 of
 the capture could not confirm it: the record was already at defaults, so
 before == after proved nothing.
@@ -90,7 +90,7 @@ correct about `01-baseline` vs `10-postflash`; it simply was not load-bearing.
 
 ## What this closes
 
-**CLAUDE.md §4.1's gate.** "Implement factory reset first and confirm it works
+**engineering-rules.md §4.1's gate.** "Implement factory reset first and confirm it works
 before any other write path." Confirmed — from a knowingly non-default state,
 against a reference produced by the vendor rather than by us, with the expected
 result written down first. The config write path is unlocked.

@@ -12,7 +12,7 @@ namespace {
 // copy rather than a shared one: that copy lives inside the non-abortable phase
 // and this one must be able to give up. Sharing it would mean one function
 // whose "do we ever stop?" answer depends on the caller, which is the exact
-// conditional CLAUDE.md §3 splits the two executables to avoid.
+// conditional engineering-rules.md §3 splits the two executables to avoid.
 int roundTripAbortable(BootloaderLink& link, const Frame& frame,
                        unsigned sleepMs, std::uint8_t replyId,
                        std::size_t replyLen, std::vector<std::uint8_t>* reply) {

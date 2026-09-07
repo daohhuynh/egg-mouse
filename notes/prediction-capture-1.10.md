@@ -132,7 +132,7 @@ the rest did not. Note only the ORDER of sections.
 
 ### Sequencing note that changes the predictions
 
-`CAPTURE-STEPS.md` is the operational file the owner follows; these predictions are
+`docs/CAPTURE-STEPS.md` is the operational file the owner follows; these predictions are
 keyed to its section numbers and its exact values. Two things in it move the
 predictions off the first draft:
 

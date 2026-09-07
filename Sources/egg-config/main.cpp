@@ -765,7 +765,7 @@ int cmdShow(bool verbose, const std::string& fromFile, bool machine,
         explain(r);
         return rcFor(r);
     }
-    // WHICH FIRMWARE THIS READING CAME OFF. CLAUDE.md §5: the record LAYOUT is
+    // WHICH FIRMWARE THIS READING CAME OFF. engineering-rules.md §5: the record LAYOUT is
     // stable across 1.07 -> 1.10 by measurement, and the DEFAULTS are not, so a
     // decoded table without a version beside it is a table whose provenance is
     // missing. A third version is a different device until shown otherwise.

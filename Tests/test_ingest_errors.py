@@ -78,7 +78,7 @@ class TheFirmwareHalfExplainsItself(unittest.TestCase):
     def test_no_arguments_prints_the_docstring_and_exits_2(self):
         rc, out = run(ingest, ["ingest.py"])
         self.assertEqual(rc, 2)
-        self.assertIn("CLAUDE.md", out)
+        self.assertIn("engineering-rules.md", out)
 
 
 class TheConfigHalfAlwaysReachesAVerdict(unittest.TestCase):

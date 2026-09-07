@@ -4,7 +4,7 @@ in a PE's .text, as 2-byte and 4-byte little-endian encodings.
 
 Records structure only. It takes the literals to look for from the command
 line and holds no opinion about what any of them mean; it does not rank,
-score, or classify. See CLAUDE.md 7.1 for why that matters.
+score, or classify. See engineering-rules.md 7.1 for why that matters.
 """
 import struct, sys, os
 
@@ -18,7 +18,7 @@ TAGS = {
  "cfg101": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.01.exe",
  "cfg100": "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.00.exe",
  # Different product (XM1r) and a different vendor's code base. Kept apart from
- # the OP1 tags on purpose; see CLAUDE.md 1.4 and notes/xm1r-flasher.md.
+ # the OP1 tags on purpose; see engineering-rules.md 1.4 and notes/xm1r-flasher.md.
  "xm1r": "XM1r_Flash_Upgrade_1.9.46.exe",
 }
 
