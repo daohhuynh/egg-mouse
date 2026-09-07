@@ -320,12 +320,28 @@ byte-identical frame after a successful flash, which is why a firmware update
 resets settings (`notes/updater-protocol.md` §5.4a).
 
 ## 6. Not yet derived
-- The 1024-byte settings blob's field layout, and which UI control writes which
-  offset. Lead: `0x413db0` writes the host-side defaults as inline immediates
-  including `0x190/0x320/0x640/0xc80` = 400/800/1600/3200.
-- What `A1 02`'s returned dwords mean (§7.3).
-- The three top-level handlers `0x412fb0`, `0x413600`, `0x414010`.
-- Validation and clamping applied before an `A0 11` write.
+
+**CORRECTION, 2026-09-06.** Two of the four items below were derived later in
+this same file and this section was never updated, so a reader arriving at §6
+first was told the layout was unknown while §7.3 maps all 115 bytes. §5 and
+§7.1 both carry correction markers; this one did not. Marked rather than
+deleted, for the same reason those are.
+
+- **DONE — see §7.3 and §7.14–§7.31.** The 1024-byte settings blob's field
+  layout, and which UI control writes which offset. All 115 record bytes are
+  mapped; thirteen have a derived *meaning* and are settable, and the rest are
+  deliberately nameless (§1.3: knowing where a byte lives is not knowing what it
+  means). The lead named here, `0x413db0`, is the host-side default writer and
+  it is what §7.19 used.
+- **DONE — see §7.17, §7.22, §7.25, §7.31.** Validation and clamping applied
+  before an `A0 11` write. The CPI normaliser (`0x0040d880`), the FIXED CPI
+  dialog's separate one (`0x00401e70`, a different step above 10000), the
+  multiclick slider range (`0x405f84`), the LOD bound and its eleven-arm jump
+  table (`0x40ec62`), and the `lod` capability gate on record `0x6f`.
+- **STILL OPEN.** What `A1 02`'s returned dwords mean (§7.3). `egg-config info`
+  prints them and deliberately does not name them.
+- **STILL OPEN.** The three top-level handlers `0x412fb0`, `0x413600`,
+  `0x414010`.
 
 ## 7. The complete command set, and what each command is  [D]
 
@@ -1198,9 +1214,18 @@ exactly once unless noted:
 | `'LOD'` 1024 | `0x0040bbd0` and `0x0040ee80` | `0.7mm`…`1.7mm` in 0.1 steps, then `2.0mm` — twelve |
 | `'SPDT:'` 1062 and 1063 | `0x00405f30` | `OFF` `GX Speed Mode` `GX Safe Mode` |
 
-The six button-assignment combos on 139 are not yet traced. **This table is a
-LIST 3 starting point, not a derivation:** which wire byte each index
-corresponds to is not established by any of it.
+~~The six button-assignment combos on 139 are not yet traced.~~ **DONE — see
+§7.14–§7.17 and §7.31.** Corrected 2026-09-06: this sentence stood for a day
+after the tracing was finished, in the same file, telling a reader the button
+mapping was underived while §7.17 gives all nineteen actions with a handler
+address each. `egg-config map` ships them and `Tests/test_button_map.py` scores
+the table against the binary.
+
+**The rest of this paragraph still stands, and is the more important half:**
+this table is an INVENTORY of the vendor's user-visible surface, not a
+derivation. Which wire byte a combo index corresponds to is established in §7,
+by tracing the handler — never by counting down a dropdown. Where the two are
+now both known, §7 is the citation and this table is the corroboration.
 
 ### 12.2a The SPDT combos ARE the GX combos, and the older builds prove it
 

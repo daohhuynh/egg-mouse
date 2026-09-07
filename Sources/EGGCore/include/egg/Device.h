@@ -24,6 +24,32 @@ struct Match {
     std::string   product;
 };
 
+// ---------------------------------------------------------------------------
+// bcdDevice -> the version Endgame's own updater displays
+// ---------------------------------------------------------------------------
+// [D] notes/updater-protocol.md, "Firmware version display", from updater 1.10
+// FUN_004011f0 instruction by instruction at 0x401245-0x401263: it formats the
+// HID VersionNumber with L"%x", parses THAT STRING back with __wtol, truncates
+// to 16 bits, and the caller divides by 100.0 for
+// L"Mouse firmware current version %.2f".
+//
+// So it is a BCD round trip, not arithmetic, and getting it wrong is easy and
+// consequential: read as a plain integer, 0x0143 divides to 3.23 rather than
+// 1.43. Each nibble is one decimal digit.
+//
+// WHERE WE DEPART FROM THE VENDOR, deliberately. A nibble above 9 formats as a
+// letter, and __wtol stops at the first non-digit -- so the vendor would show
+// 0x01a0 as 0.01, a number that looks like a version and is not one. We return
+// false instead and the caller prints the raw field. Reproducing a misleading
+// display is not "mirroring the vendor"; §1.2a's rule that a silent absence is
+// a claim applies to a wrong-looking answer even harder than to a missing one.
+//
+// The updater only ever DISPLAYS this and never gates on it [D]. Neither do we.
+bool decodeBcdVersion(std::uint16_t bcdDevice, unsigned& major, unsigned& minor);
+
+// "1.10", or the empty string when the field is not valid BCD.
+std::string describeVersion(std::uint16_t bcdDevice);
+
 // Every VID-0x3367 interface hidapi can see, unfiltered. For diagnostics and
 // for saying something useful when the four-part match fails.
 std::vector<Match> enumerateAll();

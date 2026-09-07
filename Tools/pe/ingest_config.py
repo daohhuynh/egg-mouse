@@ -43,6 +43,7 @@ And it says nothing about firmware: a config tool is not an updater.
 
     python3 Tools/pe/ingest_config.py <config-tool.exe> [--against cfg107]
 """
+import hashlib
 import importlib.util
 import os
 import re
@@ -287,6 +288,9 @@ def analyse(tag_or_path, against="cfg107"):
         if not os.path.exists(path):
             r["problems"].append("no such file: %s" % tag_or_path)
             return r
+    r["path"] = path
+    with open(path, "rb") as f:
+        r["exe_sha256"] = hashlib.sha256(f.read()).hexdigest()
     try:
         Text(path)
     except (ValueError, struct.error) as e:
@@ -302,6 +306,21 @@ def analyse(tag_or_path, against="cfg107"):
         return r
     ref = recmap.extract(against)
     r["map_diff"] = recmap.diff(m, ref) if ref.get("ok") else ["reference failed"]
+    # A MOVED RECORD OFFSET IS A PROBLEM, NOT A REMARK. Until 2026-09-06 the
+    # diff was computed, printed, folded into `ok` -- and nowhere else. So a
+    # version that moved `lod` from record 0x09 to 0x0a produced `ok = False`,
+    # an empty `problems` list, and therefore NEITHER the "SAFE" line NOR the
+    # "NOT SAFE TO ADOPT" line, and an exit status of 0. The single thing this
+    # tool exists to catch was the one thing it reported by saying nothing.
+    if r["map_diff"]:
+        r["problems"].append(
+            "the record map DIFFERS from %s in %d place(s): %s. Every byte "
+            "egg-config writes is placed by this map, so a difference here "
+            "means this build's settings knowledge does not apply to this "
+            "version -- §1.3 forbids writing a byte whose meaning has moved."
+            % (against, len(r["map_diff"]),
+               "; ".join(str(x) for x in r["map_diff"][:6])
+               + (" ..." if len(r["map_diff"]) > 6 else "")))
 
     t = Text(path)
 
@@ -409,6 +428,40 @@ def analyse(tag_or_path, against="cfg107"):
     return r
 
 
+ADOPTION_FILE = os.path.join("notes", "config-adoption.md")
+
+
+def emit_adoption(r, against):
+    """The artefact this half was missing.
+
+    THE ASYMMETRY THIS CLOSES. `ingest.py` prints a manifest row: adopting a
+    firmware release leaves a committed, reviewable trace, and a later reader
+    can see which .exe was vetted and when. This half printed a verdict that
+    changed no bytes and was recorded nowhere, so next month nobody could tell
+    whether cfg1.08 had ever been checked -- and `UpdatesView` told the user
+    "the output below tells you exactly what to paste and where", which was
+    true of one half only.
+
+    A verdict nobody can look up later is not much better than one nobody
+    computed. This is deliberately a NOTE and not a source change: unlike the
+    firmware id, nothing at run time reads it, so it belongs with the evidence
+    rather than in the flasher's tables.
+    """
+    m = r.get("map") or {}
+    return """| `%s` | %s | %s | %s | %d offsets, high 0x%02x | identical to %s |""" % (
+        os.path.basename(r["path"]),
+        r.get("label") or "(label it)",
+        _today(),
+        r["exe_sha256"][:16] + "...",
+        m.get("count", 0), m.get("high", 0),
+        against)
+
+
+def _today():
+    import datetime
+    return datetime.date.today().isoformat()
+
+
 def main(argv):
     against = "cfg107"
     targets = []
@@ -452,16 +505,34 @@ def main(argv):
             print("  buttons      %d distinct action types re-derived: %s"
                   % (len(r["button_types"]),
                      " ".join("%02x" % x for x in r["button_types"])))
-        if r["problems"]:
-            bad = 1
-            print("\n  NOT SAFE TO ADOPT:")
-            for q in r["problems"]:
-                print("    - %s" % q)
-        elif r.get("ok"):
+        # EXACTLY ONE VERDICT PER TARGET, and the exit status agrees with it.
+        # The old shape had a silent third state -- not ok, no problems -- and
+        # printed nothing at all. `UpdatesView` shows this text raw, so a
+        # verdict that is absent from the text is absent from the GUI.
+        if r.get("ok") and not r["problems"]:
             print("\n  SAFE: the record layout is identical and every byte "
                   "egg-config can write\n  re-derives from this binary to the "
                   "same record offset and the same values.")
+            print("\n  Append this row to %s, so that six months from now"
+                  % ADOPTION_FILE)
+            print("  somebody can tell whether this version was ever vetted:")
+            print("")
+            print(emit_adoption(r, against))
+            print("")
+            print("  Fill in the label column by hand -- the marketing version")
+            print("  is not mechanically recoverable, for the reason")
+            print("  Tools/pe/ingest.py's docstring gives. Nothing at run time")
+            print("  reads this file; it is evidence, not a table.")
+        else:
+            bad = 1
+            print("\n  NOT SAFE TO ADOPT:")
+            for q in r["problems"] or ["no specific problem was recorded, and "
+                                       "that itself is the finding: this tool "
+                                       "must never fall through to silence"]:
+                print("    - %s" % q)
         print()
+    if bad:
+        print("exit 1: at least one target is NOT SAFE TO ADOPT.")
     return bad
 
 

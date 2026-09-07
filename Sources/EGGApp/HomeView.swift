@@ -11,6 +11,10 @@ struct HomeView: View {
     @State private var toolsFound = ToolRunner.locate("egg-config") != nil
                                  && ToolRunner.locate("egg-flash") != nil
     @State private var deviceState: Commands.DeviceState = .absent
+    /// The firmware the attached mouse is running, from `devices`. Nil when
+    /// there is no mouse, when it is in the bootloader, or when bcdDevice is
+    /// not something the vendor's own decode reads as a version.
+    @State private var firmware: String?
 
     /// Enumerate on appear. `devices` opens no handle and sends no frame, so
     /// this costs the mouse nothing -- and it is the only way the app can tell
@@ -20,6 +24,7 @@ struct HomeView: View {
         guard let r = try? await runner.run("egg-config", Commands.listDevices())
         else { return }
         deviceState = Commands.parseDeviceState(r.text)
+        firmware = Commands.firmwareVersion(fromDevices: r.text)
     }
 
     var body: some View {
@@ -29,6 +34,13 @@ struct HomeView: View {
                     Text("Endgame Gear OP1 8k v2").font(.largeTitle).bold()
                     Text("Settings and firmware, on macOS.")
                         .foregroundStyle(.secondary)
+                    if let v = firmware {
+                        Text("Attached, running firmware \(v).")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else if deviceState == .absent {
+                        Text("No mouse attached.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
                 }
 
                 if deviceState == .bootloader {
@@ -82,6 +94,17 @@ struct HomeView: View {
                          + "and says exactly what it could not work out.",
                     risk: "Reads files only. Sends nothing to the mouse.",
                     action: { screen = .updates })
+
+                HomeCard(
+                    title: "Advanced",
+                    systemImage: "wrench.and.screwdriver",
+                    tint: .gray,
+                    blurb: "Compare two saved records, preview a change with "
+                         + "the mouse unplugged, list every USB interface, "
+                         + "dump the exact command frames, and turn on the "
+                         + "hex log. Nothing on this screen writes.",
+                    risk: "Read-only. Most of it sends nothing at all.",
+                    action: { screen = .advanced })
 
                 Text("This app does not talk to the mouse itself. It runs "
                      + "egg-config and egg-flash and shows you what they say.")

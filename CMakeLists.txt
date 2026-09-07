@@ -52,10 +52,12 @@ add_library(EGGFlashCore STATIC
   Sources/EGGFlashCore/src/FirmwareManifest.cpp
   Sources/EGGFlashCore/src/FlashCommands.cpp
   Sources/EGGFlashCore/src/WritePhase.cpp
+  Sources/EGGFlashCore/src/NoQuitDuringWrite.cpp
   Sources/EGGFlashCore/src/MockBootloader.cpp
   Sources/EGGFlashCore/src/BootloaderEntry.cpp
   Sources/EGGFlashCore/src/FlashPlan.cpp
   Sources/EGGFlashCore/src/HidBootloaderLink.cpp
+  Sources/EGGFlashCore/src/Provenance.cpp
 )
 target_include_directories(EGGFlashCore PUBLIC Sources/EGGFlashCore/include)
 target_link_libraries(EGGFlashCore PUBLIC EGGCore)
@@ -95,7 +97,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t actionset button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config keymap lod manifest recmap undo_loadable usbpcap)
+  foreach(t actionset adoption button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -192,6 +194,30 @@ set_tests_properties(flash_undo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # host-side refusals before it enumerates -- see the comment there.
 add_test(NAME flash_backup COMMAND Tests/test_flash_backup.sh)
 set_tests_properties(flash_backup PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# restore-firmware's provenance gate. Same shape as flash_backup and for the
+# same reason: the unit tests prove the loader refuses, and only a CLI test can
+# prove the verb reaches the loader before it reaches the device.
+add_test(NAME flash_restore COMMAND Tests/test_flash_restore.sh)
+set_tests_properties(flash_restore PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# The GUI's button-mapping picker gets its list from `egg-config map --machine`.
+# This runs every name that listing emits through the real CLI, so an action the
+# app would offer and the tool would refuse fails the suite. Nothing asked that
+# question before 2026-09-06 and five such entries were live.
+add_test(NAME map_machine COMMAND Tests/test_map_machine.sh)
+set_tests_properties(map_machine PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_test(NAME show COMMAND Tests/test_show.sh)
+
+set_tests_properties(show PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# The NON-DEFAULT firmware release row. Every other test drives kReleases[0];
+# this one drives 1.07 and 1.04 -- selection, refusal, the unproven-release
+# gate, and the approval token derived from the chosen image. Off-wire: no
+# --confirm is ever passed, so nothing can reach a device.
+add_test(NAME release_path COMMAND Tests/test_release_path.sh)
+set_tests_properties(release_path PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Mutation testing: §6.2's check that the flash suite can produce a bad result.
 # RUN_SERIAL because it edits the source tree, rebuilds, and restores -- nothing

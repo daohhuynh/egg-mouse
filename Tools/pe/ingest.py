@@ -68,6 +68,68 @@ EXPECTED_SIZE = 66560          # 65 blocks; see egg/Firmware.h
 EXPECTED_BLOCKS = 65
 
 
+# The §8.5a lineage fingerprint (notes/updater-protocol.md).
+#
+# WHY THIS IS HERE AND NOT ONLY IN THE NOTES. For an updater already in the
+# manifest, the pinned whole-image SHA-256 settles everything. For a BRAND-NEW
+# one there is no row yet, so the pinned hash cannot help by construction --
+# and that is precisely the moment §1.4's "other resources in the binary may
+# belong to other products" is live. 1.10 carries SIX FWFILE resources of
+# identical length, five of which the device would accept: right size, valid
+# per-block checksums, and they read back exactly as written. §2 assumes the
+# device validates nothing, so a wrong-but-well-formed image is a brick with
+# nothing downstream to catch it.
+#
+# What the fingerprint is: chunks 29-63 of every FWFILE blob are one 1024-byte
+# chunk repeated 35 times, and that chunk's value is CONSTANT PER RESOURCE NAME
+# across all four updaters we hold -- 21 blobs, six distinct values, zero
+# collisions between names. So it identifies the resource NAME independently of
+# the id the code asks for, which is the one thing a new .exe could change
+# without announcing it.
+#
+# What it is NOT: an argument about which physical mouse the image is for
+# (that is §8.2), and not proof against a vendor who deliberately re-fills the
+# run. It is a mechanical check that the blob the new .exe's own code selects
+# sits in the same lineage as the image that has actually been flashed onto
+# this mouse. That is worth having and it costs nothing.
+FILLER_FIRST = 29
+FILLER_LAST = 63
+FILLER_SHA_140 = ("cefe77fb6c23f0d4cb19fc709232bed0"
+                  "035ba41cc1413d46688172d3e6c6ffda")
+
+
+def lineage(b):
+    """Return (verdict, detail) for §8.5a's filler-chunk fingerprint.
+
+    verdict is one of "match", "mismatch", "unusable". "unusable" means the
+    image is not the shape the fingerprint is defined over -- it is reported
+    separately from a mismatch because the two mean different things and the
+    size problem is already raised elsewhere.
+    """
+    if len(b) != EXPECTED_SIZE:
+        return "unusable", ("image is %d bytes, not %d, so the 35-chunk filler "
+                            "run is not defined over it" % (len(b),
+                                                            EXPECTED_SIZE))
+    chunks = [b[i * BLOCK:(i + 1) * BLOCK] for i in range(len(b) // BLOCK)]
+    run = chunks[FILLER_FIRST:FILLER_LAST + 1]
+    odd = [FILLER_FIRST + i for i, c in enumerate(run) if c != run[0]]
+    if odd:
+        return "mismatch", ("chunks %s differ from chunk %d; in all 21 blobs of "
+                            "all four updaters this run is one chunk repeated "
+                            "%d times"
+                            % (", ".join(str(x) for x in odd), FILLER_FIRST,
+                               len(run)))
+    got = hashlib.sha256(run[0]).hexdigest()
+    if got != FILLER_SHA_140:
+        return "mismatch", ("filler chunk is %s; FWFILE 140 has been %s in "
+                            "1.04, 1.06, 1.07 and 1.10. A different value means "
+                            "this blob is a different resource NAME, whatever "
+                            "id the code asked for -- or the vendor re-filled "
+                            "the run, which nobody has ever seen them do."
+                            % (got[:16] + "...", FILLER_SHA_140[:16] + "..."))
+    return "match", "filler chunk %s..., the 140 lineage" % FILLER_SHA_140[:16]
+
+
 def whole_image_checksum(b):
     """The value A0 03 declares. [D] updater 1.10 FUN_00403580: the four
     accumulators are a 4-way unroll of one sum, so it is the plain 32-bit sum
@@ -86,9 +148,22 @@ def file_version(d):
 
 
 def report(path, label):
-    with open(path, "rb") as f:
-        d = f.read()
-    out = {"path": path, "ok": False, "problems": []}
+    # A TYPO'D PATH IS A FINDING, NOT A TRACEBACK. `UpdatesView` shows this
+    # tool's output raw, so an unhandled OSError put a Python stack trace in
+    # the GUI's pane where a sentence belonged, and the exit status was 1 for
+    # a reason nobody could read.
+    out = {"path": path, "ok": False, "problems": [], "resources": []}
+    try:
+        with open(path, "rb") as f:
+            d = f.read()
+    except OSError as e:
+        out["problems"].append("cannot read %s: %s" % (path, e.strerror or e))
+        out["exe_sha256"] = None
+        out["exe_size"] = 0
+        out["version"] = None
+        out["id"] = None
+        out["sites"] = []
+        return out
     out["exe_sha256"] = hashlib.sha256(d).hexdigest()
     out["exe_size"] = len(d)
     out["version"] = file_version(d)
@@ -132,6 +207,17 @@ def report(path, label):
                 out["problems"].append("image is not a whole number of blocks")
             else:
                 out["checksum"] = whole_image_checksum(img["bytes"])
+            verdict, detail = lineage(img["bytes"])
+            out["lineage"] = (verdict, detail)
+            if verdict == "mismatch":
+                out["problems"].append(
+                    "the selected image FAILS §8.5a's lineage fingerprint: %s "
+                    "This is the only mechanical wrong-image check that works "
+                    "on an updater nobody has read, so it refuses rather than "
+                    "warns. If Endgame really has changed the filler, that is a "
+                    "finding to write up in notes/updater-protocol.md §8.5a "
+                    "before any row is added -- not something to wave through."
+                    % detail)
             dupes = [x["id"] for x in out["resources"]
                      if x["id"] != img["id"] and x["sha256"] == img["sha256"]]
             if dupes:
@@ -152,9 +238,30 @@ def report(path, label):
 
 
 def emit_row(r):
+    """The row a person pastes into FirmwareManifest.cpp.
+
+    IT MUST COMPILE AS WRITTEN, and until 2026-09-06 it did not: `provenOnDevice`
+    was missing, so the provenance string landed in the bool's slot and clang
+    refused it as a narrowing conversion. Failing loudly is the good direction,
+    but this tool told the user to "paste it, rebuild" and the build then broke
+    with nothing pointing at the row.
+
+    It went unnoticed because the DERIVATION is tested to the letter by
+    Tests/test_manifest.py while the ARTEFACT a human copies was not tested at
+    all. Tests/test_ingest_row.py now compiles this output against the real
+    struct, and needs no .exe to do it.
+
+    `provenOnDevice` is emitted as `false` and this tool cannot make it anything
+    else. CLAUDE.md 5: a release is proven when it has been flashed onto the one
+    mouse and verified, which is a fact about the past that no file can
+    establish about itself.
+    """
     return """    // %s
     // Ingested %s by Tools/pe/ingest.py. Resource id recovered from the
     // FindResourceW call site, NOT from the resource table.
+    //
+    // provenOnDevice is false, and ingest.py cannot emit anything else: this
+    // image has not been flashed onto the mouse and verified (CLAUDE.md 5).
     {"%s",
      {%d, %d, %d, %d},
      "%s",
@@ -162,9 +269,10 @@ def emit_row(r):
      %d,
      "%s",
      0x%08xu,
+     false,
      "%s"},""" % (
         os.path.basename(r["path"]),
-        "<date>",
+        _today(),
         r["label"],
         r["version"][0], r["version"][1], r["version"][2], r["version"][3],
         r["exe_sha256"],
@@ -173,6 +281,11 @@ def emit_row(r):
         r["image"]["sha256"],
         r["checksum"],
         "Tools/pe/ingest.py; %d FWFILE resources present" % len(r["resources"]))
+
+
+def _today():
+    import datetime
+    return datetime.date.today().isoformat()
 
 
 def main(argv):
@@ -195,6 +308,16 @@ def main(argv):
         print("=" * 74)
         print(os.path.basename(p))
         print("=" * 74)
+        if r["exe_sha256"] is None:
+            # Unreadable. Everything below would print "None" and "0 bytes",
+            # which reads like findings about the file rather than the absence
+            # of one.
+            print("\n  NOT READY TO INGEST:")
+            for q in r["problems"]:
+                print("    - %s" % q)
+            print()
+            bad = 1
+            continue
         print("  exe SHA-256   %s" % r["exe_sha256"])
         print("  exe size      %d bytes" % r["exe_size"])
         print("  version rsrc  %s" % (".".join(str(x) for x in r["version"])
@@ -209,6 +332,9 @@ def main(argv):
                   % (x["id"], x["size"], x["sha256"], mark))
         if "checksum" in r:
             print("  A0 03 whole-image checksum  0x%08x" % r["checksum"])
+        if "lineage" in r:
+            verdict, detail = r["lineage"]
+            print("  §8.5a lineage  %-9s %s" % (verdict.upper(), detail))
         if r["problems"]:
             print("\n  NOT READY TO INGEST:")
             for q in r["problems"]:
@@ -217,10 +343,23 @@ def main(argv):
         if r["ok"]:
             print("\n  Proposed row for Sources/EGGFlashCore/src/FirmwareManifest.cpp:")
             print(emit_row(r))
-            print("\n  Paste it, set the date, rebuild, and run `ctest`. Adding a")
-            print("  row is a SOURCE CHANGE on purpose: it is reviewable, and the")
+            print("\n  Adding a row is a SOURCE CHANGE on purpose: it is")
+            print("  reviewable, and the")
             print("  resource id still reaches the flasher as a compile-time")
             print("  constant selected by the .exe's own hash (§1.4).")
+            print("")
+            print("  THE FULL CHECKLIST, because the row alone is not enough and")
+            print("  only ONE of these announces itself when you forget it:")
+            print("    1. paste the row into")
+            print("       Sources/EGGFlashCore/src/FirmwareManifest.cpp")
+            print("    2. Tests/test_manifest.py: bump the expected row COUNT, and")
+            print("       add this .exe to its EXE path map. The map is the one")
+            print("       that says so when it is missing; the count is not.")
+            print("    3. leave provenOnDevice false until this image has actually")
+            print("       been flashed onto the mouse and verified. Recording that")
+            print("       later means moving the row to index 0 and updating")
+            print("       test_manifest.py's proven-row check -- CLAUDE.md §5.")
+            print("    4. rebuild, then run `ctest`.")
         print()
     return bad
 

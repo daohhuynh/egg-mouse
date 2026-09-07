@@ -176,6 +176,19 @@ struct Settable {
     // neighbours would be as wrong as clobbering a neighbouring byte.
     std::uint8_t mask = 0xFF;
     std::uint8_t shift = 0;
+    // The inverse of `encode`, for showing a record to a person. `stored` is
+    // the field's own value -- already masked and shifted down by the caller --
+    // and `buf` gets the value in the SAME units `encode` accepts, plus the
+    // word that makes a bare number mean something (Hz, mm, on/off).
+    //
+    // Returns false when the stored bits are not something `encode` could ever
+    // have produced. That is a FINDING and is printed as one, not swallowed:
+    // it means the byte was written by something other than the vendor's UI or
+    // ours. `lod` is the concrete case -- cfg107 has a second encoding for the
+    // same byte in 0xc2..0xd9 (see encodeLod's comment) that nothing has ever
+    // been seen to emit, and a decoder that quietly printed "unknown" would
+    // hide the one signal that it had.
+    bool (*decode)(std::uint8_t stored, char* buf, std::size_t n) = nullptr;
 };
 
 // Derived, deliberately NOT settable, and each for a stated reason. Listed so
@@ -242,6 +255,16 @@ enum class ButtonPayload : std::uint8_t {
 
 // One item from the vendor's Button Mapping menu. b1 is ignored for Key, where
 // the modifier is supplied at apply time.
+// The key names `map ... key:NAME` accepts, enumerable.
+//
+// The table itself stays private in ConfigRecord.cpp -- it is keyed by HID
+// usage and nothing outside needs the numbers. These two exist so the GUI can
+// build a picker from the SAME list the parser uses, instead of scraping the
+// "Keys: a-z, 0-9, ..." paragraph, which is how five non-keys ended up in the
+// app's action menu (audit, 2026-09-06).
+std::size_t namedKeyCount();
+const char*  namedKeyName(std::size_t i);   // nullptr if i is out of range
+
 struct ButtonAction {
     const char*   name;
     const char*   group;
@@ -301,6 +324,29 @@ bool encodeCpiStageEntry(long x, long y, std::uint8_t out[kCpiEntryLen],
 // Decode one stage out of a record payload.
 struct CpiStage { long x; long y; bool flag; };
 CpiStage decodeCpiStageEntry(const std::uint8_t* entry);
+
+// ---------------------------------------------------------------------------
+// Reading a button entry back  (the inverse of encodeButtonEntry)
+// ---------------------------------------------------------------------------
+// `action` is null when +0/+1 match no row of kButtonActions, which is the
+// interesting case rather than an error: the 19 actions are a CLOSED set
+// derived from cfg107 (§7.17), so a pair outside it was written by something
+// else. The raw bytes come back regardless so the caller can print them.
+struct ButtonBinding {
+    const ButtonAction* action;      // nullptr if +0/+1 is not a known action
+    std::uint8_t b0, b1;             // always the raw bytes
+    long          cpiX, cpiY;        // FixedCpi only
+    std::uint8_t  mods, keycode;     // Key only
+    const char*   keyName;           // Key only; nullptr if the code has no name
+};
+
+ButtonBinding decodeButtonEntry(const std::uint8_t* entry);
+
+// HID Keyboard/Keypad usage -> the name `map ... key:NAME` would accept, or
+// nullptr. The exact inverse of hidKeycode over the same private table.
+const char* hidKeyName(std::uint8_t code);
+// 0x03 -> "ctrl+shift". Writes into `buf`; empty string for no modifiers.
+void hidModifierNames(std::uint8_t mods, char* buf, std::size_t n);
 
 // ---------------------------------------------------------------------------
 // Left-handed mode (config-protocol.md §7.20)

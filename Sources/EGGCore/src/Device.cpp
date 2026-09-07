@@ -196,4 +196,32 @@ std::unique_ptr<Device> Device::open(std::uint16_t productId, Log& log) {
 
 Device::~Device() { if (dev_) hid_close(reinterpret_cast<hid_device*>(dev_)); }
 
+
+// See Device.h for the derivation. Digit-wise, because the vendor's own decode
+// is a hex-format-then-decimal-parse round trip and that is what makes each
+// nibble a decimal digit.
+bool decodeBcdVersion(std::uint16_t bcd, unsigned& major, unsigned& minor) {
+    unsigned d[4];
+    for (int i = 0; i < 4; ++i) {
+        d[i] = (bcd >> (4 * (3 - i))) & 0xF;
+        if (d[i] > 9) return false;      // formats as a letter; __wtol stops
+    }
+    // "%x" prints no leading zeros, so 0x0110 is "110" and __wtol reads 110.
+    // The value is therefore the four digits as a decimal number, and the
+    // caller's /100 splits it -- which is the same as taking the top two
+    // digits and the bottom two, without ever touching a float.
+    const unsigned n = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];
+    major = n / 100;
+    minor = n % 100;
+    return true;
+}
+
+std::string describeVersion(std::uint16_t bcd) {
+    unsigned major = 0, minor = 0;
+    if (!decodeBcdVersion(bcd, major, minor)) return std::string();
+    char b[32];
+    std::snprintf(b, sizeof b, "%u.%02u", major, minor);
+    return b;
+}
+
 }  // namespace egg

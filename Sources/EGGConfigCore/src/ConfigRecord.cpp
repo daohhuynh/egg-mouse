@@ -1,6 +1,7 @@
 #include "egg/ConfigRecord.h"
 
 #include <string>
+#include <vector>
 
 #include <cctype>
 #include <cstdio>
@@ -250,21 +251,138 @@ bool encodeSmoothing(long item, std::uint8_t& out) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// The inverses, for `show`
+// ---------------------------------------------------------------------------
+// One per encoder above, and each is written to be checkable rather than
+// plausible: Tests/test_config.cpp walks EVERY value each encoder accepts,
+// encodes it, decodes the result, and requires the printed text to name that
+// same value. A decoder that drifts from its encoder fails there rather than
+// on a mouse.
+//
+// They print the value the ENCODER takes, never the raw byte. `polling` is the
+// clearest case -- record 0x05 holds the divisor 8, and a user who reads "8"
+// where they set 1000 has been told something true and useless.
+
+bool decodePolling(std::uint8_t div, char* buf, std::size_t n) {
+    if (div < 1 || div > 64 || (div & (div - 1)) != 0) return false;
+    std::snprintf(buf, n, "%ld Hz", 8000L / div);
+    return true;
+}
+
+bool decodeCpiLevels(std::uint8_t v, char* buf, std::size_t n) {
+    if (v < 1 || v > 4) return false;
+    std::snprintf(buf, n, "%u  (%s configured)", v,
+                  v == 1 ? "one CPI stage" : "CPI stages");
+    return true;
+}
+
+bool decodeBool(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 1) return false;
+    std::snprintf(buf, n, "%u  (%s)", v, v ? "on" : "off");
+    return true;
+}
+
+// Not the generic bool, on purpose. This byte is named after itself and not
+// after the vendor's inverted checkbox (see its row below), so "1 (on)" would
+// leave a reader to guess which of two opposite things is on.
+bool decodeLedOnLiftoff(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 1) return false;
+    std::snprintf(buf, n, "%u  (DPI indicator %s when the mouse is lifted%s)", v,
+                  v ? "stays lit" : "goes out",
+                  v ? "" : "; the vendor's \"Disable LED on Lift-Off\" is TICKED");
+    return true;
+}
+
+bool decodeSensorAngle(std::uint8_t v, char* buf, std::size_t n) {
+    const int deg = static_cast<signed char>(v);
+    if (deg < -127) return false;          // 0x80 is outside what encode takes
+    std::snprintf(buf, n, "%d degrees", deg);
+    return true;
+}
+
+// The millimetre scale is the field's, not an interpretation: cfg107 keeps
+// eleven ".rdata" strings "0.7mm".."1.7mm" and the stored value indexes them
+// (§7.25). Printed in tenths by integer arithmetic -- 7 + v -- so no rounding
+// can ever put a value between two of the vendor's own labels.
+bool decodeLod(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 10) return false;
+    const int tenths = 7 + v;
+    std::snprintf(buf, n, "%u  (%d.%dmm)", v, tenths / 10, tenths % 10);
+    return true;
+}
+
+bool decodeCpiStage(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 3) return false;
+    std::snprintf(buf, n, "%u  (stage %u is the active one)", v, v + 1u);
+    return true;
+}
+
+// The two remapped dropdowns. Their forward maps are permutations, so the
+// inverse is a search over the same array rather than a second table that
+// could disagree with it.
+//
+// THE ITEM NAMES ARE [O], read off Endgame's own dropdowns with the list open:
+// windows-run/screenshots/CPI-downshift-tuning.png shows, top to bottom, Force
+// Off / Light Timer Only / Medium Timer Only / Default, and
+// smoothing-tuning.png shows Force Off / Ripple Control Off / Ripple Control
+// On. They are in the DECODER and not in `accepts` on purpose: a name makes a
+// reading legible, and typing one would be a second spelling of a value the
+// encoder identifies by position.
+//
+// These names are also an independent check on the two remaps, which had only
+// ever been scored against the capture. Both screenshots show the dropdown
+// OPEN with the factory selection highlighted -- Default (4th of four) and
+// Ripple Control Off (2nd of three) -- and the factory record stores 0 in both
+// nibbles. kMap sends item 4 -> 0 and item 2 -> 0. Agrees, from a source that
+// is not the capture.
+bool decodeDownshift(std::uint8_t stored, char* buf, std::size_t n) {
+    static const std::uint8_t kMap[] = {2, 3, 1, 0};
+    static const char* kItems[] = {"Force Off", "Light Timer Only",
+                                   "Medium Timer Only", "Default"};
+    for (int i = 0; i < 4; ++i)
+        if (kMap[i] == stored) {
+            std::snprintf(buf, n, "%d  (\"%s\", item %d of 4, stored as %u)",
+                          i + 1, kItems[i], i + 1, stored);
+            return true;
+        }
+    return false;
+}
+
+bool decodeSmoothing(std::uint8_t stored, char* buf, std::size_t n) {
+    static const std::uint8_t kMap[] = {2, 0, 1};
+    static const char* kItems[] = {"Force Off", "Ripple Control Off",
+                                   "Ripple Control On"};
+    for (int i = 0; i < 3; ++i)
+        if (kMap[i] == stored) {
+            std::snprintf(buf, n, "%d  (\"%s\", item %d of 3, stored as %u)",
+                          i + 1, kItems[i], i + 1, stored);
+            return true;
+        }
+    return false;
+}
+
 const Settable kSettable[] = {
     {"polling",    0x05, encodePolling,
      "125, 250, 500, 1000, 2000, 4000 or 8000 (Hz)",
-     "config-protocol.md §7.5, cfg107 0x413a79 / 0x413a94-0x413b8f"},
+     "config-protocol.md §7.5, cfg107 0x413a79 / 0x413a94-0x413b8f",
+     0xFF, 0, decodePolling},
     {"cpi-levels", 0x0e, encodeCpiLevels,
      "1, 2, 3 or 4",
-     "config-protocol.md §7.6, cfg107 0x410c47 / 0x410c59 CB_GETCURSEL"},
+     "config-protocol.md §7.6, cfg107 0x410c47 / 0x410c59 CB_GETCURSEL",
+     0xFF, 0, decodeCpiLevels},
     {"angle-snapping", 0x0a, encodeBool, "0 or 1",
-     "config-protocol.md §7.8, cfg107 0x40ecb8 setne -> obj 0x28, serialised 0x4042f8"},
+     "config-protocol.md §7.8, cfg107 0x40ecb8 setne -> obj 0x28, serialised 0x4042f8",
+     0xFF, 0, decodeBool},
     {"motion-sync", 0x0c, encodeBool, "0 or 1",
-     "config-protocol.md §7.9, cfg107 0x411ad1 setne -> obj 0x2a, serialised 0x404306"},
+     "config-protocol.md §7.9, cfg107 0x411ad1 setne -> obj 0x2a, serialised 0x404306",
+     0xFF, 0, decodeBool},
     {"force-max-fps", 0x71, encodeBool, "0 or 1",
-     "config-protocol.md §7.9, cfg107 0x411b0b setne -> obj 0x2d, serialised 0x4045cf"},
+     "config-protocol.md §7.9, cfg107 0x411b0b setne -> obj 0x2d, serialised 0x4045cf",
+     0xFF, 0, decodeBool},
     {"sensor-angle", 0x70, encodeSensorAngle, "-127 to 127 (degrees, two's complement)",
-     "config-protocol.md §7.9, cfg107 0x411b19 TBM_GETPOS / 0x411b25 -> obj 0x2c"},
+     "config-protocol.md §7.9, cfg107 0x411b19 TBM_GETPOS / 0x411b25 -> obj 0x2c",
+     0xFF, 0, decodeSensorAngle},
     // NAMED AFTER THE BYTE, NOT AFTER THE CHECKBOX, and that is deliberate.
     // The vendor's control is captioned "Disable LED on Lift-Off" and stores
     // the INVERSE of its tick (sete at cfg107 0x40ecd2), so a field of that
@@ -275,7 +393,8 @@ const Settable kSettable[] = {
     {"led-on-liftoff", 0x08, encodeBool,
      "0 or 1 -- 1 = DPI indicator stays lit when lifted (default); "
      "0 = it goes out, i.e. the vendor's \"Disable LED on Lift-Off\" TICKED",
-     "config-protocol.md §7.8, cfg107 0x40ecd2 SETE -> obj 0x26, serialised 0x4042ea"},
+     "config-protocol.md §7.8, cfg107 0x40ecd2 SETE -> obj 0x26, serialised 0x4042ea",
+     0xFF, 0, decodeLedOnLiftoff},
 
     // Added 2026-09-05, once the capture scored them. Every one of these was
     // already derived and cited; what changed is that each was then seen to
@@ -287,15 +406,17 @@ const Settable kSettable[] = {
     {"lod", 0x09, encodeLod,
      "0 to 10 -- lift-off distance, 0 = 0.7mm up to 10 = 1.7mm in 0.1mm steps",
      "config-protocol.md §7.18, cfg107 0x40ec62 bound / 0x40ec6e-0x40ec9e "
-     "eleven stores of 0x00-0x0a; scored against windows-run/02-basic"},
+     "eleven stores of 0x00-0x0a; scored against windows-run/02-basic",
+     0xFF, 0, decodeLod},
     {"cpi-stage", 0x0d, encodeCpiStage,
      "0 to 3 -- which CPI stage is ACTIVE, not how many exist (that is cpi-levels)",
      "config-protocol.md §7.18, cfg107 0x40edf0-0x40ee4c four BM_GETCHECK "
-     "storing 0/1/2/3; scored against windows-run/06-cpi-stage"},
+     "storing 0/1/2/3; scored against windows-run/06-cpi-stage",
+     0xFF, 0, decodeCpiStage},
     {"slamclick-filter", 0x06, encodeBool, "0 or 1",
      "config-protocol.md §7.8, cfg107 0x40677a/0x406786; scored against "
      "windows-run/04-buttons line 1, which flipped bit 0 and held the rest",
-     0x01, 0},
+     0x01, 0, decodeBool},
     // Same byte as slamclick-filter, bit 4, and derived to the same standard:
     // written twice, by the click handler at 0x411e7a/0x411e86 and by the APPLY
     // collector at 0x411aeb/0x411af1, both agreeing on the bit. The `accepts`
@@ -309,19 +430,19 @@ const Settable kSettable[] = {
      "derived; the BEHAVIOUR is not",
      "config-protocol.md §7.8, cfg107 0x411e7a/0x411e86 (click) and "
      "0x411aeb/0x411af1 (APPLY collect), both orb $0x10 / andb $-0x11",
-     0x10, 4},
+     0x10, 4, decodeBool},
     {"cpi-downshift", 0x0b, encodeDownshift,
      "1 to 4, the dropdown item counting from the top (stored remapped: "
      "1->2, 2->3, 3->1, 4->0)",
      "config-protocol.md §7.9, cfg107 jump table 0x411bc0; scored against "
      "windows-run/03-sensor lines 8-11",
-     0x0C, 2},
+     0x0C, 2, decodeDownshift},
     {"smoothing", 0x0b, encodeSmoothing,
      "1 to 3, the dropdown item counting from the top (stored remapped: "
      "1->2, 2->0, 3->1)",
      "config-protocol.md §7.9, cfg107 ladder 0x411b36-0x411b4d; scored against "
      "windows-run/03-sensor lines 12-14",
-     0x03, 0},
+     0x03, 0, decodeSmoothing},
 };
 const std::size_t kSettableCount = sizeof(kSettable) / sizeof(kSettable[0]);
 
@@ -584,6 +705,80 @@ bool hidModifiers(const char* spec, std::uint8_t& out) {
     return true;
 }
 
+// The exact inverse of hidKeycode, built ONCE from the same four arithmetic
+// ranges and the same private table, in the same order hidKeycode tests them.
+// Built rather than written out, because a second hand-kept table is a second
+// thing to get wrong: Tests/test_config.cpp walks all 256 codes and requires
+// hidKeycode(hidKeyName(c)) == c wherever a name exists.
+//
+// Where several names share a usage ("escape"/"esc", "pause"/"break") the FIRST
+// in kNamedKeys wins, which is the spelled-out one in every case.
+const char* hidKeyName(std::uint8_t code) {
+    static const std::vector<std::string> byCode = [] {
+        std::vector<std::string> v(256);
+        for (int i = 0; i < 26; ++i) v[static_cast<std::size_t>(0x04 + i)] = std::string(1, static_cast<char>('a' + i));
+        for (int i = 0; i < 9;  ++i) v[static_cast<std::size_t>(0x1E + i)] = std::string(1, static_cast<char>('1' + i));
+        v[0x27] = "0";
+        for (int i = 0; i < 12; ++i) v[static_cast<std::size_t>(0x3A + i)] = "f" + std::to_string(i + 1);
+        for (int i = 0; i < 9;  ++i) v[static_cast<std::size_t>(0x59 + i)] = "kp" + std::to_string(i + 1);
+        v[0x62] = "kp0";
+        for (const NamedKey& k : kNamedKeys)
+            if (v[k.usage].empty()) v[k.usage] = k.name;
+        return v;
+    }();
+    return byCode[code].empty() ? nullptr : byCode[code].c_str();
+}
+
+void hidModifierNames(std::uint8_t mods, char* buf, std::size_t n) {
+    static const char* kNames[4] = {"ctrl", "shift", "alt", "win"};
+    std::string s;
+    for (int i = 0; i < 4; ++i)
+        if (mods & (1u << i)) { if (!s.empty()) s += '+'; s += kNames[i]; }
+    // §7.12 is the low nibble only. A high bit is not something hidModifiers
+    // can produce, so it is NAMED rather than dropped -- §1.2a's rule that a
+    // silent absence is a claim applies to a display as much as to a note.
+    if (mods & 0xF0) {
+        char hex[32];
+        std::snprintf(hex, sizeof hex, "%sunknown-bits-0x%02x",
+                      s.empty() ? "" : "+", mods & 0xF0);
+        s += hex;
+    }
+    std::snprintf(buf, n, "%s", s.c_str());
+}
+
+ButtonBinding decodeButtonEntry(const std::uint8_t* entry) {
+    ButtonBinding b{};
+    b.b0 = entry[0];
+    b.b1 = entry[1];
+    b.cpiX = b.cpiY = -1;
+    for (std::size_t i = 0; i < kButtonActionCount; ++i) {
+        const ButtonAction& a = kButtonActions[i];
+        // `key` is the one action whose +1 is NOT a discriminator:
+        // encodeButtonEntry overwrites a.b1 with the modifier bitfield, so
+        // matching on both bytes would fail for every key with a modifier.
+        // +0 == 0x02 belongs to no other row, so +0 alone identifies it.
+        const bool hit = a.payload == ButtonPayload::Key
+                             ? entry[0] == a.b0
+                             : entry[0] == a.b0 && entry[1] == a.b1;
+        if (hit) { b.action = &a; break; }
+    }
+    if (!b.action) return b;
+    switch (b.action->payload) {
+    case ButtonPayload::FixedCpi:
+        b.cpiX = entry[2] | (static_cast<long>(entry[3]) << 8);
+        b.cpiY = entry[4] | (static_cast<long>(entry[5]) << 8);
+        break;
+    case ButtonPayload::Key:
+        b.mods    = entry[1];
+        b.keycode = entry[2];
+        b.keyName = hidKeyName(entry[2]);
+        break;
+    case ButtonPayload::None:
+        break;
+    }
+    return b;
+}
+
 // ---------------------------------------------------------------------------
 // CPI stages -- config-protocol.md §7.19
 // ---------------------------------------------------------------------------
@@ -820,6 +1015,19 @@ bool encodeButtonEntry(const ButtonAction& a, long arg, long argY, std::uint8_t 
     }
     *err = "unknown payload kind";
     return false;
+}
+
+
+// Enumerating the key names, for the GUI's picker. See ConfigRecord.h.
+//
+// Defined at the bottom rather than beside kNamedKeys because that table lives
+// in an anonymous namespace in the middle of this file; a definition here has
+// the same view of it and does not disturb the block it sits in. The table stays
+// private -- callers get names, never usages.
+std::size_t namedKeyCount() { return sizeof kNamedKeys / sizeof kNamedKeys[0]; }
+
+const char* namedKeyName(std::size_t i) {
+    return i < namedKeyCount() ? kNamedKeys[i].name : nullptr;
 }
 
 }  // namespace egg::cfg

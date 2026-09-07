@@ -31,6 +31,18 @@ final class FirmwareModel: ObservableObject {
     @Published var versions: [String] = []
     @Published var provenLabel: String = ""
     @Published var acknowledgeUntested = false
+    /// The mouse was put into update mode by holding LEFT+RIGHT while plugging
+    /// in, rather than by this app. egg-flash cannot tell the two apart -- the
+    /// USB identity is byte-identical -- so it refuses to write to a bootloader
+    /// it did not enter itself unless told. Separate from acknowledgeUntested on
+    /// purpose: they are different admissions (CLAUDE.md 4.2c's reasoning about
+    /// approvals given by reflex).
+    @Published var buttonEntered = false
+    // --- restore: writing a saved backup BACK to the mouse ------------------
+    @Published var restoreFrom: String = ""      // the image to write
+    @Published var restoreCurrent: String = ""   // a fresh read of what is on it now
+    @Published var restoreToken: String = ""
+    @Published var restoreTyped: String = ""
     @Published var token: String = ""
     @Published var typedToken: String = ""
     @Published var output = ""
@@ -68,11 +80,15 @@ struct FirmwareView: View {
             HStack(alignment: .top, spacing: 16) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        step0
+                        Divider()
                         step1
                         Divider()
                         step2
                         Divider()
                         step3
+                        Divider()
+                        restoreSection
                     }
                     .padding(.trailing, 4)
                 }
@@ -86,6 +102,54 @@ struct FirmwareView: View {
         .task { await m.loadVersions(runner) }
     }
 
+    // ---------------------------------------------------------------- step 0
+    //
+    // ADDED 2026-09-06. Step 1 said "This puts the mouse into its bootloader",
+    // which was never true: `read-firmware` REQUIRES the bootloader and cannot
+    // reach it. The app had no way to send the entry command at all, so the only
+    // route was the buttons -- unstated, and now the weaker of the two paths
+    // because egg-flash records which one was used.
+    private var step0: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("0 · Put the mouse into update mode", systemImage: "bolt")
+                .font(.headline)
+            Text("Sends one command and then only watches. Nothing is erased "
+                 + "and nothing is written.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Once this is done the mouse STOPS BEING A MOUSE until a "
+                 + "firmware write finishes. Unplugging does not undo it. Have "
+                 + "another pointing device to hand before you press this.")
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Put the mouse into update mode") {
+                    run(Commands.enterBootloader())
+                }
+                .disabled(runner.writePhaseInProgress)
+                Button("Try to leave update mode") {
+                    run(Commands.leaveBootloader())
+                }
+                .disabled(runner.writePhaseInProgress)
+            }
+            Text("Leaving works if the mouse has firmware to go back to. If it "
+                 + "was already mid-update it will come straight back into "
+                 + "update mode — the tool's output says which happened.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("I used the buttons instead (held left+right while plugging in)",
+                   isOn: $m.buttonEntered)
+                .font(.caption)
+            Text("Tick this only if you did. The app cannot detect it — the "
+                 + "mouse reports the same identity either way — and it relaxes "
+                 + "a check, so it is a separate box from the firmware-version "
+                 + "one on purpose.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // ---------------------------------------------------------------- step 1
     private var step1: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -96,9 +160,9 @@ struct FirmwareView: View {
                  + "not start without one of these.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("This puts the mouse into its bootloader, where it stops "
-                 + "behaving as a mouse until a firmware write completes. Have "
-                 + "another pointing device to hand.")
+            Text("Needs the mouse to already be in update mode — do step 0 "
+                 + "first. This does not put it there and will refuse if it "
+                 + "is not.")
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -205,6 +269,138 @@ struct FirmwareView: View {
         }
     }
 
+    // ------------------------------------------------------------- restore
+    //
+    // ADDED 2026-09-06. `restore-firmware` existed only on the command line,
+    // which made the app's own promise -- "a saved image is what makes a failed
+    // flash recoverable" (step 1's text) -- something the app could not deliver.
+    //
+    // Two files, and the distinction is the whole point: the one being WRITTEN
+    // is an old backup, and --backup is a FRESH read of whatever is on the mouse
+    // right now, which is the thing about to be erased. egg-flash refuses if
+    // they are the same file, and refuses any image without the .origin sidecar
+    // `read-firmware` writes beside it.
+    private var restoreSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Put a backup back", systemImage: "arrow.uturn.backward")
+                .font(.headline)
+            Text("Writes a firmware backup this app made back onto the mouse. "
+                 + "This is the undo for a firmware write, not for settings — "
+                 + "settings live on the Config screen.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("It only accepts backups this app made. A file without the "
+                 + "matching .origin record beside it is refused, and so is one "
+                 + "whose bytes changed since it was saved.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                TextField("Backup to write", text: $m.restoreFrom)
+                Button("Choose…") { chooseOpen(into: { m.restoreFrom = $0 }) }
+            }
+            HStack {
+                TextField("Fresh backup of what is on it NOW",
+                          text: $m.restoreCurrent)
+                Button("Choose…") { chooseOpen(into: { m.restoreCurrent = $0 }) }
+            }
+            Text("The second one is what is on the mouse at this moment — take "
+                 + "it with step 1 first. It must be a different file.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Preview the restore") { previewRestore() }
+                .disabled(m.restoreFrom.isEmpty || m.restoreCurrent.isEmpty
+                          || runner.writePhaseInProgress)
+
+            if !m.restoreToken.isEmpty {
+                Text("Confirmation code: \(m.restoreToken)")
+                    .font(.system(.body, design: .monospaced)).bold()
+                    .textSelection(.enabled)
+            }
+            TextField("Confirmation code from the preview", text: $m.restoreTyped)
+                .font(.system(.body, design: .monospaced))
+
+            Button(role: .destructive) { startRestore() } label: {
+                Text("Write the backup back").frame(maxWidth: .infinity)
+            }
+            .disabled(restoreBlocked != nil)
+            .help(restoreBlocked ?? "This cannot be stopped once it begins.")
+
+            Text(restoreBlocked ?? "Same write phase as a flash: once it starts "
+                                 + "there is no cancel.")
+                .font(.caption)
+                .foregroundStyle(restoreBlocked == nil ? .red : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Nil when a restore is allowed; otherwise why not. Mirrors `blocked`, and
+    /// deliberately does not reuse it: a restore has no updater .exe and no
+    /// firmware version, so sharing the function would mean passing empty
+    /// strings through checks that exist for a different command.
+    private var restoreBlocked: String? {
+        if runner.writePhaseInProgress {
+            return "A firmware write is already running. It cannot be "
+                 + "interrupted, and starting a second one is not possible."
+        }
+        if m.restoreFrom.isEmpty { return "Choose the backup you want written." }
+        if !FileManager.default.fileExists(atPath: m.restoreFrom) {
+            return "That backup file does not exist."
+        }
+        if !FileManager.default.fileExists(
+                atPath: m.restoreFrom + ".origin") {
+            return "That file has no .origin record beside it, so this app "
+                 + "cannot tell it is a backup it made. egg-flash will refuse "
+                 + "it. Use a file saved by step 1."
+        }
+        if m.restoreCurrent.isEmpty {
+            return "Take a fresh backup of what is on the mouse now (step 1) "
+                 + "and choose it as the second file. That is what makes this "
+                 + "restore itself undoable."
+        }
+        if m.restoreCurrent == m.restoreFrom {
+            return "Those are the same file. The second one must be a fresh "
+                 + "read of what is on the mouse right now."
+        }
+        if m.restoreTyped.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Run the preview and type the confirmation code it prints."
+        }
+        return nil
+    }
+
+    private func previewRestore() {
+        Task {
+            m.busy = true
+            defer { m.busy = false }
+            do {
+                let r = try await runner.run(
+                    "egg-flash",
+                    Commands.requestRestoreToken(backup: m.restoreFrom,
+                                                 current: m.restoreCurrent,
+                                                 buttonEntered: m.buttonEntered))
+                if let t = Commands.confirmToken(in: r.text) { m.restoreToken = t }
+                m.output = r.text
+            } catch { m.output = error.localizedDescription }
+        }
+    }
+
+    private func startRestore() {
+        guard restoreBlocked == nil else { return }
+        let args = Commands.restoreFirmware(backup: m.restoreFrom,
+                                            current: m.restoreCurrent,
+                                            token: m.restoreTyped,
+                                            buttonEntered: m.buttonEntered)
+        Task {
+            m.busy = true
+            defer { m.busy = false }
+            do {
+                let r = try await runner.run("egg-flash", args, isWritePhase: true)
+                m.output = r.text
+            } catch { m.output = error.localizedDescription }
+        }
+    }
+
     /// Nil when a flash is allowed; otherwise the reason, shown to the user.
     /// One function decides this and Tests/test_app_commands.swift drives it.
     private var blocked: String? {
@@ -231,7 +427,8 @@ struct FirmwareView: View {
                                   backup: effectiveBackup,
                                   token: m.typedToken,
                                   version: m.version,
-                                  versionIsProven: m.selectedIsProven)
+                                  versionIsProven: m.selectedIsProven,
+                                  buttonEntered: m.buttonEntered)
         Task {
             m.busy = true
             defer { m.busy = false }
@@ -262,7 +459,8 @@ struct FirmwareView: View {
                     "egg-flash",
                     Commands.requestToken(updater: m.updaterPath,
                                           backup: effectiveBackup,
-                                          version: m.version))
+                                          version: m.version,
+                                          buttonEntered: m.buttonEntered))
                 if let tok = Commands.confirmToken(in: t.text) { m.token = tok }
                 m.output = d.text + "\n\n" + t.text
             } catch {
@@ -306,5 +504,18 @@ struct FirmwareView: View {
         p.nameFieldStringValue = "egg-mouse-firmware-backup.bin"
         p.message = "Where to save the mouse's current firmware"
         if p.runModal() == .OK, let u = p.url { m.backupPath = u.path }
+    }
+
+    /// Pick an existing firmware backup. Takes a setter rather than a binding
+    /// because the restore section has two of these fields and they must not be
+    /// confusable: one is the image to write, the other is what is on the mouse
+    /// now, and the whole guard depends on them being different files.
+    private func chooseOpen(into set: @escaping (String) -> Void) {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.canChooseDirectories = false
+        p.allowsMultipleSelection = false
+        p.message = "Choose a firmware backup saved by this app"
+        if p.runModal() == .OK, let u = p.url { set(u.path) }
     }
 }

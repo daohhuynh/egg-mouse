@@ -1,5 +1,7 @@
 #include "egg/Firmware.h"
 
+#include "egg/Provenance.h"
+
 #include <CommonCrypto/CommonDigest.h>
 
 #include <cstdio>
@@ -333,6 +335,89 @@ bool Image::loadFromRelease(const std::string& exePath, const Release& rel,
     bytes_ = std::move(raw);
     sha_ = sha;
     checksum_ = sum;
+    return true;
+}
+
+bool Image::loadFromBackup(const std::string& imagePath, std::string& error) {
+    bytes_.clear();
+    checksum_ = 0;
+    sha_.clear();
+
+    std::vector<std::uint8_t> raw;
+    if (!readFile(imagePath, raw, error)) return false;
+
+    // Same three structural checks the other two loaders make, in the same
+    // order, for the same reason: a file of the wrong length is the sign that
+    // it is not what the reader thinks it is.
+    if (raw.size() != kExpectedImageSize) {
+        error = imagePath + " is " + std::to_string(raw.size()) +
+                " bytes, a backup is exactly " +
+                std::to_string(kExpectedImageSize);
+        return false;
+    }
+    if (raw.size() % kBlockSize != 0) {
+        error = "image size is not a whole number of 1024-byte blocks";
+        return false;
+    }
+    if (raw.size() / kBlockSize != kExpectedBlockCount) {
+        error = "image is " + std::to_string(raw.size() / kBlockSize) +
+                " blocks, expected " + std::to_string(kExpectedBlockCount);
+        return false;
+    }
+
+    // The uniformity check checkBackupFile makes, repeated here rather than
+    // called, because this is the WRITE side. A right-length buffer of one
+    // repeated byte is what a failed A0 07 loop leaves behind, and writing that
+    // back over a working application is the worst outcome this command has.
+    bool varied = false;
+    for (std::size_t i = 1; i < raw.size(); ++i)
+        if (raw[i] != raw[0]) { varied = true; break; }
+    if (!varied) {
+        char b[64];
+        std::snprintf(b, sizeof b, "0x%02x", raw[0]);
+        error = imagePath + " is " + std::to_string(raw.size()) +
+                " identical bytes (" + b + "); that is a failed read, not an "
+                "image. Refusing to write it.";
+        return false;
+    }
+
+    // THE PROVENANCE GATE. Everything above would pass for any 66560-byte file
+    // with two different bytes in it; this is the clause that makes the command
+    // "restore a backup" rather than "write an arbitrary file".
+    const Provenance p = readProvenance(imagePath);
+    if (!p.ok) {
+        error = p.reason +
+                ".\n  A restore writes to flash, so the image must be one THIS "
+                "tool read off\n  THIS device. `read-firmware` writes " +
+                provenancePathFor(imagePath) +
+                " beside the\n  image it saves; without it there is nothing "
+                "that says where these bytes\n  came from, and \u00a72 assumes "
+                "the device validates nothing it is given.";
+        return false;
+    }
+
+    const std::string sha = sha256Hex(raw.data(), raw.size());
+    if (sha != p.sha256) {
+        error = imagePath + " has changed since it was backed up.\n"
+                "  it hashes to      " + sha + "\n"
+                "  " + provenancePathFor(imagePath) + " records " + p.sha256 +
+                "\n  Refusing. Take a fresh backup rather than trusting this "
+                "one.";
+        return false;
+    }
+    // The sidecar's own size field, checked against the file. Redundant with
+    // the sha256 above and kept anyway: a sidecar that disagrees with itself is
+    // a corrupt sidecar, and noticing that here costs nothing.
+    if (p.size != 0 && p.size != raw.size()) {
+        error = provenancePathFor(imagePath) + " records " +
+                std::to_string(p.size) + " bytes but the image is " +
+                std::to_string(raw.size()) + ". Refusing.";
+        return false;
+    }
+
+    bytes_ = std::move(raw);
+    sha_ = sha;
+    checksum_ = wholeImageChecksum(bytes_);
     return true;
 }
 

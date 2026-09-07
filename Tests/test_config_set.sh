@@ -272,6 +272,53 @@ else
   echo "  FAIL  encode refused an ungated record, or wrote nothing"; FAIL=$((FAIL+1))
 fi
 
+# ---------------------------------------------------------------------------
+# `-v` cannot change the byte stream.
+# ---------------------------------------------------------------------------
+# The GUI applies -v to EVERY command it runs (ToolRunner.verbose), which is
+# only defensible if -v is a pure logging flag. That is a claim about the code,
+# so it gets checked against the frames themselves rather than against the
+# parser: `dryrun` prints the exact 1041-byte frame a field change would send,
+# and the hex must be identical with and without -v.
+#
+# Checked for several fields, including two sub-byte ones, because a flag that
+# altered composition would show up on those first.
+vdiffs=0
+for spec in "polling 1000" "lod 5" "cpi-downshift 2" "slamclick-filter 0" \
+            "sensor-angle -30"; do
+  set -- $spec
+  a=$("$BIN" dryrun "$TMP/plain.bin" "$1" "$2" 2>/dev/null \
+      | grep -E '^ +[0-9a-f]{4} +[0-9a-f]+$' || true)
+  b=$("$BIN" -v dryrun "$TMP/plain.bin" "$1" "$2" 2>/dev/null \
+      | grep -E '^ +[0-9a-f]{4} +[0-9a-f]+$' || true)
+  [ -n "$a" ] || vdiffs=$((vdiffs+1))
+  [ "$a" = "$b" ] || vdiffs=$((vdiffs+1))
+done
+if [ "$vdiffs" = 0 ]; then
+  echo "  PASS  -v does not change the frame for any of 5 fields"; PASS=$((PASS+1))
+else
+  echo "  FAIL  -v changed the emitted frame ($vdiffs discrepancies)"; FAIL=$((FAIL+1))
+fi
+
+# And the falsification: the comparison above must be able to fail. Two
+# DIFFERENT field changes must produce different frames, or the grep is
+# matching nothing and the check is vacuous.
+#
+# THIS IS NOT HYPOTHETICAL. When the -v check was written on 2026-09-06 its
+# grep was `^[0-9a-f]{4}:`, and `dryrun` prints `  0000  a011...` -- two
+# leading spaces, no colon. So it matched nothing, both sides were empty, and
+# "-v does not change the frame" was true of a comparison between two empty
+# strings. The check below is what said so. A falsification that has never
+# fired is decoration; this one earned its place within a day of being written.
+c=$("$BIN" dryrun "$TMP/plain.bin" polling 1000 2>/dev/null | grep -E '^ +[0-9a-f]{4} +[0-9a-f]+$')
+d=$("$BIN" dryrun "$TMP/plain.bin" polling 500  2>/dev/null | grep -E '^ +[0-9a-f]{4} +[0-9a-f]+$')
+if [ -n "$c" ] && [ "$c" != "$d" ]; then
+  echo "  PASS  the frame comparison can tell two frames apart"; PASS=$((PASS+1))
+else
+  echo "  FAIL  the frame comparison cannot distinguish 1000 Hz from 500 Hz, "
+  echo "        so the -v check above proved nothing"; FAIL=$((FAIL+1))
+fi
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

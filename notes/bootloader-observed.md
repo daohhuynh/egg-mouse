@@ -110,7 +110,25 @@ Consequence for enumeration: **usage page and usage do not distinguish the two
 modes.** Only `ProductID` and the `Product` string do. Any code that finds the
 device by usage alone will happily talk to the wrong mode.
 
-## 5. Open gap — a one-byte descriptor difference, source unverified
+## 5. CLOSED 2026-09-06 — the one-byte descriptor difference is real  [O]
+
+**Resolved by §5 "Both report descriptors, recovered from the kernel log",
+further down this same file.** Both descriptors were read programmatically out
+of the `IOHIDFamily` kernel-log dictionaries, so neither side of the comparison
+is a hand transcription any more, and the answer is that the hand transcription
+was right: offset 35 is `0x01` in application mode and `0x00` in the
+bootloader. Both of the outstanding items below are also closed there — the
+application-mode **mouse interface** (`usage 0x02`) descriptor was captured for
+the first time and is byte-identical to the bootloader's.
+
+**Marked rather than deleted**, because a fresh session that reads this section
+first would otherwise re-run a programmatic descriptor read that already exists
+in this file. Two sections are numbered 5; the numbering is left alone because
+`working-memory.md` cites `§5a` and renumbering would break it.
+
+The original text follows.
+
+### 5 (original) — the gap as it was recorded
 
 Diffing the bootloader's `usage 0x06` descriptor against the application-mode
 descriptor **as transcribed into `notes/device-predictions.md`** gives one

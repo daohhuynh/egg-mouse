@@ -5,7 +5,9 @@
 #include "egg/FlashCommands.h"
 #include "egg/FlashPlan.h"
 #include "egg/HidBootloaderLink.h"
+#include "egg/Provenance.h"
 #include "egg/Firmware.h"
+#include "egg/NoQuitDuringWrite.h"
 #include "egg/FirmwareManifest.h"
 #include "egg/RecordVault.h"
 #include "egg/Transport.h"
@@ -16,10 +18,57 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 
 using namespace egg::fw;
+
+// bcdDevice, rendered the way Endgame's own updater renders it (Device.h), or
+// the word for "this field is not a version" when it is not valid BCD. Never
+// silently blank: this string sits inside an identity line that a person reads
+// immediately before deciding whether to erase their only mouse.
+static std::string versionOrRaw(std::uint16_t bcd) {
+    const std::string v = egg::describeVersion(bcd);
+    return v.empty() ? std::string("not BCD") : v;
+}
+
+// WHEN AN .exe DOES NOT MATCH THE SELECTED ROW, SAY WHAT IT ACTUALLY IS.
+//
+// The row is chosen by --version (default: the primary release) and the file
+// must then hash to it -- that is CLAUDE.md §1.4's compile-time constant, and
+// this function does not change it. It only reads the failure back to the user.
+//
+// It exists because `egg-flash help` claimed "The .exe you name is identified
+// BY ITS OWN SHA-256 against a table compiled into this binary, and the
+// resource id comes from the row that matched", which was not what the code
+// did, and `releaseForUpdaterSha` -- the manifest's own hash lookup -- had no
+// caller anywhere in Sources/. So naming a 1.06 updater without `--version
+// 1.06` produced "does not hash to the row" with no hint that this binary held
+// the answer. Found by the completeness inventory, 2026-09-06.
+//
+// SELECTS NOTHING. It prints a suggestion and returns; the user still has to
+// type --version, which is the point (§5: a different firmware version is a
+// different device until shown otherwise, so choosing one is deliberate).
+static void nameTheReleaseInstead(const std::string& exePath) {
+    std::ifstream f(exePath, std::ios::binary);
+    if (!f) return;                      // unreadable: the refusal above said so
+    const std::vector<std::uint8_t> raw(
+        (std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (raw.empty()) return;
+    const egg::fw::Release* other =
+        egg::fw::releaseForUpdaterSha(sha256Hex(raw.data(), raw.size()));
+    if (!other) return;                  // not a release this build knows
+    std::printf("\n         That file IS a release this build knows: %s.\n"
+                "         Re-run with --version %s%s\n",
+                other->label, other->label,
+                other->provenOnDevice
+                    ? "."
+                    : ", and note it is NOT proven on\n"
+                      "         this device -- see --i-know-this-version-is-untested.");
+}
 
 // ---------------------------------------------------------------------------
 // The settings undo. working-memory.md, open gaps:
@@ -93,11 +142,12 @@ static int usage() {
         "                                  vendor's own exit. No erase, no write.\n"
         "  egg-flash help\n"
         "\n"
-        "The .exe you name is identified BY ITS OWN SHA-256 against a table\n"
-        "compiled into this binary, and the resource id comes from the row that\n"
-        "matched. There is no way to name a resource, and an .exe not in the\n"
-        "table is refused outright -- so the id is still a compile-time constant\n"
-        "and never anything the file itself suggests.\n"
+        "The release comes from --version (default %s), and the .exe you name\n"
+        "must then hash to that row's updater SHA-256 or it is refused. If the\n"
+        "file is a DIFFERENT release this build knows, the refusal says which\n"
+        "one and what to type. There is no way to name a resource: the id\n"
+        "reaches the flasher as a compile-time constant from the row, and never\n"
+        "as anything the file itself suggests.\n"
         "\n"
         "  --versions        list the firmware releases this build knows\n"
         "  --version 1.07    flash one other than the default (%s)\n"
@@ -115,6 +165,24 @@ static int usage() {
         "  egg-flash flash <updater.exe> --backup <file>\n"
         "                                      the real thing. Prints the plan\n"
         "                                      and a token; needs --confirm.\n"
+        "  egg-flash restore-firmware <backup.bin> --backup <current.bin>\n"
+        "                                      put a backup BACK. Same frames,\n"
+        "                                      same write phase, same token\n"
+        "                                      rules as flash -- only the image\n"
+        "                                      differs.\n"
+        "\n"
+        "RESTORE ACCEPTS ONLY THIS TOOL'S OWN BACKUPS. `read-firmware` writes a\n"
+        "sidecar <image>.origin recording the sha256 it saved. `restore-firmware`\n"
+        "refuses an image with no sidecar, or one whose bytes no longer hash to\n"
+        "what the sidecar says. So the only thing it can write is something this\n"
+        "tool read off this device with A0 07 and that has not changed since.\n"
+        "It never opens a PE, so \u00a71.4 is untouched: there is no resource to\n"
+        "select and nothing in the file can suggest one.\n"
+        "\n"
+        "--backup here means the same as it does for `flash`: a FRESH read of\n"
+        "what is on the device now, the thing about to be erased. It must be a\n"
+        "different file from the one being restored, and the tool refuses if\n"
+        "they are the same path.\n"
         "\n"
         "A FLASH IS TWO RUNS, and that is deliberate (§4.2b, §4.2a):\n"
         "\n"
@@ -139,6 +207,28 @@ static int usage() {
         "vendor never sends into the one sequence we have evidence for. So run 1\n"
         "takes it and run 2 only CHECKS it. `flash` refuses without a valid one.\n"
         "\n"
+        "THE ENTRY RECEIPT. `enter-bootloader` writes\n"
+        ".egg-mouse-entry-receipt in your HOME directory, after A1 3A has gone\n"
+        "out and the mouse has come back as the bootloader. `flash` and\n"
+        "`restore-firmware` require it\n"
+        "when they find the mouse ALREADY in the bootloader, because \u00a74.2b says\n"
+        "firmware work enters by A1 3A and nothing else can tell that entry from\n"
+        "a LEFT+RIGHT button entry -- PID, bcdDevice and product string are\n"
+        "identical either way.\n"
+        "\n"
+        "  --i-know-this-is-button-entered   flash a bootloader this tool did not\n"
+        "                                    enter. Deliberately not --yes.\n"
+        "\n"
+        "IT IS IN $HOME, NOT THE WORKING DIRECTORY, and that is deliberate: a\n"
+        "Finder-launched .app runs with a working directory of \"/\", so a\n"
+        "cwd-relative receipt could never be written from the GUI at all. You\n"
+        "can therefore run the two commands from different directories. The\n"
+        "refusal prints the absolute path it looked for.\n"
+        "\n"
+        "What the receipt does NOT prove: entering by A1 3A, unplugging, then\n"
+        "button-entering leaves it in place. That is a deliberate sequence, not\n"
+        "an accident.\n"
+        "\n"
         "A1 3A LATCHES [O]. Once run 2 starts, a power cycle will not return the\n"
         "mouse to normal -- only a completed flash will. Everything that can fail\n"
         "is checked before it is sent, and if a flash aborts anyway, re-running it\n"
@@ -152,7 +242,7 @@ static int usage() {
         "              command is A1 13, the same byte as Factory Reset, so it\n"
         "              reports whether that undo exists before doing anything.\n"
         "\n%s\n", primaryRelease().label, primaryRelease().label,
-        kRecoveryProcedure);
+        primaryRelease().label, kRecoveryProcedure);
     return 2;
 }
 
@@ -246,9 +336,11 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
 
     if (o.sawBootloaderPid) {
         std::printf("appeared   %u ms after the reply\n", o.reenumerateMs);
-        std::printf("identity   PID 0x%04x  bcdDevice 0x%04x  \"%s\"  (manufacturer \"%s\")\n",
-                    o.seen.productId, o.seen.releaseNumber, o.seen.product.c_str(),
-                    o.seen.manufacturer.c_str());
+        std::printf("identity   PID 0x%04x  bcdDevice 0x%04x (%s)  \"%s\"  "
+                    "(manufacturer \"%s\")\n",
+                    o.seen.productId, o.seen.releaseNumber,
+                    versionOrRaw(o.seen.releaseNumber).c_str(),
+                    o.seen.product.c_str(), o.seen.manufacturer.c_str());
     }
 
     if (o.result != EntryResult::EnteredAndConfirmed) {
@@ -268,6 +360,37 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
                 "\n"
                 "TO GET OUT: unplug the mouse, wait a moment, plug it back in.\n"
                 "Then `egg-config devices` should show PID 0x1978 (application).\n");
+
+    // THE RECEIPT. the owner's call, 2026-09-06: "enforce it, with an escape hatch."
+    //
+    // §4.2b requires everything touching firmware to enter by A1 3A, and until
+    // now that rule had nothing behind it -- `flash` finding the mouse already
+    // in the bootloader could not tell an A1 3A entry from a LEFT+RIGHT button
+    // entry, because PID, bcdDevice and product string are identical either
+    // way. So the rule was advice. This is the code.
+    //
+    // Written HERE and only here, and only on EnteredAndConfirmed: the receipt
+    // means "A1 3A went out and the mouse came back as the bootloader", which
+    // is exactly what this branch has just established.
+    //
+    // A failure to write it is reported, not fatal. Nothing has been erased,
+    // the entry itself succeeded, and the consequence is one refusal later with
+    // a named escape hatch -- turning that into an error here would be the tool
+    // complaining about its own bookkeeping after the irreversible part.
+    {
+        std::string werr;
+        if (writeEntryReceipt(o.seen.releaseNumber, o.seen.product, werr))
+            std::printf("\nreceipt    %s\n"
+                        "           `flash` and `restore-firmware` require this when they find\n"
+                        "           the mouse already in the bootloader (\u00a74.2b). Run them from\n"
+                        "           THIS directory, or pass --i-know-this-is-button-entered.\n",
+                        entryReceiptPath().c_str());
+        else
+            std::printf("\nNOTE: could not write the entry receipt (%s).\n"
+                        "The entry itself succeeded and nothing was erased. `flash` will\n"
+                        "refuse the already-in-bootloader path without it; pass\n"
+                        "--i-know-this-is-button-entered to override.\n", werr.c_str());
+    }
     return 0;
 }
 
@@ -374,16 +497,32 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
           "     their updater does. It needs a backup file first, and taking one\n"
           "     is read-only:\n"
           "       ./build/egg-flash read-firmware backup.bin\n"
-          "       ./build/egg-flash flash <updater.exe> --backup backup.bin\n"
+          "       ./build/egg-flash flash <updater.exe> --backup backup.bin \\\n"
+          "           --i-know-this-is-button-entered\n"
+          "     The flag is needed because THIS tool did not put the mouse into\n"
+          "     the bootloader in the run you are about to make -- see the entry\n"
+          "     receipt in `egg-flash help`. If you got here from\n"
+          "     `enter-bootloader`, the receipt is already in your home\n"
+          "     directory and you can leave the flag off, whichever directory\n"
+          "     you run from.\n"
           "\n"
           "Settings are safe either way: the vault is on disk and restore is\n"
           "verified 21/21.\n");
         return 1;
     }
 
+    // THE LATCH IS GONE, so the receipt describing it must go too. Same rule
+    // as the flash's own clear, and missed for the same reason: writeEntryReceipt
+    // gained a call site before every path that ENDS a latched session was
+    // checked. A receipt outliving its session vouches for a later button entry,
+    // which is precisely the thing the gate exists to catch.
+    clearEntryReceipt();
+
     std::printf("\nBACK IN APPLICATION MODE.\n"
-                "  PID 0x%04x  bcdDevice 0x%04x  \"%s\"\n",
-                o.seen.productId, o.seen.releaseNumber, o.seen.product.c_str());
+                "  PID 0x%04x  bcdDevice 0x%04x (%s)  \"%s\"\n",
+                o.seen.productId, o.seen.releaseNumber,
+                versionOrRaw(o.seen.releaseNumber).c_str(),
+                o.seen.product.c_str());
     if (o.reenumerateMs) std::printf("  came back %u ms after the reply\n", o.reenumerateMs);
     std::printf("\nNow check the settings survived:\n"
                 "  ./build/egg-config read --save after-stage2.bin\n"
@@ -491,19 +630,78 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
           "erasing without the backup this command exists to make.\n");
         return 1;
     }
+    bool needsOverride = false;
     std::printf("read       %zu blocks, %zu bytes\n", rb.blocksRead, rb.image.size());
     std::printf("sha256     %s\n", sha256Hex(rb.image.data(), rb.image.size()).c_str());
     std::printf("checksum   0x%08x  (32-bit sum, the value A0 03 declares)\n",
                 wholeImageChecksum(rb.image));
     if (saveAndVerify(rb.image, outPath) != 0) return 1;
     std::printf("saved      %s, re-read and byte-identical\n", outPath.c_str());
+
+    // THE SIDECAR, and it is written only after saveAndVerify -- the file must
+    // already be known to read back byte-identical before anything vouches for
+    // what is in it.
+    //
+    // the owner's call, 2026-09-06: a restore may write back a backup, and ONLY a
+    // backup. This is the record that makes "is this a backup?" a question with
+    // an answer. `restore-firmware` refuses an image with no sidecar, or one
+    // whose bytes no longer hash to what the sidecar says.
+    //
+    // The bootloader identity goes in it because it is free and it is the only
+    // evidence in the file of which device these bytes came off.
+    {
+        SeenDevice bl{};
+        for (const auto& d : seeAll())
+            if (d.productId == egg::kProductIdBootloader) { bl = d; break; }
+        // How this bootloader was entered, informational. §4.2b wants A1 3A;
+        // if the receipt is absent this read may have been taken in a
+        // button-entered bootloader, which is worth RECORDING and not worth
+        // refusing over -- see Provenance.h. The bytes are still the bytes, and
+        // refusing to take a backup is the only refusal here that can leave the
+        // user with less than they started with.
+        // entryGate, not readEntryReceipt: a receipt that describes a
+        // DIFFERENT bootloader must not stamp this backup "a1-3a". Using mere
+        // presence here would have written the more reassuring value on exactly
+        // the evidence the gate rejects, and restore-firmware prints this field
+        // as if it meant something.
+        const bool viaA13a = entryGate(false, bl.releaseNumber, bl.product).allowed;
+        std::string werr;
+        if (!writeProvenance(outPath,
+                             sha256Hex(rb.image.data(), rb.image.size()),
+                             rb.image.size(), bl.productId, bl.releaseNumber,
+                             bl.product, viaA13a ? "a1-3a" : "unknown",
+                             werr)) {
+            // Fatal, unlike the receipt's write failure in enter-bootloader.
+            // The difference: this file is what makes the backup RESTORABLE, so
+            // a silent failure here produces a backup that looks fine and is
+            // refused later for a reason the user cannot see.
+            std::printf("REFUSED: the image saved but its provenance did not "
+                        "(%s).\n"
+                        "The file %s is intact and correct -- it simply cannot "
+                        "be used by\n`restore-firmware` without it. Fix the "
+                        "permissions and run this again.\n",
+                        werr.c_str(), outPath.c_str());
+            return 1;
+        }
+        std::printf("origin     %s\n", provenancePathFor(outPath).c_str());
+        if (!viaA13a)
+            std::printf("           entry recorded as \"unknown\": no usable receipt at\n"
+                        "           %s,\n"
+                        "           so this read may have been taken in a "
+                        "button-entered bootloader.\n"
+                        "           \u00a74.2b prefers A1 3A. The backup is still "
+                        "valid; the note is\n           so a later restore can say "
+                        "which kind it is holding.\n",
+                        entryReceiptPath().c_str());
+        needsOverride = !viaA13a;
+    }
     std::printf(
       "\nTHE MOUSE IS STILL IN THE BOOTLOADER and stays there until a flash\n"
       "completes. That is expected, not a fault. The flash below will find it\n"
       "already there and skip its own A1 3A -- 134 frames instead of 135, which\n"
       "is the path Endgame's updater takes for a 0x1977 device (§5.1a).\n"
       "\nTHIS FILE IS THE BACKUP A FLASH REQUIRES (§4.2). Pass it with:\n"
-      "  ./build/egg-flash flash <updater.exe> --backup %s\n"
+      "  ./build/egg-flash flash <updater.exe> --backup %s%s\n"
       "The flash CHECKS it and takes no read-back of its own, so that run sends\n"
       "exactly the vendor's byte stream and nothing else.\n"
       "\nSCORE IT against the pre-registered predictions before drawing any\n"
@@ -517,7 +715,13 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
       "\nOr compare against the reference directly:\n"
       "  python3 Tools/pe/fwfile.py --extract 140 \"<updater.exe>\" /tmp/fw140.bin\n"
       "  cmp %s /tmp/fw140.bin\n",
-      outPath.c_str(), outPath.c_str(), outPath.c_str());
+      outPath.c_str(),
+      // THE COMMAND LINE PRINTED HERE MUST BE ONE THAT WORKS. Without this the
+      // no-receipt case printed a `flash` invocation the entry gate was
+      // guaranteed to refuse -- the tool handing someone a command it had
+      // already decided to reject, at the point where the mouse is latched.
+      needsOverride ? " \\\n      --i-know-this-is-button-entered" : "",
+      outPath.c_str(), outPath.c_str());
     return 0;
 }
 
@@ -557,57 +761,28 @@ static bool checkBackup(const std::string& path, const Image& img) {
     return true;
 }
 
-// CLAUDE.md §3: "Trap SIGINT/SIGTERM explicitly during the write phase."
-//
-// NEVER IMPLEMENTED UNTIL 2026-09-05, when an adversarial audit noticed the
-// rule had no code behind it. It is not hypothetical: earlier the same day the owner
-// watched a command sit silent and asked "uhh my terminal froze do i control c
-// this?" -- of a read-only command, where the answer was yes. During the write
-// phase the answer is no, and the difference cannot be left to a judgement call
-// made under stress.
-//
-// §4.2: after the erase the device has no valid application, so exiting
-// cleanly GUARANTEES the bad outcome. A default-disposition Ctrl-C terminates
-// the process between two chunks and leaves exactly that.
-//
-// SIG_IGN, not a flag a loop polls: the loops here are deliberately unbounded,
-// so a "please stop" flag would either be ignored anyway or become the early
-// exit §4.2 forbids. The handler is installed for the erase-through-verify unit
-// only and restored immediately after, so before the erase Ctrl-C still works
-// normally -- which is correct, because before the erase abort is always right.
-//
-// This is not an inescapable process. SIGKILL cannot be trapped, so `kill -9`
-// still works for a genuinely wedged tool. It is not offered in the message,
-// because someone reaching for it should have to decide to.
-class NoQuitDuringWrite {
-public:
-    NoQuitDuringWrite() {
-        int_  = std::signal(SIGINT,  SIG_IGN);
-        term_ = std::signal(SIGTERM, SIG_IGN);
-        // SIGHUP too: closing the terminal is the same mistake with less
-        // deliberation behind it than Ctrl-C.
-        hup_  = std::signal(SIGHUP,  SIG_IGN);
-    }
-    ~NoQuitDuringWrite() {
-        if (int_  != SIG_ERR) std::signal(SIGINT,  int_);
-        if (term_ != SIG_ERR) std::signal(SIGTERM, term_);
-        if (hup_  != SIG_ERR) std::signal(SIGHUP,  hup_);
-    }
-    NoQuitDuringWrite(const NoQuitDuringWrite&) = delete;
-    NoQuitDuringWrite& operator=(const NoQuitDuringWrite&) = delete;
-private:
-    void (*int_)(int)  = SIG_ERR;
-    void (*term_)(int) = SIG_ERR;
-    void (*hup_)(int)  = SIG_ERR;
-};
+// NoQuitDuringWrite used to be defined here. It is now
+// EGGFlashCore/include/egg/NoQuitDuringWrite.h, so that a test can reach it --
+// see that header for why, and for the SIGPIPE hole that living in this
+// translation unit hid for a day.
 
 // ---------------------------------------------------------------------------
 // §4.4 stage 4. The real thing.
 // ---------------------------------------------------------------------------
+// `restoring` selects which of the two verbs is speaking. The write phase, the
+// preflight, the frames and the token are IDENTICAL either way and that is
+// deliberate: `restore-firmware` is `flash` with a different Image, so it
+// inherits every guard and every test rather than becoming a second, less
+// exercised path to the same erase (§4.3 -- keep the write phase in one place).
+// Only the wording and the source line differ.
+//
+// `allowButtonEntry` is --i-know-this-is-button-entered, the escape hatch on
+// the entry-receipt gate below.
 static int cmdFlash(const Image& img, const std::string& vaultPath,
                     const std::string& confirmArg, const std::string& backupPath,
-                    bool verbose) {
+                    bool verbose, bool restoring, bool allowButtonEntry) {
     const std::string token = confirmToken(img);
+    const char* const verbName = restoring ? "restore-firmware" : "flash";
 
     // THE PLAN IS PRINTED FIRST, AND UNCONDITIONALLY.
     //
@@ -618,6 +793,13 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     // anyone is nervous about. The token depends only on the image, so there is
     // nothing about the device it needs in order to be correct.
     if (confirmArg.empty()) {
+        if (restoring)
+            std::printf(
+              "\nTHIS IS A RESTORE. The image below is not the vendor's -- it is a\n"
+              "backup this tool read off this device with A0 07, and its sidecar\n"
+              "has been checked against its current bytes. Everything else about\n"
+              "the run is identical to `flash`: the same frames, in the same\n"
+              "order, through the same write phase.\n");
         std::printf(
           "\nWHAT WOULD HAPPEN, in order:\n"
           "  A1 3A  enter the bootloader, the vendor's own way (§4.2b)\n"
@@ -655,10 +837,13 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
           "then pass it here with --backup <file>. It is checked, not taken, so\n"
           "that this run inserts nothing into their sequence.\n"
           "\nTo proceed:\n"
-          "  ./build/egg-flash flash <updater.exe> --backup <file> --confirm %s\n"
+          "  ./build/egg-flash %s %s --backup <file> --confirm %s\n"
           "\nThat token is SHA-256 over the exact frames listed above. Change the\n"
-          "image and it changes, so an approval cannot outlive what it approved.\n",
-          img.blockCount(), img.checksum(), img.blockCount(), token.c_str());
+          "image and it changes, so an approval cannot outlive what it approved.\n"
+          "A restore of a DIFFERENT backup has a different token, for the same\n"
+          "reason.\n",
+          img.blockCount(), img.checksum(), img.blockCount(),
+          verbName, restoring ? "<backup.bin>" : "<updater.exe>", token.c_str());
         // NOT another reportSettingsUndo() here. main() already printed it
         // before the plan and the gate below prints it again on the way to
         // deciding; a third copy is noise, and noise is how a real warning
@@ -688,6 +873,45 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
 
     if (!checkBackup(backupPath, img)) {
         std::printf("NOTHING WAS SENT.\n");
+        return 1;
+    }
+
+    // THE OVERRIDE IS ANNOUNCED HERE, BEFORE THE DEVICE IS LOOKED AT.
+    //
+    // Two reasons, and the second is why it is here rather than only inside the
+    // fromBoot branch. First, a person who typed a flag that relaxes a safety
+    // gate should see it acknowledged before anything happens, not discover it
+    // took effect three screens later. Second, and found by audit 2026-09-06:
+    // the ONLY test of this flag compared the printed token with and without
+    // it, which is identical either way -- so the test passed for the right
+    // reason and would also have passed if main() dropped the flag on the
+    // floor. The gate itself needs a mouse in the bootloader to reach, so
+    // without a line like this there is NO way to observe, with no hardware,
+    // that the flag survives argument parsing at all. §6.2: a harness that
+    // cannot produce a bad result is not evidence.
+    if (allowButtonEntry)
+        std::printf("\noverride   --i-know-this-is-button-entered given. If the mouse\n"
+                    "           is already in the bootloader it will be accepted even\n"
+                    "           without a receipt saying this tool put it there.\n");
+
+    // THE TOKEN MISMATCH, HERE RATHER THAN AFTER ENUMERATION.
+    //
+    // Moved 2026-09-06, and it was Tests/test_flash_restore.sh that found it:
+    // the check sat below the preflight, so with no mouse attached the run
+    // returned "NOT ready" first and the mismatch was never reached. §4.2c's
+    // whole point is that an approval cannot outlive what it approved, and
+    // nothing could regression-test that without hardware -- the same defect
+    // this block's own header calls out for the settings and backup gates.
+    //
+    // Only the MISMATCH moves. Printing the plan still happens after the
+    // preflight line, deliberately: someone reading the plan wants to be told
+    // which mode the mouse is in, and that line is read-only.
+    if (!confirmArg.empty() && confirmArg != token) {
+        std::printf("\nREFUSED: --confirm %s does not match this plan's token %s.\n"
+                    "NOTHING WAS SENT. Re-run without --confirm to see the plan.\n"
+                    "(The token covers the image, so a token from a DIFFERENT\n"
+                    "image or a different backup will never match this one.)\n",
+                    confirmArg.c_str(), token.c_str());
         return 1;
     }
 
@@ -742,8 +966,58 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
                         egg::kBootloaderProduct);
             return 1;
         }
-        std::printf("  -> bootloader identity confirmed: bcdDevice 0x%04x, \"%s\"\n",
-                    bl.releaseNumber, bl.product.c_str());
+        std::printf("  -> bootloader identity confirmed: bcdDevice 0x%04x (%s), "
+                    "\"%s\"\n", bl.releaseNumber,
+                    versionOrRaw(bl.releaseNumber).c_str(), bl.product.c_str());
+
+        // HOW WAS IT ENTERED? §4.2b: "EVERYTHING THAT TOUCHES FIRMWARE ENTERS
+        // BY A1 3A." The identity check above cannot answer this -- PID,
+        // bcdDevice and product string are byte-identical for an A1 3A entry
+        // and a LEFT+RIGHT button entry, which is precisely why §4.2b's own
+        // reasoning says a button-entered bootloader "may prove nothing about
+        // the flash". Until 2026-09-06 the rule had no code behind it.
+        //
+        // the owner chose "enforce it, with an escape hatch". So: refuse without the
+        // receipt `enter-bootloader` leaves, and take an override that has to
+        // be typed in full. NOT --yes -- §4.2c's reasoning exactly, --yes is
+        // typed every time and would be given by reflex.
+        //
+        // WHAT THE RECEIPT DOES NOT PROVE, said here and in the help text
+        // rather than left for someone to discover: entering by A1 3A,
+        // unplugging, then button-entering leaves the file in place. That is a
+        // deliberate sequence, not an accident, and it is the same standard
+        // §4.2b already accepts for a backup going stale.
+        const EntryGate gate = entryGate(allowButtonEntry, bl.releaseNumber,
+                                         bl.product);
+        const EntryReceipt& er = gate.receipt;
+        if (!gate.allowed) {
+            std::printf(
+              "  -> REFUSED: %s\n"
+              "     The mouse is in the bootloader, but nothing here says THIS\n"
+              "     tool put it there with A1 3A. \u00a74.2b requires that entry for\n"
+              "     anything touching firmware, and PID/bcdDevice/product are\n"
+              "     identical for a LEFT+RIGHT button entry, so the identity\n"
+              "     check above cannot tell the two apart.\n"
+              "\n"
+              "     Looked for it at:\n"
+              "       %s\n"
+              "     If you did run `enter-bootloader`, you are most likely in a\n"
+              "     different directory than you were then. cd there and re-run.\n"
+              "\n"
+              "     If you entered with the buttons and mean to flash anyway:\n"
+              "       ./build/egg-flash %s ... --i-know-this-is-button-entered\n"
+              "     It is deliberately not --yes.\n"
+              "\n     NOTHING WAS SENT.\n",
+              gate.reason.c_str(), entryReceiptPath().c_str(), verbName);
+            return 1;
+        }
+        if (!gate.overridden)
+            std::printf("  -> entered by A1 3A: receipt from %s (\"%s\", bcdDevice 0x%04x)\n",
+                        er.sent.c_str(), er.product.c_str(), er.bcdDevice);
+        else
+            std::printf("  -> NO ENTRY RECEIPT. Proceeding only because\n"
+                        "     --i-know-this-is-button-entered was given. \u00a74.2b's\n"
+                        "     preference for A1 3A is being overridden deliberately.\n");
     }
 
     std::printf(fromApp ? "  -> ready. Will enter the bootloader with A1 3A.\n"
@@ -751,13 +1025,6 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
 
 
     if (confirmArg.empty()) return 2;
-
-    if (confirmArg != token) {
-        std::printf("\nREFUSED: --confirm %s does not match this plan's token %s.\n"
-                    "NOTHING WAS SENT. Re-run without --confirm to see the plan.\n",
-                    confirmArg.c_str(), token.c_str());
-        return 1;
-    }
 
     egg::Log log(verbose);
 
@@ -804,6 +1071,42 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
         // application handle refers to a device that no longer exists.
         std::printf("      in the bootloader after %u ms  (PID 0x%04x, \"%s\")\n",
                     o.reenumerateMs, o.seen.productId, o.seen.product.c_str());
+
+        // THE RECEIPT, FOR THE A1 3A THIS COMMAND JUST SENT ITSELF.
+        //
+        // Missing until 2026-09-06, and it was the worst defect of the day:
+        // five independent reviewers found it and none of them was wrong.
+        // writeEntryReceipt had exactly one call site -- cmdEnterBootloader --
+        // so a `flash` or `restore-firmware` that started in application mode
+        // latched the mouse and left NOTHING saying it had done so.
+        //
+        // The consequence was not a refused edge case, it was the tool blocking
+        // its own recovery. Abort anywhere between this line and the write
+        // phase -- the bootloader link failing to open, an entry that went out
+        // but did not confirm, a Ctrl-C before the write phase where SIGINT is
+        // still honoured -- and the printed advice is "re-run this command".
+        // The re-run then takes the fromBoot branch, finds no receipt, and is
+        // refused, offering a flag that asserts a button entry which did not
+        // happen. Recovery would have required typing something false.
+        //
+        // Written HERE, immediately after EnteredAndConfirmed, for the same
+        // reason as in cmdEnterBootloader: that result means the frame went out
+        // AND the mouse came back with the identity we expect, which is exactly
+        // what the receipt claims. Not fatal on failure -- the entry succeeded
+        // and nothing is erased; the cost is one refusal later with a named way
+        // through, and failing here would abort a run that is otherwise fine.
+        {
+            std::string werr;
+            if (writeEntryReceipt(o.seen.releaseNumber, o.seen.product, werr))
+                std::printf("      receipt written to %s\n",
+                            entryReceiptPath().c_str());
+            else
+                std::printf("      NOTE: could not write the entry receipt (%s).\n"
+                            "      Nothing is wrong with the flash. If this run "
+                            "aborts before the\n      write phase, the re-run "
+                            "needs --i-know-this-is-button-entered.\n",
+                            werr.c_str());
+        }
     }
 
     auto link = HidBootloaderLink::open(log);
@@ -862,6 +1165,18 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
         if (back) { std::printf("      back after ~%u ms  (PID 0x%04x, bcdDevice 0x%04x, \"%s\")\n",
                                 waited, appAgain.productId, appAgain.releaseNumber,
                                 appAgain.product.c_str());
+                    // THE LATCH IS DEMONSTRABLY CLEARED -- the mouse is a mouse
+                    // again -- so the receipt describing it must go, or it
+                    // would vouch for a LATER button entry.
+                    //
+                    // MOVED HERE 2026-09-06, from immediately after the write
+                    // phase. The image being verified resident is not the same
+                    // thing as the mouse being out of the bootloader: if it
+                    // does NOT come back (the !back branch below), clearing the
+                    // receipt early would delete the one piece of evidence a
+                    // re-run needs, at the exact moment a re-run is the answer.
+                    // Seen in the mouse's own enumeration, not inferred.
+                    clearEntryReceipt();
                     break; }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -876,6 +1191,12 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
           "      failed flash. Unplug and replug. A1 13 was NOT sent, so your\n"
           "      settings are untouched; the vendor's tool reaches the same\n"
           "      state via 0x403e6f and also reports success (§5.4a).\n");
+        std::printf(
+          "      The entry receipt at %s\n"
+          "      is DELIBERATELY LEFT IN PLACE: the mouse has not been seen to\n"
+          "      leave the bootloader, so if it is still there a re-run of this\n"
+          "      command needs it and would otherwise be refused.\n",
+          entryReceiptPath().c_str());
         std::printf("\nThe pre-flash image is in %s.\n", backupPath.c_str());
         return 0;
     }
@@ -946,6 +1267,7 @@ int main(int argc, char** argv) {
     std::string confirmArg, backupPath, versionArg;
     bool yes = false, verbose = false, checkOnly = false;
     bool acceptUnproven = false;
+    bool allowButtonEntry = false;
     int n = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -957,6 +1279,13 @@ int main(int argc, char** argv) {
         if (a == "--version" && i + 1 < argc) { versionArg = argv[++i]; continue; }
         if (a == "--i-know-this-version-is-untested") {
             acceptUnproven = true; continue;
+        }
+        // The entry-receipt escape hatch. Long, and deliberately so: it has to
+        // be typed in full every time, and it says what it is agreeing to.
+        // Not folded into --yes, for §4.2c's reason -- --yes is typed by
+        // reflex and a second meaning attached to it is approved by reflex too.
+        if (a == "--i-know-this-is-button-entered") {
+            allowButtonEntry = true; continue;
         }
         if (a == "--versions") return listReleases();
         if (a == "-v" || a == "--verbose") { verbose = true; continue; }
@@ -977,6 +1306,77 @@ int main(int argc, char** argv) {
     if (verb == "read-firmware")
         return cmdReadFirmware(n >= 2 ? args[1] : std::string("device-firmware.bin"),
                                checkOnly, verbose);
+
+    // RESTORE. Dispatched here, with read-firmware and before the manifest,
+    // because its second argument is a BACKUP IMAGE and not a vendor .exe --
+    // there is no release to select, no resource id to look up and no PE to
+    // open. Letting it fall through to the loader below would try to hash a
+    // 66560-byte firmware image against the updater manifest and fail with a
+    // message about the wrong thing entirely.
+    if (verb == "restore-firmware") {
+        if (n < 2) {
+            std::printf("REFUSED: restore-firmware needs the backup to WRITE.\n"
+                        "  ./build/egg-flash restore-firmware <backup.bin> "
+                        "--backup <current.bin>\n");
+            return usage();
+        }
+        const std::string restorePath = args[1];
+
+        // TWO DIFFERENT FILES, REQUIRED. §4.2: never erase without a saved copy
+        // of what is being erased -- and what a restore erases is whatever is
+        // on the device NOW, which is precisely not the old backup being put
+        // back. Naming one file for both roles reads as satisfying the rule
+        // while satisfying nothing: if the device holds something else, that
+        // file does not describe it, and if it holds the same bytes there was
+        // nothing to restore. Off-wire, so it costs an error message.
+        if (sameFile(backupPath, restorePath)) {
+            std::printf(
+              "REFUSED: --backup names the same file as the image to restore.\n"
+              "\n"
+              "  restoring   %s\n"
+              "  --backup    %s\n"
+              "\n"
+              "These are two different things. The first is what will be WRITTEN;\n"
+              "the second is a fresh copy of what is on the device RIGHT NOW, the\n"
+              "thing about to be erased (\u00a74.2). Take that one first -- it is\n"
+              "read-only and sends no write:\n"
+              "  ./build/egg-flash read-firmware current.bin\n"
+              "NOTHING WAS SENT.\n",
+              restorePath.c_str(), backupPath.c_str());
+            return 1;
+        }
+
+        Image rimg;
+        std::string rerr;
+        if (!rimg.loadFromBackup(restorePath, rerr)) {
+            std::printf("REFUSED: %s\n", rerr.c_str());
+            return 1;
+        }
+        const Provenance prov = readProvenance(restorePath);
+        std::printf("restoring  %s\n", restorePath.c_str());
+        std::printf("origin     %s\n", provenancePathFor(restorePath).c_str());
+        std::printf("           read off PID 0x%04x \"%s\" on %s, entry %s\n",
+                    egg::kProductIdBootloader, prov.product.c_str(),
+                    prov.taken.c_str(), prov.entry.c_str());
+        if (prov.entry != "a1-3a")
+            std::printf("           ^ that backup was NOT taken in a bootloader this\n"
+                        "           tool had entered with A1 3A. The bytes are still the\n"
+                        "           bytes; \u00a74.2b's preference is noted, not enforced here.\n");
+        std::printf("size       %zu bytes, %zu blocks of %zu\n",
+                    rimg.bytes().size(), rimg.blockCount(), kBlockSize);
+        std::printf("sha256     %s  (matches the sidecar)\n", rimg.sha256().c_str());
+        std::printf("checksum   0x%08x  (FUN_00403580, 32-bit sum of every byte)\n",
+                    rimg.checksum());
+        std::printf("blocks     device indices 0x%02x..0x%02x\n",
+                    rimg.deviceIndex(0), rimg.deviceIndex(rimg.blockCount() - 1));
+        if (rimg.sha256() == primaryRelease().imageSha256)
+            std::printf("note       these bytes ARE firmware %s -- identical to the\n"
+                        "           image `flash` would write from the vendor .exe.\n",
+                        primaryRelease().label);
+        reportSettingsUndo(vaultPath);
+        return cmdFlash(rimg, vaultPath, confirmArg, backupPath, verbose,
+                        /*restoring=*/true, allowButtonEntry);
+    }
 
     if (n < 2) return usage();
     const std::string exePath = args[1];
@@ -1003,6 +1403,7 @@ int main(int argc, char** argv) {
     std::string err;
     if (!img.loadFromRelease(exePath.c_str(), *rel, err)) {
         std::printf("REFUSED: %s\n", err.c_str());
+        nameTheReleaseInstead(exePath);
         return 1;
     }
 
@@ -1060,7 +1461,8 @@ int main(int argc, char** argv) {
         // was right; now that it CHECKS one, inventing a name would either
         // refuse against a file the user never named or, worse, silently accept
         // an unrelated file that happened to be sitting there.
-        return cmdFlash(img, vaultPath, confirmArg, backupPath, verbose);
+        return cmdFlash(img, vaultPath, confirmArg, backupPath, verbose,
+                        /*restoring=*/false, allowButtonEntry);
     }
 
     // "stream" prints every frame in full, one per line, so the whole outbound

@@ -84,10 +84,25 @@ struct UpdatesView: View {
                           systemImage: "lock.shield")
                         .font(.caption).foregroundStyle(.green)
 
-                    Text("Adopting a result is a source change, on purpose: it "
-                         + "is reviewable, and it keeps the firmware resource "
-                         + "id a compile-time constant. The output below tells "
-                         + "you exactly what to paste and where.")
+                    // The two halves leave DIFFERENT artefacts, and saying so
+                    // is the point: until 2026-09-06 this paragraph promised
+                    // "what to paste and where" for both, and the config half
+                    // printed a verdict that was recorded nowhere at all.
+                    Text(m.kind == .firmware
+                         ? "Adopting a result is a source change, on purpose: "
+                           + "it is reviewable, and it keeps the firmware "
+                           + "resource id a compile-time constant. The output "
+                           + "below prints the manifest row to paste into "
+                           + "FirmwareManifest.cpp, and the rest of the "
+                           + "checklist with it."
+                         : "Nothing at run time reads a config-tool verdict, "
+                           + "so adopting one is not a source change. The "
+                           + "output below prints a row for "
+                           + "notes/config-adoption.md instead, so that six "
+                           + "months from now somebody can tell whether this "
+                           + "version was ever checked. A verdict nobody can "
+                           + "look up later is not much better than one "
+                           + "nobody computed.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 

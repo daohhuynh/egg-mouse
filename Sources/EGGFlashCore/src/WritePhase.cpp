@@ -44,13 +44,27 @@
 
 namespace egg::fw {
 
+// AMENDED 2026-09-06, the same hour the entry receipt was added, because the
+// receipt made this text WRONG. It says "then run this command again" after a
+// BUTTON entry -- and flash/restore-firmware now refuse a bootloader they did
+// not enter themselves with A1 3A. Following this to the letter would have
+// produced a refusal at the one moment a recovery instruction is read closely.
+//
+// The same defect was found once before, at cmdLeaveBootloader's failure path,
+// and the comment there is the rule: a recovery instruction that is wrong is
+// worse than none. A guard added anywhere has to be checked against every text
+// that tells someone what to do next.
 const char* const kRecoveryProcedure =
     "RECOVERY (observed on the device, notes/bootloader-observed.md):\n"
     "  Hold LEFT and RIGHT mouse buttons together. Keep holding.\n"
     "  Plug the cable in. Keep holding a few more seconds, then release.\n"
     "  The mouse re-enumerates as PID 0x1977, Product \"Bootloader\".\n"
-    "  Then run this command again. The bootloader is forced by hardware and\n"
-    "  does not depend on any firmware being valid.";
+    "  Then run this command again -- and if it is `flash` or\n"
+    "  `restore-firmware`, ADD --i-know-this-is-button-entered. The buttons\n"
+    "  are not an A1 3A entry and those two refuse a bootloader they did not\n"
+    "  enter themselves (CLAUDE.md 4.2b); the flag is how you say you meant it.\n"
+    "  The bootloader is forced by hardware and does not depend on any\n"
+    "  firmware being valid.";
 
 namespace {
 
@@ -180,6 +194,41 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img) {
         // numbers that looked like a cross-check and were one number twice.
         // A statistic that cannot disagree with itself is not evidence.
         ++p.blocksVerified;      // reached only once the read-back matched
+
+        // SAY SO, once per block. Added 2026-09-06.
+        //
+        // This phase takes roughly 10-15 seconds and, until now, said NOTHING
+        // for the whole of it -- in the exact window where the tool has just
+        // announced that Ctrl-C is ignored. "It has hung" and "it is working"
+        // looked identical at the one moment the difference matters most, and
+        // the GUI inherited the silence because it only streams what the CLI
+        // prints.
+        //
+        // Through link.note() and not printf, for two reasons. It goes to
+        // STDERR, and stdout carries the frame stream that
+        // Tests/test_golden_vendor.py diffs against Endgame's capture -- a
+        // progress line there would make that diff depend on how the run went.
+        // And it goes through the link, so the mock sees it too and the
+        // adversarial scenarios exercise the same path.
+        //
+        // It reports blocksVerified rather than the loop index because the
+        // counter is the thing that means "came back correct". BE PRECISE
+        // ABOUT WHAT THAT BUYS, THOUGH: today the two are EQUAL on every
+        // reachable path -- the counter is bumped exactly once, immediately
+        // above, and the outer loop has no `continue` and no `break` -- so
+        // this is a choice of source of truth, not a behavioural difference,
+        // and no test can tell them apart. Tests/mutants.sh carries it as an
+        // EQUIVALENT mutant with that proof, because the first draft of this
+        // comment claimed a distinction the tests were then credited with
+        // catching, which is exactly the shape §6.2 warns about.
+        //
+        // The rewrite count rides along because a flash that is quietly
+        // repairing itself is the thing an operator most wants to see early.
+        link.note("block " + std::to_string(p.blocksVerified) + "/" +
+                  std::to_string(img.blockCount()) + " verified" +
+                  (p.rewrites ? "  (" + std::to_string(p.rewrites) +
+                                " rewrite(s) so far)"
+                              : std::string()));
     }
 
     // ---- Whole-image checksum. ---------------------------------------------

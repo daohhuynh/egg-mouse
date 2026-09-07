@@ -17,6 +17,7 @@
 // section ever passes with every fault disabled, it is measuring nothing, so
 // one test deliberately asserts that the faults actually bite.
 #include "egg/ConfigRecord.h"
+#include "egg/Device.h"
 #include "egg/ConfigSession.h"
 #include "egg/MockConfigDevice.h"
 #include "egg/Protocol.h"
@@ -1171,6 +1172,335 @@ static void testFixedCpi() {
     }());
 }
 
+static bool decodePollingSaysHz(std::uint8_t stored, const char* want,
+                                char* b, std::size_t n) {
+    const Settable* f = findSettable("polling");
+    return f && f->decode && f->decode(stored, b, n) && std::string(b) == want;
+}
+
+// ---------------------------------------------------------------------------
+// 11b. bcdDevice -> the version Endgame's updater displays.
+// ---------------------------------------------------------------------------
+// [D] notes/updater-protocol.md: updater 1.10 FUN_004011f0 formats the field
+// with L"%x", parses that string back with __wtol, and the caller divides by
+// 100.0. A BCD round trip, not arithmetic -- and the arithmetic reading is
+// wrong in a way that still looks like a version number, which is why it gets
+// its own test rather than a comment.
+static void testVersionDecode() {
+    std::printf("\nbcdDevice -> firmware version\n");
+
+    ok("the two worked examples in the notes", [] {
+        return describeVersion(0x0140) == "1.40"
+            && describeVersion(0x0143) == "1.43";
+    }());
+
+    ok("every version this project has actually seen", [] {
+        // The four updater releases, plus the two firmwares this one mouse has
+        // run (§5: everything before 2026-09-05 07:53 is 1.07, after is 1.10).
+        return describeVersion(0x0104) == "1.04"
+            && describeVersion(0x0106) == "1.06"
+            && describeVersion(0x0107) == "1.07"
+            && describeVersion(0x0110) == "1.10";
+    }());
+
+    ok("the bootloader's own field decodes rather than being special-cased", [] {
+        // kBootloaderRelease is 0x0006. "%x" gives "6", __wtol gives 6, /100 is
+        // 0.06 -- which is what the vendor's updater would print. Odd-looking
+        // and correct; inventing "bootloader" here would be a guess.
+        return describeVersion(0x0006) == "0.06";
+    }());
+
+    ok("the arithmetic reading, which is the trap, is NOT what we produce", [] {
+        // 0x0143 as an integer is 323, and 323/100 is 3.23. A version display
+        // that said 3.23 would be believed.
+        unsigned maj = 0, min = 0;
+        return decodeBcdVersion(0x0143, maj, min) && maj == 1 && min == 43
+            && !(maj == 3 && min == 23);
+    }());
+
+    ok("a nibble above 9 is refused, not rendered as a plausible version", [] {
+        // The vendor's __wtol stops at the first non-digit, so 0x01a0 would
+        // display as 0.01 in its own tool. We refuse instead -- a number that
+        // looks like a version and is not one is worse than no number.
+        unsigned maj = 0, min = 0;
+        return !decodeBcdVersion(0x01A0, maj, min)
+            && !decodeBcdVersion(0xFFFF, maj, min)
+            && !decodeBcdVersion(0x000A, maj, min)
+            && describeVersion(0x01A0).empty();
+    }());
+
+    ok("every valid BCD field decodes to its own digits, all 10000 of them", [] {
+        for (unsigned n = 0; n < 10000; ++n) {
+            const std::uint16_t bcd = static_cast<std::uint16_t>(
+                ((n / 1000) << 12) | ((n / 100 % 10) << 8) |
+                ((n / 10 % 10) << 4) | (n % 10));
+            unsigned maj = 0, min = 0;
+            if (!decodeBcdVersion(bcd, maj, min)) return false;
+            if (maj != n / 100 || min != n % 100) return false;
+        }
+        return true;
+    }());
+
+    ok("the minor part is always two digits", [] {
+        // "1.7" and "1.07" are different versions and this mouse has run one of
+        // them. A %u here instead of %02u would print 1.7 for 0x0107.
+        return describeVersion(0x0107) == "1.07"
+            && describeVersion(0x0100) == "1.00";
+    }());
+
+    ok("exactly the non-BCD fields are refused, over all 65536", [] {
+        unsigned refused = 0;
+        for (unsigned v = 0; v <= 0xFFFF; ++v) {
+            unsigned maj = 0, min = 0;
+            const bool okv = decodeBcdVersion(static_cast<std::uint16_t>(v),
+                                              maj, min);
+            bool allDigits = true;
+            for (int i = 0; i < 4; ++i)
+                if (((v >> (4 * i)) & 0xF) > 9) allDigits = false;
+            if (okv != allDigits) return false;
+            if (!okv) ++refused;
+        }
+        return refused == 65536 - 10000;
+    }());
+}
+
+// ---------------------------------------------------------------------------
+// 12. The decoders behind `egg-config show`.
+// ---------------------------------------------------------------------------
+// The property every one of them is held to, and the reason `show` can be
+// trusted to tell a user what their mouse is set to:
+//
+//   for every value `encode` accepts, `decode` of the stored byte must succeed
+//   and must LEAD with that same value, in the encoder's own units.
+//
+// "Leads with the value" is not a formatting preference, it is what makes the
+// round trip decidable by a script instead of by reading the strings. It is
+// also the contract `show` prints and the GUI parses: the first token of the
+// decoded text is what `set FIELD VALUE` would take to get back here.
+//
+// The second property is the one that catches a decoder that is merely
+// permissive: over every byte the field's mask can hold, decode succeeds on
+// EXACTLY the bytes some legal value encodes to, and refuses the rest. A field
+// whose decoder said "unknown" for a legal byte, or invented a reading for an
+// illegal one, fails here rather than on the mouse.
+static bool leadingNumber(const char* text, long& out) {
+    char* end = nullptr;
+    out = std::strtol(text, &end, 10);
+    return end && end != text;
+}
+
+static void testDecoders() {
+    std::printf("\ndecoders (`show`)\n");
+
+    ok("every settable field has a decoder", [] {
+        for (std::size_t i = 0; i < kSettableCount; ++i)
+            if (!kSettable[i].decode) return false;
+        return kSettableCount > 0;
+    }());
+
+    // The range is deliberately wider than any field accepts, so a decoder is
+    // never asked only about values its own encoder was going to like.
+    ok("decode inverts encode for every legal value of every field", [] {
+        char buf[192];
+        for (std::size_t i = 0; i < kSettableCount; ++i) {
+            const Settable& f = kSettable[i];
+            for (long v = -300; v <= 30000; ++v) {
+                std::uint8_t b = 0;
+                if (!f.encode(v, b)) continue;
+                if ((b & (f.mask >> f.shift)) != b) return false;  // fits its bits
+                if (!f.decode(b, buf, sizeof buf)) return false;
+                long got = 0;
+                if (!leadingNumber(buf, got)) return false;
+                if (got != v) return false;
+            }
+        }
+        return true;
+    }());
+
+    ok("decode refuses exactly the bytes encode cannot produce", [] {
+        char buf[192];
+        for (std::size_t i = 0; i < kSettableCount; ++i) {
+            const Settable& f = kSettable[i];
+            const unsigned top = f.mask >> f.shift;      // widest value the bits hold
+            for (unsigned b = 0; b <= top; ++b) {
+                bool reachable = false;
+                for (long v = -300; v <= 30000 && !reachable; ++v) {
+                    std::uint8_t e = 0;
+                    if (f.encode(v, e) && e == b) reachable = true;
+                }
+                const bool decoded =
+                    f.decode(static_cast<std::uint8_t>(b), buf, sizeof buf);
+                if (decoded != reachable) return false;
+            }
+        }
+        return true;
+    }());
+
+    // Two planted regressions, spelled out rather than left to the sweep, so a
+    // reader can see what the sweep is protecting. Both are real mistakes that
+    // a decoder written by eye would make.
+    ok("polling decodes the divisor, not the byte", [] {
+        char b[64];
+        // Record 0x05 holds 8000/Hz. A decoder that printed the byte would say
+        // "8" here, which is true about the record and wrong about the mouse.
+        return decodePollingSaysHz(0x08, "1000 Hz", b, sizeof b)
+            && decodePollingSaysHz(0x01, "8000 Hz", b, sizeof b)
+            && decodePollingSaysHz(0x40, "125 Hz",  b, sizeof b);
+    }());
+
+    ok("lod names the vendor's own millimetre for every step", [] {
+        // The eleven .rdata strings, 0.7mm..1.7mm (§7.25). An off-by-one here
+        // would put every reading one tenth of a millimetre off the label the
+        // vendor shows, and still look entirely reasonable.
+        static const char* kMm[] = {"0.7mm","0.8mm","0.9mm","1.0mm","1.1mm",
+                                    "1.2mm","1.3mm","1.4mm","1.5mm","1.6mm",
+                                    "1.7mm"};
+        const Settable* f = findSettable("lod");
+        char b[128];
+        for (int v = 0; v <= 10; ++v) {
+            if (!f->decode(static_cast<std::uint8_t>(v), b, sizeof b)) return false;
+            if (!std::strstr(b, kMm[v])) return false;
+        }
+        return true;
+    }());
+
+    ok("sensor-angle reads 0x80 as unencodable rather than as -128", [] {
+        // encodeSensorAngle was narrowed to -127..127 on 2026-09-06. If decode
+        // still spanned the whole signed byte it would print a value `set`
+        // refuses, which is worse than saying it does not recognise it.
+        const Settable* f = findSettable("sensor-angle");
+        char b[64];
+        return !f->decode(0x80, b, sizeof b)
+            && f->decode(0x81, b, sizeof b) && std::string(b) == "-127 degrees";
+    }());
+
+    // The two remapped dropdowns, checked against the vendor's own open lists
+    // rather than against the map they are the inverse of.
+    // windows-run/screenshots/CPI-downshift-tuning.png and smoothing-tuning.png.
+    ok("the factory nibble reads as the item each screenshot highlights", [] {
+        char b[128];
+        return findSettable("cpi-downshift")->decode(0, b, sizeof b)
+            && std::strstr(b, "\"Default\"") && std::strstr(b, "item 4 of 4")
+            && findSettable("smoothing")->decode(0, b, sizeof b)
+            && std::strstr(b, "\"Ripple Control Off\"")
+            && std::strstr(b, "item 2 of 3");
+    }());
+
+    std::printf("\nkey names\n");
+
+    ok("hidKeyName inverts hidKeycode over all 256 usages", [] {
+        for (int c = 0; c < 256; ++c) {
+            const char* n = hidKeyName(static_cast<std::uint8_t>(c));
+            if (!n) continue;
+            std::uint8_t back = 0;
+            if (!hidKeycode(n, back) || back != c) return false;
+        }
+        return true;
+    }());
+
+    ok("every name the GUI is offered has a code, and it comes back", [] {
+        // namedKeyName is what `map --machine` emits and what the app's picker
+        // is built from. A name in that list that hidKeycode rejects would be
+        // an item that cannot be chosen.
+        for (std::size_t i = 0; i < namedKeyCount(); ++i) {
+            std::uint8_t c = 0;
+            if (!hidKeycode(namedKeyName(i), c)) return false;
+            if (!hidKeyName(c)) return false;
+        }
+        return namedKeyCount() > 0;
+    }());
+
+    ok("the generated key families all come back by their own name", [] {
+        // hidKeyName builds a-z, 0-9, f1-f12 and kp0-kp9 arithmetically rather
+        // than from kNamedKeys, so the sweep above -- which only checks the
+        // codes that DO have a name -- says nothing about a family that went
+        // missing. Losing `kp0`, whose 0x62 sits outside the kp1-kp9 run and
+        // is a separate line, would be invisible without this.
+        const char* probes[] = {"a", "z", "1", "9", "0",
+                                "f1", "f12", "kp0", "kp1", "kp9"};
+        for (const char* p : probes) {
+            std::uint8_t c = 0;
+            if (!hidKeycode(p, c)) return false;
+            const char* n = hidKeyName(c);
+            if (!n || std::string(n) != p) return false;
+        }
+        return true;
+    }());
+
+    ok("a usage with no name comes back null, not empty", [] {
+        // 0x00 is "no key" and 0x03 is the HID error roll-over; neither is in
+        // cfg107's translator, and a decoder that returned "" would print a
+        // blank binding instead of saying it does not know the key.
+        return hidKeyName(0x00) == nullptr && hidKeyName(0x03) == nullptr
+            && hidKeyName(0xFF) == nullptr;
+    }());
+
+    ok("modifier names invert hidModifiers for all 16 low nibbles", [] {
+        char b[64];
+        for (unsigned m = 0; m < 16; ++m) {
+            hidModifierNames(static_cast<std::uint8_t>(m), b, sizeof b);
+            std::uint8_t back = 0;
+            if (!hidModifiers(b, back) || back != m) return false;
+        }
+        return true;
+    }());
+
+    ok("a modifier bit outside the low nibble is named, not dropped", [] {
+        char b[64];
+        hidModifierNames(0x91, b, sizeof b);
+        return std::string(b) == "ctrl+unknown-bits-0x90";
+    }());
+
+    std::printf("\nbutton entries\n");
+
+    ok("decodeButtonEntry inverts encodeButtonEntry for all 19 actions", [] {
+        std::uint8_t e[kButtonEntryLen];
+        const char* err = nullptr;
+        for (std::size_t i = 0; i < kButtonActionCount; ++i) {
+            const ButtonAction& a = kButtonActions[i];
+            long x = 0, y = 0;
+            std::uint8_t mods = 0;
+            if (a.payload == ButtonPayload::FixedCpi) { x = 1600; y = 800; }
+            else if (a.payload == ButtonPayload::Key) {
+                std::uint8_t code = 0;
+                if (!hidKeycode("f5", code)) return false;
+                x = code;
+                mods = 0x03;                    // ctrl+shift
+            }
+            if (!encodeButtonEntry(a, x, y, mods, 0x08, e, &err)) return false;
+            const ButtonBinding b = decodeButtonEntry(e);
+            if (b.action != &a) return false;
+            if (a.payload == ButtonPayload::FixedCpi &&
+                (b.cpiX != 1600 || b.cpiY != 800)) return false;
+            if (a.payload == ButtonPayload::Key &&
+                (b.mods != 0x03 || b.keycode != x ||
+                 !b.keyName || std::string(b.keyName) != "f5")) return false;
+            if (e[6] != 0x08) return false;     // +6 preserved, §1.3
+        }
+        return true;
+    }());
+
+    ok("`key` is matched on +0 alone, because +1 carries the modifiers", [] {
+        // The bug this is here to stop: matching on both bytes would decode
+        // every modified key binding as UNKNOWN, because kButtonActions holds
+        // b1 = 0 for `key` and encodeButtonEntry overwrites it with the
+        // modifier bitfield.
+        const std::uint8_t e[kButtonEntryLen] = {0x02, 0x0F, 0x04, 0, 0, 0, 0x08};
+        const ButtonBinding b = decodeButtonEntry(e);
+        return b.action && std::string(b.action->name) == "key"
+            && b.mods == 0x0F && b.keyName && std::string(b.keyName) == "a";
+    }());
+
+    ok("an action pair outside the closed set decodes to nothing", [] {
+        // §7.17's 19 actions are a CLOSED set. A pair outside it means
+        // something other than this tool or the vendor's wrote the entry, and
+        // that has to be visible rather than rounded to the nearest action.
+        const std::uint8_t e[kButtonEntryLen] = {0x00, 0x40, 0, 0, 0, 0, 0x08};
+        const ButtonBinding b = decodeButtonEntry(e);
+        return b.action == nullptr && b.b0 == 0x00 && b.b1 == 0x40;
+    }());
+}
+
 int main() {
     std::printf("EGGConfigCore\n");
     testTable();
@@ -1184,6 +1514,8 @@ int main() {
     testMulticlick();
     testCapabilityGate();
     testFixedCpi();
+    testVersionDecode();
+    testDecoders();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILURES" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

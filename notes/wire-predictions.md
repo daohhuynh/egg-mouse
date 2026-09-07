@@ -1715,7 +1715,7 @@ entries deserves suspicion, not celebration — see the fault mix above.
 **If a different updater version is run, the payload is that binary's own FWFILE/140 — all four share the shape and differ in content.**
 
 - **Expect:** All four: 66,560 bytes, block_count 65, remainder 0, A0 03 [16]=0x41. Updater 1.07 (.exe sha256 d355346d…): payload sha256 3922b14157eff4268ca28c8fe7f284ba1ec0880dae2d9137d01eb1c42e297940, sum32 0x0081D408 so A0 03 [17..20] = 08 D4 81 00, first16 CA 77 4E 19 7B 45 71 09 B2 FC 21 4F D8 3B EA D7. 1.06 (221c1c49…): sha256 9f01d732913fcfc6799d699d19a92878c97a5f4dc76ed18b4a307125b35514dd, sum32 0x0081F40B so 0B F4 81 00, first16 49 31 DA 12 2B EF 4A A4 45 46 78 46 2E D7 92 52. 1.04 (0fd2016f…): sha256 41d5397ec84c4f167e6dce4d05f649f425e5c38ee066b8931721898d5dc013c3, sum32 0x0081F627 so 27 F6 81 00, first16 identical to 1.06's.
-- **Cite:** Independent resource extraction from old-firmware-executables/*.exe with scratchpad/fw.py; .exe SHA-256s re-verified against notes/binaries.md and against disk.
+- **Cite:** `Tools/pe/fwfile.py` over `old-firmware-executables/*.exe` and the 1.10 updater; every value above is re-derived and pinned by `Tests/test_fwfile_set.py::PredictionThirteenAlternateUpdaterPayloads`, which runs in `ctest`. .exe SHA-256s re-verified against notes/binaries.md and against disk. *(Citation corrected 2026-09-06: it previously named `scratchpad/fw.py`, which is not in the repo, so the route could not be reproduced — §1.2. Every number re-derived unchanged with the committed parser.)*
 - **REFUTED IF:** The A0 03 checksum bytes in the capture match none of the four values above, which would mean the running .exe is not one of the four we have analysed and our ingest gate must refuse it.
 - **Matters:** Every other prediction here is keyed to which .exe was run. The A0 03 checksum alone identifies it from the capture, with no filesystem access needed.
 
@@ -1724,7 +1724,7 @@ entries deserves suspicion, not celebration — see the fault mix above.
 **The Configuration Tool cannot flash. If the config tool is captured instead of the updater, no firmware payload appears at all.**
 
 - **Expect:** Config tools 1.00, 1.01, 1.04 and 1.07 each expose 74 resource leaves and ZERO of type FWFILE; no leaf of any type is 66,560 bytes; the UTF-16 string L"FWFILE" occurs 0 times in any of the four files. Their traffic is 64-byte A1 and 1041-byte A0 feature reports only, with no A0 03, A0 06, A0 07, A1 08, A1 09 or A1 3A.
-- **Cite:** Resource directories of all four config .exe files walked with the independent parser (scratchpad/fw.py); whole-file UTF-16 string scan. Independently reproduces notes/updater-protocol.md §6.2.1.
+- **Cite:** Resource directories of all four config .exe files walked with `Tools/pe/fwfile.py`; whole-file UTF-16 string scan. Pinned by `Tests/test_fwfile_set.py::PredictionFourteenConfigToolsCannotFlash` (74 leaves each, zero FWFILE, no 66,560-byte leaf, zero UTF-16 `FWFILE`), with the same check run against two updaters to show it can fail. Independently reproduces notes/updater-protocol.md §6.2.1. *(Citation corrected 2026-09-06 for the same reason as #13; all four counts re-derived unchanged.)*
 - **REFUTED IF:** Any config-tool capture contains an A0 06 frame or any run of 1024 high-entropy payload bytes.
 - **Matters:** CLAUDE.md §3's two-executable split assumes the config tool has no flash path. If it did, the contradictory-quit-semantics argument would need revisiting.
 

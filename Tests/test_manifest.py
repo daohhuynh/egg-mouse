@@ -29,6 +29,7 @@ import hashlib
 import importlib.util
 import os
 import re
+import subprocess
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -222,6 +223,96 @@ class EveryRowMatchesItsExecutable(unittest.TestCase):
             self.assertNotIn(r["img_sha"], others,
                              "%s: the flashed image is byte-identical to another "
                              "resource" % r["label"])
+
+
+class RefusingAnExeNamesWhatItActuallyIs(unittest.TestCase):
+    """`egg-flash` selects the row from --version, then requires the .exe to
+    hash to it. When it does not, and the file IS another release this build
+    knows, the refusal must say which one.
+
+    WHY IT IS TESTED HERE. This is the only place the .exe path map lives, and
+    the behaviour is exactly "the manifest's own hash lookup, used". Until
+    2026-09-06 `releaseForUpdaterSha` had no caller anywhere in Sources/ while
+    `egg-flash help` claimed the .exe was "identified BY ITS OWN SHA-256", so
+    naming a 1.06 updater without `--version 1.06` produced a hash mismatch and
+    no hint that this binary held the answer.
+
+    IT SELECTS NOTHING, and that is asserted below: the refusal is still a
+    refusal, the exit status is still non-zero, and the user still has to type
+    --version. CLAUDE.md §1.4 is untouched.
+    """
+
+    def setUp(self):
+        self.bin = os.path.join(ROOT, "build", "egg-flash")
+        if not os.path.exists(self.bin):
+            self.skipTest("build/egg-flash not present")
+        self.rows = rows()
+        self.primary = self.rows[0]["label"]
+
+    def _run(self, path, *extra):
+        return subprocess.run([self.bin, "image", path] + list(extra),
+                              capture_output=True, text=True, cwd=ROOT)
+
+    def test_a_known_release_named_without_version_is_identified(self):
+        n = 0
+        for r in self.rows:
+            if r["label"] == self.primary:
+                continue          # the default row: it would simply be accepted
+            p = os.path.join(ROOT, EXE[r["label"]])
+            if not os.path.exists(p):
+                continue
+            out = self._run(p)
+            self.assertIn("REFUSED", out.stdout,
+                          "%s: naming a non-default release without --version "
+                          "must still be refused" % r["label"])
+            self.assertIn("That file IS a release this build knows: %s"
+                          % r["label"], out.stdout,
+                          "%s: the refusal did not say what the file actually "
+                          "is:\n%s" % (r["label"], out.stdout))
+            self.assertIn("--version %s" % r["label"], out.stdout)
+            n += 1
+        self.assertGreater(
+            n, 0,
+            "no non-default updater .exe present, so this test checked nothing")
+
+    def test_an_unknown_file_gets_no_suggestion(self):
+        """The hint must not fire on a file that is not a release at all.
+
+        A suggestion naming some release for an arbitrary .exe would be worse
+        than no suggestion: it is precisely the "guessing a resource id" shape
+        CLAUDE.md §2 says nothing downstream of us would catch.
+        """
+        candidates = [os.path.join(ROOT, "XM1r_Flash_Upgrade_1.9.46.exe")]
+        candidates += [os.path.join(ROOT, EXE[r["label"]]) for r in self.rows]
+        alien = None
+        for c in candidates[:1]:
+            if os.path.exists(c):
+                alien = c
+        if alien is None:
+            # Fall back to any file that is certainly not an updater.
+            alien = os.path.join(ROOT, "README.md")
+        out = self._run(alien)
+        self.assertIn("REFUSED", out.stdout)
+        self.assertNotIn("That file IS a release this build knows", out.stdout,
+                         "the hint fired for a file that is not a release:\n"
+                         + out.stdout)
+
+    def test_the_right_version_is_accepted(self):
+        """The falsification for the two above: if every .exe were refused
+        whatever was typed, the assertions on REFUSED would pass for the wrong
+        reason."""
+        n = 0
+        for r in self.rows:
+            p = os.path.join(ROOT, EXE[r["label"]])
+            if not os.path.exists(p):
+                continue
+            out = self._run(p, "--version", r["label"])
+            self.assertNotIn("REFUSED", out.stdout,
+                             "%s refused its own .exe:\n%s"
+                             % (r["label"], out.stdout))
+            self.assertIn(r["img_sha"], out.stdout)
+            n += 1
+        self.assertGreater(n, 0, "no updater .exe present to check against")
 
 
 if __name__ == "__main__":

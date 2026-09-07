@@ -39,7 +39,7 @@ struct EGGApp: App {
 }
 
 enum Screen: Hashable {
-    case home, config, firmware, updates
+    case home, config, firmware, updates, advanced
 }
 
 struct RootView: View {
@@ -56,6 +56,7 @@ struct RootView: View {
             case .config:   ConfigView(screen: $screen)
             case .firmware: FirmwareView(screen: $screen)
             case .updates:  UpdatesView(screen: $screen)
+            case .advanced: AdvancedView(screen: $screen)
             }
         }
     }

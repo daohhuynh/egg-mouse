@@ -94,7 +94,11 @@ void usage() {
       "egg-config -- Endgame Gear OP1 8k v2, macOS\n"
       "\n"
       "  egg-config devices            list every VID 0x3367 interface\n"
+      "  egg-config show [--from F]    every setting, decoded into words.\n"
+      "                                --from reads a saved record and\n"
+      "                                sends nothing. --machine gives TSV.\n"
       "  egg-config read [--save F]    read the settings record and dump it\n"
+      "                                as hex, and save it if asked\n"
       "  egg-config info               small query (A1 02)\n"
       "  egg-config diff A B           compare two saved records, offline\n"
       "  egg-config frames             offline: the exact bytes of every fixed\n"
@@ -159,14 +163,21 @@ void usage() {
 int cmdDevices() {
     std::vector<Match> all = enumerateAll();
     if (all.empty()) { std::puts("no VID 0x3367 device attached."); return 1; }
-    std::printf("%-8s %-10s %-7s %-9s %-14s %s\n",
-                "PID", "usagepage", "usage", "version", "manufacturer", "product");
+    std::printf("%-8s %-10s %-7s %-9s %-9s %-14s %s\n",
+                "PID", "usagepage", "usage", "version", "firmware",
+                "manufacturer", "product");
     for (const Match& m : all) {
         const char* mode = m.productId == kProductIdApplication ? " (application)"
                          : m.productId == kProductIdBootloader  ? " (BOOTLOADER)"
                          : "";
-        std::printf("0x%04x   0x%04x     0x%02x    0x%04x    %-14s %s%s\n",
+        // The version column is the raw bcdDevice and the `firmware` column is
+        // what Endgame's own updater would print for it (Device.h). Both, not
+        // one: the raw field is what every note and capture cites, and the
+        // decoded one is the only form a person recognises.
+        const std::string v = describeVersion(m.releaseNumber);
+        std::printf("0x%04x   0x%04x     0x%02x    0x%04x    %-9s %-14s %s%s\n",
                     m.productId, m.usagePage, m.usage, m.releaseNumber,
+                    v.empty() ? "not BCD" : v.c_str(),
                     m.manufacturer.c_str(), m.product.c_str(), mode);
     }
     return 0;
@@ -526,6 +537,240 @@ int cmdRead(bool verbose, const std::string& savePath, UnknownBytes policy,
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// `show` -- the record, in words
+// ---------------------------------------------------------------------------
+// Until now the only way to ask this mouse what it is set to was `read`, which
+// prints 1024 bytes of hex and leaves the user to look offsets up by hand. Every
+// decoder needed to answer the question already existed -- read-modify-write
+// means each write path decodes before it writes -- and nothing assembled them.
+//
+// IT SENDS NOTHING `read` DOES NOT. The same single A1 12 exchange, and with
+// `--from FILE` no device is opened at all (§4.2a gate 2: a question that can be
+// answered off the device is answered off the device).
+//
+// Two output shapes on purpose. The human one is for a person; `--machine` is
+// TSV and is the GUI's contract, so EGGApp never has to know a record offset --
+// the same reasoning as reportGates and `map --machine`. A GUI that parsed the
+// human layout would be a second copy of the field table.
+
+// "0x05 = 08" for a whole byte, "0x0b[3:2] = 3" for a sub-byte field, so the
+// provenance of every printed value is on the same line as the value.
+std::string whereFrom(const Settable& f, std::uint8_t rawByte, std::uint8_t val) {
+    char b[48];
+    if (f.mask == 0xFF && f.shift == 0) {
+        std::snprintf(b, sizeof b, "0x%02zx = %02x", f.recordOffset, rawByte);
+        return b;
+    }
+    int hi = f.shift;
+    for (int i = 7; i >= 0; --i) if (f.mask & (1u << i)) { hi = i; break; }
+    if (hi == f.shift)
+        std::snprintf(b, sizeof b, "0x%02zx[%d] = %u", f.recordOffset, hi, val);
+    else
+        std::snprintf(b, sizeof b, "0x%02zx[%d:%u] = %u",
+                      f.recordOffset, hi, f.shift, val);
+    return b;
+}
+
+std::uint8_t fieldValue(const Settable& f, const std::uint8_t* payload) {
+    return static_cast<std::uint8_t>((payload[f.recordOffset] & f.mask) >> f.shift);
+}
+
+// A settings record is not a thing this tool may invent (§4.1), and it is not a
+// thing this function may misreport either. Anything it cannot decode is
+// printed as the raw byte with a reason -- never omitted, never guessed.
+void printDecoded(const std::uint8_t* frame, bool machine) {
+    const std::uint8_t* p = frame + kPayloadOffset;
+    char buf[192];
+
+    if (!machine) std::puts("\nsettings\n");
+    for (std::size_t i = 0; i < kSettableCount; ++i) {
+        const Settable& f = kSettable[i];
+        const std::uint8_t v = fieldValue(f, p);
+        const bool got = f.decode && f.decode(v, buf, sizeof buf);
+        if (!got)
+            std::snprintf(buf, sizeof buf,
+                          "raw 0x%02x -- NOT a value `set %s` can produce, so "
+                          "something other than this tool or the vendor's wrote it",
+                          v, f.name);
+        // The gate is about what may be WRITTEN, and it is reported here
+        // because it also changes what the number MEANS: `lod` under glass
+        // mode is a different scale (§7.25). Showing "3 (1.0mm)" while the
+        // governing byte says otherwise would be the exact wrong-but-plausible
+        // reading §2 says nothing downstream of us catches.
+        const char* gate = capabilityRefusal(f, frame);
+        if (machine) {
+            std::printf("FIELD\t%s\t%s\t%s\t%s\t%s\n", f.name,
+                        whereFrom(f, p[f.recordOffset], v).c_str(), buf,
+                        !got ? "undecodable" : gate ? "gated" : "ok",
+                        gate ? gate : "");
+        } else {
+            std::printf("  %-22s %-14s  %s\n", f.name,
+                        whereFrom(f, p[f.recordOffset], v).c_str(), buf);
+            if (gate)
+                std::printf("  %-22s %-14s  ^ CAUTION: %s\n", "", "", gate);
+        }
+    }
+
+    // CPI stages. `cpi-levels` says how many of the four are in use and
+    // `cpi-stage` which one is live; both are decoded above, and repeating the
+    // judgement here rather than the bytes keeps one reading of each.
+    const std::uint8_t levels = p[0x0e], active = p[0x0d];
+    if (!machine) std::puts("\nCPI stages  (record 0x23, four 5-byte entries)\n");
+    for (std::size_t k = 0; k < kCpiStageCount; ++k) {
+        const CpiStage st =
+            decodeCpiStageEntry(p + kCpiBlockFirst + k * kCpiEntryLen);
+        const bool inUse  = levels >= 1 && levels <= 4 && k < levels;
+        const bool isLive = active <= 3 && k == active;
+        if (machine) {
+            std::printf("CPI\t%zu\t%ld\t%ld\t%d\t%d\n", k + 1, st.x, st.y,
+                        isLive ? 1 : 0, inUse ? 1 : 0);
+        } else if (st.x == st.y) {
+            std::printf("  stage %zu %-14s %ld CPI%s%s\n", k + 1,
+                        isLive ? "<- active" : "", st.x,
+                        inUse ? "" : "   (beyond cpi-levels; not selectable)",
+                        st.flag ? "   [flag says X!=Y but they are equal]" : "");
+        } else {
+            std::printf("  stage %zu %-14s %ld x %ld CPI%s\n", k + 1,
+                        isLive ? "<- active" : "", st.x, st.y,
+                        inUse ? "" : "   (beyond cpi-levels; not selectable)");
+        }
+    }
+
+    // Handedness first, because it decides which of entries 0 and 1 holds the
+    // user's mapping and therefore how the button list below reads (§7.20).
+    const Handedness h = readHandedness(p);
+    const char* hName = h == Handedness::Right ? "right"
+                      : h == Handedness::Left  ? "left" : "unknown";
+    if (machine) std::printf("HANDED\t%s\n", hName);
+    else if (h == Handedness::Unknown)
+        std::puts("\nhandedness: UNKNOWN -- neither entry 0 nor entry 1 holds the "
+                  "vendor's\n            primary-click value, a state its own UI "
+                  "cannot produce.");
+    else std::printf("\nhandedness: %s-handed\n", hName);
+
+    if (!machine) std::puts("\nbuttons  (record 0x37, eight 7-byte entries)\n");
+    for (std::size_t i = 0; i < kButtonSlotCount; ++i) {
+        const ButtonSlot& sl = kButtonSlots[i];
+        const std::uint8_t* e = p + kButtonBlockFirst + sl.index * kButtonEntryLen;
+        const ButtonBinding b = decodeButtonEntry(e);
+        char detail[128] = "";
+        const char* name = b.action ? b.action->name : "";
+        if (!b.action) {
+            std::snprintf(detail, sizeof detail,
+                          "+0/+1 = %02x %02x match none of the %zu derived "
+                          "actions", b.b0, b.b1, kButtonActionCount);
+        } else if (b.action->payload == ButtonPayload::FixedCpi) {
+            if (b.cpiX == b.cpiY) std::snprintf(detail, sizeof detail, "%ld", b.cpiX);
+            else std::snprintf(detail, sizeof detail, "%ldx%ld", b.cpiX, b.cpiY);
+        } else if (b.action->payload == ButtonPayload::Key) {
+            char mods[64];
+            hidModifierNames(b.mods, mods, sizeof mods);
+            if (b.keyName)
+                std::snprintf(detail, sizeof detail, "%s%s%s",
+                              mods, *mods ? "+" : "", b.keyName);
+            else
+                std::snprintf(detail, sizeof detail,
+                              "%s%sHID usage 0x%02x, which has no name in "
+                              "cfg107's translator", mods, *mods ? "+" : "",
+                              b.keycode);
+        }
+        if (machine) {
+            std::printf("BUTTON\t%s\t%s\t%s\t%02x %02x %02x %02x %02x %02x %02x\t%d\n",
+                        sl.name, name, detail,
+                        e[0], e[1], e[2], e[3], e[4], e[5], e[6],
+                        sl.vendorExposes ? 1 : 0);
+        } else {
+            std::printf("  %-11s %-13s %s%s\n", sl.name,
+                        b.action ? name : "UNKNOWN", detail,
+                        sl.vendorExposes ? "" : "   (not offered by `map`)");
+        }
+    }
+
+    if (!machine)
+        std::puts("\nmulticlick filter / SPDT  (record 0x3d + 7n)\n");
+    for (std::size_t k = 0; k < kMulticlickCount; ++k) {
+        const std::uint8_t byte = p[kMulticlickFirst + k * kMulticlickStride];
+        long value = 0;
+        const char* mode = describeMulticlick(byte, value);
+        const char* who = kButtonSlots[k].name;
+        if (machine) {
+            std::printf("MULTICLICK\t%s\t%s\t%ld\t%02x\n", who,
+                        mode ? mode : "unknown", value, byte);
+        } else if (!mode) {
+            std::printf("  %-11s raw 0x%02x -- neither 0..%ld nor a GX mode\n",
+                        who, byte, kMulticlickMax);
+        } else if (std::strcmp(mode, "off") == 0) {
+            std::printf("  %-11s filter %ld\n", who, value);
+        } else {
+            std::printf("  %-11s %s\n", who, mode);
+        }
+    }
+
+    // Two bytes that are derived but deliberately NOT settable (kWithheld).
+    // Shown anyway, because withholding a WRITE is not a reason to withhold a
+    // READ, and because record 0x6f is what the `lod` caution above turns on.
+    if (machine) {
+        std::printf("RAW\tglass-mode\t6f\t%02x\n", p[0x6f]);
+        std::printf("RAW\tmulticlick-ack\t72\t%02x\n", p[0x72]);
+    } else {
+        std::puts("\nderived, read-only here (see `set` for why each is withheld)\n");
+        std::printf("  %-22s 0x6f = %02x       %s\n", "glass-mode", p[0x6f],
+                    p[0x6f] == 0 ? "off -- `lod` means the eleven-step 0.7-1.7mm scale"
+                                 : "ON -- `lod` means something else (§7.25)");
+        std::printf("  %-22s 0x72 = %02x       %s\n", "multiclick-ack", p[0x72],
+                    p[0x72] ? "ticked -- a warning checkbox in Endgame's Windows "
+                              "app. Configures no mouse behaviour."
+                            : "unticked -- a warning checkbox in Endgame's Windows "
+                              "app. Configures no mouse behaviour.");
+    }
+}
+
+int cmdShow(bool verbose, const std::string& fromFile, bool machine,
+            UnknownBytes policy, const std::string& vaultPath) {
+    std::vector<std::uint8_t> rec;
+    if (!fromFile.empty()) {
+        if (!loadRecord(fromFile, rec)) return 2;
+        if (!machine)
+            std::printf("\nfrom %s -- nothing was sent to any device.\n",
+                        fromFile.c_str());
+        printDecoded(rec.data(), machine);
+        return 0;
+    }
+
+    Log log(verbose);
+    auto dev = Device::open(kProductIdApplication, log);
+    if (!dev) return 1;
+    Transport t(*dev, kConfigBusy, log);
+    DeviceConfigLink link(t, log);
+    ConfigSession s(link, policy, &log);
+    FileRecordVault vault(vaultPath);
+    s.setVault(&vault);
+
+    Result r = Result::Ok;
+    if (!s.read(rec, r)) {
+        std::printf("\n");
+        explain(r);
+        return rcFor(r);
+    }
+    // WHICH FIRMWARE THIS READING CAME OFF. CLAUDE.md §5: the record LAYOUT is
+    // stable across 1.07 -> 1.10 by measurement, and the DEFAULTS are not, so a
+    // decoded table without a version beside it is a table whose provenance is
+    // missing. A third version is a different device until shown otherwise.
+    const std::uint16_t bcd = dev->match().releaseNumber;
+    const std::string ver = describeVersion(bcd);
+    if (machine) {
+        std::printf("FIRMWARE\t%04x\t%s\n", bcd, ver.c_str());
+    } else {
+        std::printf("\nfirmware %s  (bcdDevice 0x%04x)\n",
+                    ver.empty() ? "UNKNOWN -- bcdDevice is not valid BCD"
+                                : ver.c_str(), bcd);
+    }
+    printDecoded(rec.data(), machine);
+    if (!machine) reportVault(s, vault);
+    return 0;
+}
+
 int cmdInfo(bool verbose) {
     Log log(verbose);
     auto dev = Device::open(kProductIdApplication, log);
@@ -868,6 +1113,40 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
     }
     std::puts("\nNothing was sent. No device was opened.");
     return 0;
+}
+
+// A MACHINE-READABLE FORM OF THE SAME TABLES, for the GUI.
+//
+// ADDED 2026-09-06 after an audit found the app's button-mapping picker was
+// scraping listButtons()' prose and getting it wrong. It offered `e.g.`, `for`,
+// `minus`, `grave` and `pagedown` -- continuation lines of two descriptions,
+// picked up as if they were actions -- so five of the twenty-four choices in
+// the menu were guaranteed refusals. Worse, `fixed-cpi` and `key` appeared bare
+// with nowhere to type their argument, so the two most useful bindings in the
+// whole tool were unreachable from the app.
+//
+// The fix is not a cleverer parser. Prose is for people and will keep changing
+// shape; a screen-scraper of it is a defect waiting to recur on the next
+// wording edit. This emits the TABLES, one record per line, with a leading
+// keyword so a reader can ignore anything it does not recognise -- and it says
+// which actions need an argument, which prose never did.
+//
+// Not in the help text: it is an interface between our own two programs, and
+// advertising it to people would invite them to parse it too.
+void listButtonsMachine() {
+    for (std::size_t i = 0; i < kButtonSlotCount; ++i) {
+        const ButtonSlot& b = kButtonSlots[i];
+        std::printf("BUTTON\t%s\t%d\n", b.name, b.vendorExposes ? 1 : 0);
+    }
+    for (std::size_t i = 0; i < kButtonActionCount; ++i) {
+        const ButtonAction& a = kButtonActions[i];
+        const char* arg = a.payload == ButtonPayload::FixedCpi ? "cpi"
+                        : a.payload == ButtonPayload::Key      ? "key"
+                                                               : "none";
+        std::printf("ACTION\t%s\t%s\t%s\n", a.name, a.group, arg);
+    }
+    for (std::size_t i = 0; i < namedKeyCount(); ++i)
+        std::printf("KEY\t%s\n", namedKeyName(i));
 }
 
 void listButtons() {
@@ -1571,8 +1850,9 @@ int main(int argc, char** argv) {
         else if (a == "--yes") yes = true;
         else if (a == "--save" && i + 1 < argc) save = argv[++i];
         else if (a == "--vault" && i + 1 < argc) vaultPath = argv[++i];
-        // `handedness` only. It decides from a SAVED record instead of the
-        // device, so the plan can be inspected with nothing on the wire.
+        // `handedness` and `show`. Both work from a SAVED record instead of
+        // the device, so the plan (or the settings) can be inspected with
+        // nothing on the wire.
         else if (a == "--from" && i + 1 < argc) fromFile = argv[++i];
         else if (a.rfind("--unknown-bytes=", 0) == 0) {
             // No silent fallback. A mistyped policy would otherwise choose one
@@ -1589,6 +1869,10 @@ int main(int argc, char** argv) {
     const std::string& cmd = args[0];
     if (cmd == "devices") return cmdDevices();
     if (cmd == "read")    return cmdRead(verbose, save, policy, vaultPath);
+    if (cmd == "show")
+        return cmdShow(verbose, fromFile,
+                       args.size() > 1 && args[1] == "--machine",
+                       policy, vaultPath);
     if (cmd == "info")    return cmdInfo(verbose);
     if (cmd == "factory-reset") return cmdFactoryReset(verbose, yes, policy, vaultPath);
     if (cmd == "restore" && args.size() > 1)
@@ -1605,7 +1889,11 @@ int main(int argc, char** argv) {
         return cmdEncode(args[1], args[2], args[3], args[4], policy);
     if (cmd == "map" && args.size() > 2)
         return cmdMap(args[1], args[2], verbose, yes, policy, vaultPath);
-    if (cmd == "map") { listButtons(); return 2; }
+    if (cmd == "map") {
+        if (args.size() >= 2 && args[1] == "--machine") { listButtonsMachine(); return 0; }
+        listButtons();
+        return 2;
+    }
     if (cmd == "cpi" && args.size() > 2)
         return cmdCpi(args[1], args[2], args.size() > 3 ? args[3] : std::string(),
                       verbose, yes, policy, vaultPath);

@@ -16,7 +16,11 @@
 #include "egg/HidBootloaderLink.h"
 #include "egg/MockBootloader.h"
 #include "egg/Protocol.h"
+#include "egg/Provenance.h"
+#include "egg/NoQuitDuringWrite.h"
 #include "egg/WritePhase.h"
+
+#include <unistd.h>
 
 #include <cstdio>
 #include <cstring>
@@ -1033,6 +1037,394 @@ static void testBackupGate() {
 // not by position: A1 3A goes to the APPLICATION device before the bootloader
 // exists, and A1 13 goes to it again after it comes back (§5.4 steps 1 and 7).
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 10a. The provenance gate on restore-firmware, and the bootloader entry
+// receipt. Both are the owner's calls of 2026-09-06 and both are OFF-WIRE guards --
+// §4.2b: "refusing, checking a file, pinning a hash, requiring a token -- cost
+// nothing and are always allowed."
+//
+// §6.2 applies here as much as anywhere: a gate that refuses everything is not
+// a gate, it is a broken loader. So the positive case is asserted first and the
+// negatives are all ONE MUTATION away from it -- same file, same sidecar, one
+// thing changed -- rather than being separately constructed rubbish that would
+// fail for reasons unrelated to the property under test.
+// ---------------------------------------------------------------------------
+static std::vector<std::uint8_t> variedImage(std::uint8_t seed) {
+    std::vector<std::uint8_t> b(kBlockCount * kBlockSize);
+    for (std::size_t i = 0; i < b.size(); ++i)
+        b[i] = static_cast<std::uint8_t>(i * 31u + seed);
+    return b;
+}
+
+static void testProvenanceGate() {
+    std::printf("\n10a. restore provenance and the entry receipt\n");
+
+    const std::string img = tmpPath("prov-image");
+    const std::string side = provenancePathFor(img);
+    const std::vector<std::uint8_t> bytes = variedImage(0x11);
+    writeFile(img, bytes);
+    const std::string realSha = sha256Hex(bytes.data(), bytes.size());
+
+    // --- refuse with no sidecar at all --------------------------------------
+    std::remove(side.c_str());
+    {
+        Image im; std::string err;
+        const bool loaded = im.loadFromBackup(img, err);
+        ok("a 66560-byte image with NO sidecar is refused", !loaded);
+        ok("...and the refusal names the .origin file it wanted",
+           err.find(".origin") != std::string::npos, err.substr(0, 60));
+    }
+
+    // --- the positive case, and it must actually pass ------------------------
+    {
+        std::string werr;
+        const bool wrote = writeProvenance(img, realSha, bytes.size(),
+                                           kProductIdBootloader,
+                                           kBootloaderRelease,
+                                           kBootloaderProduct, "a1-3a", werr);
+        ok("writeProvenance writes the sidecar", wrote, werr);
+        Image im; std::string err;
+        const bool loaded = im.loadFromBackup(img, err);
+        // THE PLANTED POSITIVE. If this ever fails, every refusal below is
+        // meaningless -- they would all be passing because nothing loads.
+        ok("a backup WITH a matching sidecar loads", loaded, err);
+        ok("...and its sha256 is the file's own", loaded && im.sha256() == realSha);
+        ok("...and it is 65 blocks", loaded && im.blockCount() == kBlockCount);
+        ok("...and its checksum is the 32-bit byte sum",
+           loaded && im.checksum() == wholeImageChecksum(bytes));
+        // And what writeProvenance wrote, readProvenance reads back. The two
+        // ends are separate functions and a format drift between them would
+        // show up only as an unexplained refusal months later.
+        const Provenance p = readProvenance(img);
+        ok("the sidecar round-trips: sha256", p.ok && p.sha256 == realSha);
+        ok("the sidecar round-trips: size", p.ok && p.size == bytes.size());
+        ok("the sidecar round-trips: bcdDevice",
+           p.ok && p.bcdDevice == kBootloaderRelease);
+        ok("the sidecar round-trips: product",
+           p.ok && p.product == std::string(kBootloaderProduct));
+        ok("the sidecar round-trips: entry", p.ok && p.entry == "a1-3a");
+        ok("the sidecar records a timestamp", p.ok && p.taken.size() >= 20, p.taken);
+    }
+
+    // --- ONE BYTE of the image changed, sidecar untouched --------------------
+    // The failure this exists for: a backup edited, truncated-and-repadded, or
+    // swapped for a different file that happens to sit at the same path.
+    {
+        std::vector<std::uint8_t> tampered = bytes;
+        tampered[40000] ^= 0x01;
+        writeFile(img, tampered);
+        Image im; std::string err;
+        const bool loaded = im.loadFromBackup(img, err);
+        ok("ONE flipped bit in the image is refused", !loaded);
+        ok("...and the refusal prints both hashes",
+           err.find(realSha) != std::string::npos &&
+           err.find(sha256Hex(tampered.data(), tampered.size())) != std::string::npos);
+        writeFile(img, bytes);   // put it back for the cases below
+    }
+
+    // --- a sidecar that is not ours -----------------------------------------
+    {
+        std::FILE* f = std::fopen(side.c_str(), "wb");
+        std::fprintf(f, "some other tool v3\nsha256 %s\nsize %zu\n",
+                     realSha.c_str(), bytes.size());
+        std::fclose(f);
+        Image im; std::string err;
+        ok("a sidecar with the wrong magic line is refused",
+           !im.loadFromBackup(img, err));
+        ok("...and says it is not an egg-flash provenance file",
+           err.find("not an egg-flash") != std::string::npos, err.substr(0, 60));
+    }
+
+    // --- a sidecar with our magic but no hash in it --------------------------
+    // Fails closed either way -- an empty recorded hash never equals a real
+    // one -- so this is asserted on the REASON, not just the refusal. A gate
+    // that refuses for the wrong reason sends the user looking for an override
+    // instead of for the missing line.
+    {
+        std::FILE* f = std::fopen(side.c_str(), "wb");
+        std::fprintf(f, "egg-flash backup provenance v1\nsize %zu\n", bytes.size());
+        std::fclose(f);
+        Image im; std::string err;
+        ok("a sidecar with no sha256 line is refused", !im.loadFromBackup(img, err));
+        ok("...and says the sidecar records no hash, not that the image changed",
+           err.find("records no sha256") != std::string::npos, err.substr(0, 70));
+    }
+
+    // --- a sidecar that disagrees with ITSELF --------------------------------
+    // sha256 right, size wrong. Redundant with the hash and checked anyway: a
+    // sidecar contradicting itself is corrupt, and noticing costs nothing.
+    {
+        std::string werr;
+        writeProvenance(img, realSha, bytes.size() + 1, kProductIdBootloader,
+                        kBootloaderRelease, kBootloaderProduct, "a1-3a", werr);
+        Image im; std::string err;
+        ok("a sidecar whose size disagrees with the image is refused",
+           !im.loadFromBackup(img, err), err.substr(0, 60));
+    }
+
+    // --- the structural checks still run, sidecar or no sidecar -------------
+    // A VALID sidecar over a file that is not a plausible image. This is the
+    // one that matters most: the provenance gate must be an ADDITION to the
+    // shape checks, never a way round them. A failed A0 07 loop that got saved
+    // and then had a sidecar written for it is exactly this shape.
+    {
+        const std::string flat = tmpPath("prov-flat");
+        std::vector<std::uint8_t> uniform(kBlockCount * kBlockSize, 0xff);
+        writeFile(flat, uniform);
+        std::string werr;
+        writeProvenance(flat, sha256Hex(uniform.data(), uniform.size()),
+                        uniform.size(), kProductIdBootloader,
+                        kBootloaderRelease, kBootloaderProduct, "a1-3a", werr);
+        Image im; std::string err;
+        ok("66560 IDENTICAL bytes are refused even with a valid sidecar",
+           !im.loadFromBackup(flat, err));
+        ok("...and it is named as a failed read, not a hash problem",
+           err.find("failed read") != std::string::npos, err.substr(0, 70));
+
+        const std::string shortp = tmpPath("prov-short");
+        std::vector<std::uint8_t> shortb(bytes.begin(), bytes.begin() + 1024);
+        writeFile(shortp, shortb);
+        writeProvenance(shortp, sha256Hex(shortb.data(), shortb.size()),
+                        shortb.size(), kProductIdBootloader, kBootloaderRelease,
+                        kBootloaderProduct, "a1-3a", werr);
+        Image im2; std::string err2;
+        ok("a SHORT file is refused even with a valid sidecar",
+           !im2.loadFromBackup(shortp, err2));
+        ok("...and the size is named", err2.find("1024") != std::string::npos,
+           err2.substr(0, 70));
+
+        // AND A TOO-LONG ONE. Short and long are not the same test: a loader
+        // that asks "is this at least an image?" refuses the short file and
+        // accepts the long one by silently taking its first 66560 bytes. That
+        // is how a concatenation, or a firmware image for another product with
+        // something appended, becomes a restore. checkBackupFile has the same
+        // case for the same reason.
+        const std::string longp = tmpPath("prov-long");
+        std::vector<std::uint8_t> longb = bytes;
+        longb.push_back(0x5a);
+        writeFile(longp, longb);
+        writeProvenance(longp, sha256Hex(longb.data(), longb.size()),
+                        longb.size(), kProductIdBootloader, kBootloaderRelease,
+                        kBootloaderProduct, "a1-3a", werr);
+        Image im3; std::string err3;
+        ok("a file ONE BYTE too long is refused, not truncated",
+           !im3.loadFromBackup(longp, err3));
+        ok("...and the real size is named",
+           err3.find(std::to_string(longb.size())) != std::string::npos,
+           err3.substr(0, 70));
+        std::remove(provenancePathFor(longp).c_str()); std::remove(longp.c_str());
+        std::remove(provenancePathFor(flat).c_str());   std::remove(flat.c_str());
+        std::remove(provenancePathFor(shortp).c_str()); std::remove(shortp.c_str());
+    }
+
+    std::remove(side.c_str());
+    std::remove(img.c_str());
+
+    // --- sameFile: the guard that keeps a restore's two roles distinct -------
+    {
+        const std::string a = tmpPath("samefile-a");
+        std::vector<std::uint8_t> b(16, 0x5a); b[3] = 1;
+        writeFile(a, b);
+        ok("sameFile: a path equals itself", sameFile(a, a));
+        // THE CASE THE LEXICAL COMPARE MISSED. Same file, two spellings.
+        const std::string dotted = "/tmp/./" + a.substr(a.rfind('/') + 1);
+        ok("sameFile: /tmp/x and /tmp/./x are the same file",
+           sameFile(a, dotted), a + "  vs  " + dotted);
+        const std::string other = tmpPath("samefile-b");
+        writeFile(other, b);
+        ok("sameFile: two distinct files with IDENTICAL contents are not the\n"
+           "        same file -- this guard is about identity, not bytes",
+           !sameFile(a, other));
+        ok("sameFile: an empty path is never the same as anything",
+           !sameFile("", a) && !sameFile(a, "") && !sameFile("", ""));
+        // Neither resolves. They must not be called the same file just because
+        // realpath failed on both.
+        ok("sameFile: two different unresolvable paths are not the same",
+           !sameFile("/no/such/aaa", "/no/such/bbb"));
+        std::remove(a.c_str()); std::remove(other.c_str());
+    }
+
+    // --- the recovery text must not send someone into the gate ---------------
+    // FOUND BY WRITING THE GATE, NOT BY A TEST FAILING. kRecoveryProcedure
+    // tells the reader to hold LEFT+RIGHT and "run this command again" -- and
+    // the receipt gate refuses exactly that. A guard added anywhere has to be
+    // checked against every text that tells someone what to do next, and this
+    // is the second time that has bitten in this file's history (the first is
+    // recorded at cmdLeaveBootloader's failure path).
+    //
+    // Pinned as a test because the coupling is invisible: the text lives in
+    // WritePhase.cpp, the gate in Provenance.cpp, and nothing but this
+    // assertion connects them.
+    {
+        // BOTH of them. There are two constants with this name -- the long one
+        // egg-flash prints and the short one egg-config prints -- and on
+        // 2026-09-06 the gate made both wrong while only one was noticed. The
+        // compiler caught the second by reporting the name as ambiguous here,
+        // which is luck, not a check. This is the check.
+        const std::string rec = egg::fw::kRecoveryProcedure;
+        const std::string rec2 = egg::kRecoveryProcedure;
+        ok("egg-config's shorter recovery text names the flag too",
+           rec2.find("--i-know-this-is-button-entered") != std::string::npos,
+           rec2.substr(0, 60));
+        ok("recovery text mentions the button entry it describes",
+           rec.find("LEFT and RIGHT") != std::string::npos);
+        ok("...AND names the flag that gets a button-entered bootloader past\n"
+           "        the receipt gate -- without it, following this text to the\n"
+           "        letter ends in a refusal",
+           rec.find("--i-know-this-is-button-entered") != std::string::npos);
+    }
+
+    // --- the entry receipt ---------------------------------------------------
+    // It lives in the CURRENT DIRECTORY by design, so this chdirs into a temp
+    // directory rather than dropping .egg-entry-receipt into the repo root --
+    // where it would both pollute the tree and be picked up by the tree_clean
+    // test as an uncommitted file.
+    {
+        // HOME, not the working directory -- the receipt moved there on
+        // 2026-09-06 because a Finder-launched .app has cwd "/" and could never
+        // write one. So this test redirects HOME rather than chdir-ing, and
+        // that difference is the point: if it still passed after a chdir alone,
+        // the path would still be cwd-relative and the GUI would still be
+        // broken.
+        const char* oldHome = std::getenv("HOME");
+        const std::string savedHome = oldHome ? oldHome : "";
+        char tmpl[] = "/tmp/egg-receipt-XXXXXX";
+        const char* dir = mkdtemp(tmpl);
+        ok("receipt: a scratch HOME to run in", dir != nullptr);
+        if (dir && setenv("HOME", dir, 1) == 0) {
+            ok("no receipt in a fresh directory", !readEntryReceipt().present);
+            ok("...and the reason names the absolute path it looked for",
+               readEntryReceipt().reason.find(dir) != std::string::npos,
+               readEntryReceipt().reason);
+            ok("entryReceiptPath() is the receipt in HOME",
+               entryReceiptPath() == std::string(dir) + "/" + kEntryReceiptName,
+               entryReceiptPath());
+            // AND IT DOES NOT MOVE WHEN THE WORKING DIRECTORY DOES. This is the
+            // assertion that actually pins the GUI fix: chdir somewhere else
+            // and the path must be unchanged.
+            {
+                char before[4096];
+                const bool got = getcwd(before, sizeof before) != nullptr;
+                const std::string p1 = entryReceiptPath();
+                const bool moved = (chdir("/") == 0);
+                ok("the receipt path is INDEPENDENT of the working directory --\n"
+                   "        a Finder-launched .app runs with cwd \"/\"",
+                   moved && entryReceiptPath() == p1, entryReceiptPath());
+                if (got) { if (chdir(before) != 0) {} }
+            }
+
+            std::string werr;
+            const bool wrote = writeEntryReceipt(kBootloaderRelease,
+                                                 kBootloaderProduct, werr);
+            ok("writeEntryReceipt writes it", wrote, werr);
+            const EntryReceipt r = readEntryReceipt();
+            ok("...and it reads back as present", r.present);
+            ok("...with the bcdDevice it was given",
+               r.present && r.bcdDevice == kBootloaderRelease);
+            ok("...with the product string it was given",
+               r.present && r.product == std::string(kBootloaderProduct));
+            ok("...and a timestamp", r.present && r.sent.size() >= 20, r.sent);
+
+            // A file at the right path that is not ours must not count. The
+            // shape this catches: any stray .egg-entry-receipt, including one
+            // a user made by hand to get past the gate without reading what
+            // the gate is for.
+            {
+                // entryReceiptPath(), not the bare name: the receipt is
+                // HOME-relative now, and writing to the cwd would have this
+                // test pass by looking at a file nothing reads.
+                std::FILE* f = std::fopen(entryReceiptPath().c_str(), "wb");
+                std::fprintf(f, "not a receipt\nbcd-device 0x0006\n");
+                std::fclose(f);
+                ok("a file with the wrong magic is NOT a receipt",
+                   !readEntryReceipt().present);
+            }
+
+            writeEntryReceipt(kBootloaderRelease, kBootloaderProduct, werr);
+            ok("re-written, it is present again", readEntryReceipt().present);
+            clearEntryReceipt();
+            ok("clearEntryReceipt removes it -- a completed flash clears the "
+               "latch, so the receipt must not outlive it",
+               !readEntryReceipt().present);
+            clearEntryReceipt();   // idempotent; must not crash or throw
+            ok("...and clearing an absent receipt is a no-op",
+               !readEntryReceipt().present);
+
+            // --- the gate itself, all four combinations ---------------------
+            // Two booleans, so the table is small enough to be exhaustive, and
+            // exhaustive is the right standard for a gate: the interesting
+            // cases are the two where the answers disagree.
+            {
+                // no receipt, no override -> REFUSE
+                EntryGate g = entryGate(false, kBootloaderRelease, kBootloaderProduct);
+                ok("gate: no receipt and no override REFUSES", !g.allowed);
+                ok("...and gives a reason naming the path",
+                   g.reason.find(kEntryReceiptName) != std::string::npos,
+                   g.reason);
+                ok("...and does not claim to have been overridden",
+                   !g.overridden);
+
+                // no receipt, override -> ALLOW, and say it was overridden
+                g = entryGate(true, kBootloaderRelease, kBootloaderProduct);
+                ok("gate: no receipt WITH the override allows", g.allowed);
+                ok("...and reports that it was overridden", g.overridden);
+
+                std::string gerr;
+                writeEntryReceipt(kBootloaderRelease, kBootloaderProduct, gerr);
+
+                // receipt, no override -> ALLOW, NOT as an override
+                g = entryGate(false, kBootloaderRelease, kBootloaderProduct);
+                ok("gate: a receipt and no override allows", g.allowed);
+                ok("...and is NOT reported as an override -- this is the normal\n"
+                   "        path and must not print the override warning",
+                   !g.overridden);
+                ok("...and carries the receipt it found",
+                   g.receipt.present &&
+                   g.receipt.bcdDevice == kBootloaderRelease);
+
+                // receipt AND override -> ALLOW, and the receipt wins the
+                // wording: the override changed nothing, so saying it did
+                // would teach the user the flag is needed when it is not.
+                g = entryGate(true, kBootloaderRelease, kBootloaderProduct);
+                ok("gate: a receipt plus the override still allows", g.allowed);
+                ok("...and the receipt wins: not reported as an override",
+                   !g.overridden);
+
+                // --- and a receipt about a DIFFERENT bootloader -----------
+                // Present, our magic, well-formed -- and describing something
+                // else. The shapes this catches are a receipt copied between
+                // machines and one hand-edited to get past the gate.
+                writeEntryReceipt(kBootloaderRelease, kBootloaderProduct, werr);
+                g = entryGate(false, kBootloaderRelease + 1, kBootloaderProduct);
+                // NOTE what this does and does not measure. Every OP1 8k v2
+                // reports the same bcdDevice and product, so this comparison
+                // cannot tell two mice apart; the test feeds a deliberately
+                // impossible value to exercise the branch. What it pins is that
+                // a receipt failing the comparison is refused -- the catch is a
+                // hand-edited or copied file, not device binding.
+                ok("gate: a receipt with the wrong bcdDevice REFUSES", !g.allowed);
+                ok("...and says it describes a different bootloader, not that\n"
+                   "        none was found -- the two send a person elsewhere",
+                   g.reason.find("different bootloader") != std::string::npos,
+                   g.reason);
+                g = entryGate(false, kBootloaderRelease, "Something Else");
+                ok("gate: a receipt with the wrong product string REFUSES",
+                   !g.allowed);
+                g = entryGate(true, kBootloaderRelease + 1, kBootloaderProduct);
+                ok("...and the override still gets past it", g.allowed);
+                ok("...reported as an override", g.overridden);
+
+                clearEntryReceipt();
+            }
+
+            std::remove((std::string(dir) + "/" + kEntryReceiptName).c_str());
+            rmdir(dir);
+            if (savedHome.empty()) unsetenv("HOME");
+            else setenv("HOME", savedHome.c_str(), 1);
+        }
+    }
+}
+
 static void testWireEqualsPlan() {
     std::printf("\n11. the frames sent == the frames planned\n");
     Image img;
@@ -1310,6 +1702,191 @@ static void testLinkPolicy() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Per-block progress. The write phase must not be silent.
+// ---------------------------------------------------------------------------
+// Added 2026-09-06. The phase takes ~10-15 s and said nothing for all of it, in
+// the exact window where the tool has just announced that Ctrl-C is ignored --
+// so "it has hung" and "it is working" looked identical at the one moment the
+// difference matters. The GUI inherited the silence, because it only streams
+// what the CLI prints.
+//
+// Tested through the mock's own note log, which is the same path the real link
+// uses. Two properties, and the second is the one worth having: the count is
+// right on a COOPERATIVE device, and on a HOSTILE one the numbers still count
+// verified blocks rather than loop iterations -- a progress line that ran ahead
+// of the device would be worse than none, because it would say a block was
+// written while it was still being repaired.
+static void testWriteProgress() {
+    std::printf("\nwrite-phase progress\n");
+
+    Image img;
+    std::string err;
+    if (!img.loadFromExecutable(kExe, err)) {
+        ok("image for the progress runs", false, err);
+        return;
+    }
+
+    auto verifiedLines = [](const std::vector<std::string>& log) {
+        std::vector<std::string> out;
+        for (const std::string& l : log)
+            if (l.rfind("block ", 0) == 0 &&
+                l.find("verified") != std::string::npos)
+                out.push_back(l);
+        return out;
+    };
+
+    ok("a clean run reports every block, once, in order", [&] {
+        MockBootloader m;
+        const Progress p = driveToVerifiedImage(m, img);
+        const auto lines = verifiedLines(m.log());
+        if (lines.size() != img.blockCount()) return false;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            const std::string want = "block " + std::to_string(i + 1) + "/" +
+                                     std::to_string(img.blockCount()) +
+                                     " verified";
+            if (lines[i] != want) return false;
+        }
+        return p.blocksVerified == img.blockCount();
+    }());
+
+    ok("the last line names the total, so a reader can see it finished", [&] {
+        MockBootloader m;
+        driveToVerifiedImage(m, img);
+        const auto lines = verifiedLines(m.log());
+        return !lines.empty() &&
+               lines.back() == "block " + std::to_string(img.blockCount()) +
+                               "/" + std::to_string(img.blockCount()) +
+                               " verified";
+    }());
+
+    ok("repairs do not inflate the count: one line per block, not per attempt",
+       [&] {
+        // WHAT THIS CAN AND CANNOT CATCH, stated because the first version of
+        // this test was called "the count tracks VERIFIED blocks, not the loop
+        // index" and could not have caught that if it were wrong. In the loop
+        // as written the counter and the index are equal on every reachable
+        // path, so no test distinguishes them (Tests/mutants.sh carries that
+        // as an equivalent mutant with the proof).
+        //
+        // What IS falsifiable, and is the defect worth stopping: emitting the
+        // line from inside the retry loop. That would announce a block on
+        // every attempt, so a device repairing block 9 four times would report
+        // reaching block 12 -- a progress line running ahead of the device is
+        // a false statement made at the moment of maximum cost. Hence the
+        // exact-count check below, under a fault rate that forces repairs.
+        Faults f;
+        f.corruptStoreRate = 0.20;      // forces read-back failures and rewrites
+        f.seed = 7;
+        MockBootloader m(f);
+        const Progress p = driveToVerifiedImage(m, img);
+        const auto lines = verifiedLines(m.log());
+        if (p.rewrites == 0) return false;          // the scenario did nothing
+        if (lines.size() != img.blockCount()) return false;
+        // Exactly blockCount lines, and each numbered by the verified count.
+        for (std::size_t i = 0; i < lines.size(); ++i)
+            if (lines[i].rfind("block " + std::to_string(i + 1) + "/", 0) != 0)
+                return false;
+        // Once a rewrite has happened, every later line carries the count.
+        bool seen = false;
+        for (const std::string& l : lines) {
+            const bool has = l.find("rewrite(s) so far") != std::string::npos;
+            if (has) seen = true;
+            if (seen && !has) return false;
+        }
+        return seen;
+    }());
+}
+
+// ---------------------------------------------------------------------------
+// NoQuitDuringWrite -- the guard that makes the write phase unstoppable.
+// ---------------------------------------------------------------------------
+// UNTESTABLE UNTIL 2026-09-06, because it was a class inside
+// Sources/egg-flash/main.cpp. Nothing in ctest could construct it, so the only
+// thing that had ever checked its signal list was a person reading the code --
+// and that is how it came to ignore SIGINT, SIGTERM and SIGHUP while leaving
+// SIGPIPE at its default disposition, which TERMINATES THE PROCESS. The phase
+// writes progress and every recovery instruction to stderr, so a pipe whose
+// reader went away would kill the flash between two blocks with nobody having
+// typed anything.
+//
+// These raise each signal at the running test process. If a disposition is not
+// actually ignored the test does not "fail" -- it DIES, and ctest reports the
+// signal. Either way it cannot pass, which is what §6.2 asks of a harness.
+static void testNoQuitDuringWrite() {
+    std::printf("\nNoQuitDuringWrite\n");
+
+    std::size_t n = 0;
+    const int* sigs = NoQuitDuringWrite::signals(n);
+
+    ok("SIGPIPE is covered", [&] {
+        // Named on its own because it is the one that was missing, and because
+        // the reason it belongs is different from the other three: nobody has
+        // to do anything for it to arrive.
+        for (std::size_t i = 0; i < n; ++i) if (sigs[i] == SIGPIPE) return true;
+        return false;
+    }());
+
+    ok("CLAUDE.md §3's own two are covered, and SIGHUP with them", [&] {
+        bool i_ = false, t = false, h = false;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (sigs[i] == SIGINT)  i_ = true;
+            if (sigs[i] == SIGTERM) t  = true;
+            if (sigs[i] == SIGHUP)  h  = true;
+        }
+        return i_ && t && h;
+    }());
+
+    ok("every covered signal is actually ignored inside the guard", [&] {
+        // Raised at THIS process. Reaching the next line at all is the result:
+        // an un-ignored SIGPIPE or SIGTERM would end the run here.
+        NoQuitDuringWrite guard;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (std::signal(sigs[i], SIG_IGN) != SIG_IGN) return false;
+            std::raise(sigs[i]);
+        }
+        return true;
+    }());
+
+    ok("the previous dispositions come back afterwards", [&] {
+        // Install something recognisable, let the guard replace it, and require
+        // it back. The guard runs for the erase-through-verify unit ONLY --
+        // before the erase Ctrl-C must still work, because before the erase
+        // abort is always correct (§4.2).
+        struct H { static void h(int) {} };
+        for (std::size_t i = 0; i < n; ++i) {
+            void (*before)(int) = std::signal(sigs[i], &H::h);
+            {
+                NoQuitDuringWrite guard;
+                if (std::signal(sigs[i], SIG_IGN) != SIG_IGN) {
+                    std::signal(sigs[i], before);
+                    return false;
+                }
+            }
+            const bool back = std::signal(sigs[i], before) == &H::h;
+            if (!back) return false;
+        }
+        return true;
+    }());
+
+    ok("nesting two guards still restores the outer disposition", [&] {
+        // Not a shape the CLI uses, and cheap to be sure of: a nested guard
+        // that saved SIG_IGN and restored it is harmless; one that saved
+        // nothing and restored SIG_DFL would silently disarm the outer unit.
+        struct H { static void h(int) {} };
+        void (*before)(int) = std::signal(SIGPIPE, &H::h);
+        {
+            NoQuitDuringWrite outer;
+            { NoQuitDuringWrite inner; }
+            if (std::signal(SIGPIPE, SIG_IGN) != SIG_IGN) {
+                std::signal(SIGPIPE, before);
+                return false;
+            }
+        }
+        return std::signal(SIGPIPE, before) == &H::h;
+    }());
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -1322,9 +1899,12 @@ int main() {
     testStage2Exit();
     testReadBackAndToken();
     testBackupGate();
+    testProvenanceGate();
     testWireEqualsPlan();
     testAuditRegressions();
     testLinkPolicy();
+    testWriteProgress();
+    testNoQuitDuringWrite();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

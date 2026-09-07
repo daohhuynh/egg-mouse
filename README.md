@@ -85,10 +85,22 @@ The app looks for `egg-config` and `egg-flash` next to itself and then in
 `./build`, so build those first. It says so on its home screen if it cannot
 find them.
 
+Four screens. **Settings** reads the mouse and shows every setting decoded into
+words, and changes one thing at a time with a preview before every write.
+**Firmware** backs the current image up and writes a new one. **New versions**
+identifies an updater or config tool this build has never seen. **Advanced** is
+everything the tools can do without writing: compare two saved records, preview
+a change with the mouse unplugged, list every USB interface, dump the exact
+command frames, and turn on the hex log.
+
+`Tools/build-app.sh` is **not** part of `cmake --build`, so re-run it after any
+change to `Sources/EGGApp`.
+
 ## egg-config
 
 ```
 egg-config devices                 list every VID 0x3367 interface
+egg-config show [--from FILE]      every setting, decoded into words
 egg-config read [--save FILE]      read the settings record, dump it, save it
 egg-config info                    small query (A1 02)
 egg-config diff A B                compare two saved records, offline
@@ -105,6 +117,21 @@ egg-config cpi N X [Y] --yes            set CPI stage N (1-4)
 egg-config handedness left|right --yes  swap the primary click
 egg-config multiclick BUTTON MODE [N] --yes   per-button click filter
 ```
+
+`show` is the one to reach for first. `read` prints 1024 bytes of hex; `show`
+prints what the mouse is actually set to — polling in Hz, lift-off distance in
+the vendor's own millimetres, which CPI stage is live, what each button is bound
+to, and the firmware version the reading came off. `--from FILE` does the same
+to a record saved earlier with nothing plugged in, and `--machine` emits TSV,
+which is what the app parses.
+
+Every decoder is the exact inverse of the encoder beside it, and that is
+checked rather than assumed: for every value `set` accepts, the decode must
+lead with the same value, and it must refuse exactly the bytes no legal value
+can produce. A byte outside that set is printed as unrecognised rather than
+rounded to the nearest sensible reading. The whole thing is anchored outside
+the code as well — `Tests/test_show.sh` decodes the device's own captured reply
+and checks all sixteen settings against Endgame's screenshots.
 
 The four verbs in the second group exist because those settings are not single
 bytes. `handedness` in particular is not a flag: it MOVES your mapping between
@@ -169,9 +196,42 @@ egg-flash stream <updater.exe>     the same stream in full, one frame per line
 egg-flash enter-bootloader --yes   send ONE report (A1 3A) and confirm the mode
 egg-flash leave-bootloader --yes   the way back (A1 09)
 egg-flash read-firmware [OUT]      read the resident image back with A0 07
+egg-flash read-firmware --check    report whether the bootloader is there
 egg-flash flash <updater.exe> --backup FILE --confirm TOKEN
+egg-flash restore-firmware <backup.bin> --backup <current.bin> --confirm TOKEN
 egg-flash help
 ```
+
+`restore-firmware` puts a backup back. It is `flash` with a different image and
+inherits every guard — same frames, same write phase, same token rules — rather
+than becoming a second, less exercised path to the same erase. **It accepts only
+this tool's own backups**: `read-firmware` writes a sidecar `<image>.origin`
+recording the SHA-256 it saved, and `restore-firmware` refuses an image with no
+sidecar or one whose bytes no longer hash to what the sidecar says. It never
+opens a PE, so there is no resource for a file to suggest.
+
+### The entry receipt
+
+CLAUDE.md §4.2b requires that everything touching firmware enters the bootloader
+by `A1 3A`, the vendor's own way — and nothing on the wire can tell that entry
+from a LEFT+RIGHT button entry, because PID, `bcdDevice` and the product string
+are identical either way.
+
+So `enter-bootloader` writes `~/.egg-mouse-entry-receipt` once `A1 3A` has gone
+out and the mouse has come back as the bootloader, and `flash` and
+`restore-firmware` require it when they find the mouse **already** in the
+bootloader. It is in `$HOME` and not the working directory on purpose: a
+Finder-launched `.app` runs with a working directory of `/`, so a cwd-relative
+receipt could never be written from the GUI at all.
+
+```sh
+egg-flash flash "...Updater 1.10.exe" --backup backup.bin \
+    --i-know-this-is-button-entered
+```
+
+is the escape hatch for a bootloader this tool did not enter. Deliberately not
+`--yes`: `--yes` is typed every time and would be given by reflex. A completed
+flash clears the receipt, and so does `leave-bootloader`.
 
 **A flash is two runs, on purpose.** `read-firmware` takes the backup §4.2
 requires; `flash` only *checks* it. Taking the backup inside the flash would put
@@ -190,9 +250,16 @@ Everything that can fail is checked **before** `A1 3A` goes out — image hash,
 block range, backup file, approval token, settings undo, device count — so the
 window in which the mouse is not a mouse contains only the commands that have to
 be there. After the erase the tool does not stop: no cancel, no timeout that
-gives up, and `SIGINT`/`SIGTERM`/`SIGHUP` are ignored until the image is
-resident, because with the application erased, exiting cleanly guarantees the
-bad outcome.
+gives up, and `SIGINT`/`SIGTERM`/`SIGHUP`/`SIGPIPE` are ignored until the image
+is resident, because with the application erased, exiting cleanly guarantees the
+bad outcome. `SIGPIPE` is on that list for a reason that has nothing to do with
+anyone typing anything: piping the run into `head`, or closing the `tee` reading
+it, would otherwise kill the process between two blocks.
+
+It reports `block N/65 verified` as it goes, on **stderr** — stdout carries the
+frame stream that gets diffed against the vendor capture, so progress must not
+land there. `N` counts blocks that read back correct, and a block being
+repaired does not advance it.
 
 The image is always `FWFILE` resource **140** of the vendor `.exe` you name, and
 that is a compile-time constant — there is no way to select a different one. Its
@@ -257,9 +324,10 @@ app parses shows up as a failing test rather than as a greyed-out button.
 ## Tests
 
 ```sh
-ctest --test-dir build -E mutants   # 30 suites, no hardware needed, ~2 min
-ctest --test-dir build              # adds the mutation run (~15 min: it
-                                    # rebuilds the tree once per planted bug)
+ctest --test-dir build -E mutants   # 40 suites, no hardware needed, ~3 min
+ctest --test-dir build              # adds the mutation run (~20 min: it
+                                    # rebuilds the tree once per planted bug,
+                                    # 118 real defects and 8 equivalents)
 ```
 
 `-E` is an unanchored regex, which is worth knowing here: `-E mutants` would
@@ -322,9 +390,11 @@ payload. `egg-config dryrun` emits the real frame, so now it can be.
 suite that has never failed has not been shown to work. `test-config` then
 passed on *its* first run too, for the same reason. So the harness plants known
 bugs in both — several of them the vendor's own — and requires the relevant
-suite to notice. It currently kills **43 of 43** real defects and correctly lets **5**
-provably-equivalent mutants survive. **If either number moves, suspect the
-harness before the tests** — it has now been wrong five times, and every one of
+suite to notice. The two counts it declares are at the top of `Tests/mutants.sh`
+(`grep DECLARED_ Tests/mutants.sh`) — read them from there rather than from
+prose, because they have been stale in prose three times.
+**If either number moves, suspect the
+harness before the tests** — it has now been wrong seven times, and every one of
 those bugs made it misreport its own reliability, which is the only thing it
 exists to measure. The most recent (a mutated file left out of the restore list)
 graded every later mutant against an already-failing suite and reported a clean

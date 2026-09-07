@@ -287,9 +287,17 @@ static_assert(kBlockCount * kPayloadLen == 66560, "and 65 * 1024 = 66560 bytes")
 // ---------------------------------------------------------------------------
 // Printed by egg-flash before it sends anything, per that file: a recovery
 // procedure nobody can find is not a recovery procedure.
+// THERE ARE TWO OF THESE, and that is a trap worth naming rather than leaving
+// for the next reader: egg::fw::kRecoveryProcedure in WritePhase.h is the
+// longer one egg-flash prints, and this shorter one is what egg-config prints.
+// On 2026-09-06 the entry receipt made BOTH of them wrong and only the first
+// was noticed -- the compiler found the second, by reporting the name as
+// ambiguous in a test. Amend both or neither.
 inline constexpr const char* kRecoveryProcedure =
     "Hold LEFT and RIGHT mouse buttons together, plug the cable in while still\n"
     "holding, and keep holding for a few more seconds. The mouse re-enumerates\n"
-    "as PID 0x1977, Product \"Bootloader\", and can be re-flashed from there.";
+    "as PID 0x1977, Product \"Bootloader\", and can be re-flashed from there --\n"
+    "with --i-know-this-is-button-entered, because the buttons are not an\n"
+    "A1 3A entry and egg-flash refuses a bootloader it did not enter itself.";
 
 }  // namespace egg

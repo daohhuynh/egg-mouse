@@ -94,13 +94,33 @@ FP=Sources/EGGFlashCore/src/FlashPlan.cpp
 # mutant below pretends otherwise.
 HL=Sources/EGGFlashCore/src/HidBootloaderLink.cpp
 
+# The two off-wire guards the owner chose on 2026-09-06 -- the restore provenance
+# sidecar and the bootloader entry receipt. Both are pure file logic with no
+# device in them, so every line here is gradeable without hardware, which is
+# exactly the property that made them worth putting in the library instead of
+# in main.cpp's printf blocks.
+PV=Sources/EGGFlashCore/src/Provenance.cpp
+
+# The guard that makes the erase-through-verify unit unstoppable. It used
+# to be a class inside egg-flash/main.cpp, where nothing could test it and
+# nothing could mutate it -- which is how it came to leave SIGPIPE at its
+# default disposition (terminate) while the phase writes to stderr.
+NQ=Sources/EGGFlashCore/src/NoQuitDuringWrite.cpp
+
 # ONE list. Backup and restore are both derived from it, because they used to be
 # two hardcoded lists and the second one drifted the moment a fourth file was
 # added: a mutant editing Firmware.h applied, restore() did not know that file
 # existed, and the mutation survived into every LATER mutant -- which then made
 # two correctly-labelled equivalent mutants look wrongly labelled. The harness
 # accused itself of a bug it did not have. Add a file here and nowhere else.
-MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB" "$HL")
+# EGGCore. The bcdDevice -> version decode lives here (Device.h cites updater
+# 1.10 FUN_004011f0), and it is graded by test-config, which is where its
+# tests are. Note the objdir below: EGGCore is a third library and a case
+# that fell through to EGGFlashCore would delete the wrong objects and grade
+# a binary that never contained the mutation.
+DV=Sources/EGGCore/src/Device.cpp
+
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB" "$HL" "$PV" "$DV" "$NQ")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -125,12 +145,14 @@ trap 'restore; cmake --build build >/dev/null 2>&1; rm -rf "$BACKUP"' EXIT INT T
 target_for() {
   case "$1" in
     Sources/EGGConfigCore/*) echo "test-config" ;;
+    Sources/EGGCore/*)       echo "test-config" ;;
     *)                       echo "test-flash" ;;
   esac
 }
 objdir_for() {
   case "$1" in
     Sources/EGGConfigCore/*) echo "EGGConfigCore" ;;
+    Sources/EGGCore/*)       echo "EGGCore" ;;
     *)                       echo "EGGFlashCore" ;;
   esac
 }
@@ -143,8 +165,8 @@ objdir_for() {
 # it -- including every equivalent -- never ran. The script printed nothing
 # about it because the summary lives below the error too. A count fixed at the
 # TOP is the only version of this check that a truncated script cannot skip.
-DECLARED_KILL=80
-DECLARED_EQUIV=7
+DECLARED_KILL=118
+DECLARED_EQUIV=8
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
 # The clean binary's hash. Any mutant build equal to this did not take effect.
@@ -170,6 +192,23 @@ mutate() {  # <kill|equiv> <name> <file> <old|||new>
   # A file not in MUTABLE is now fatal, not silent. The check is one line; the
   # bug cost a full 10-minute run and would have been invisible in any run
   # whose equivalent mutants all happened to come first.
+  # HARNESS BUG #6, 2026-09-06, and the same family as the apostrophe that
+  # truncated a run: `$name` is echoed inside DOUBLE quotes, so a backtick in a
+  # mutant name is command substitution. `"sensor-angle decodes 0x80, which
+  # `set` refuses"` ran bash's `set` builtin, which dumps every variable and
+  # function, and the run printed a page of shell internals in place of the
+  # mutant's name. The mutation ALSO did not apply -- a whitespace mismatch --
+  # so the two failures were indistinguishable in the log.
+  #
+  # Refused rather than escaped: a name is a sentence for a human, and there is
+  # no reason for one to contain a shell metacharacter.
+  case "$name" in
+    *'`'*|*'$('*)
+      echo "FATAL: mutant name contains a backtick or \$( -- it is echoed"
+      echo "       inside double quotes and would be executed. Reword it."
+      exit 2 ;;
+  esac
+
   local m found=0
   for m in "${MUTABLE[@]}"; do [ "$m" = "$file" ] && found=1; done
   if [ $found -eq 0 ]; then
@@ -535,6 +574,147 @@ mutate kill "backup reports ok before it has checked anything" "$FP" \
     bc.ok = true;  // MUTANT
     if (path.empty()) {'
 
+# ---- The restore provenance gate and the entry receipt. --------------------
+#
+# Both are the owner's calls of 2026-09-06 and both fail SILENTLY when broken: the
+# restore proceeds, the frames are correct, the device does what it is told. The
+# only evidence a guard has stopped working is that it stopped refusing, and
+# nothing on the wire shows it. That is the same shape as the backup gate above
+# and it gets the same treatment.
+
+# THE ONE THAT MATTERS. Without the sidecar check, `restore-firmware` writes any
+# 66560-byte file with two different bytes in it -- which is what the verb was
+# specifically not allowed to be. the owner's answer was "yes, but only its own
+# backups"; this mutant is that word "only" being deleted.
+mutate kill "restore accepts an image with no provenance at all" "$FW" \
+'    const Provenance p = readProvenance(imagePath);
+    if (!p.ok) {|||    const Provenance p = readProvenance(imagePath);
+    if (false) {  // MUTANT'
+
+# The sidecar exists but is never compared against the bytes. A backup edited,
+# truncated-and-repadded, or replaced at the same path passes -- and the file
+# that vouches for it is still sitting there looking correct.
+mutate kill "restore never checks the image against its recorded hash" "$FW" \
+'    if (sha != p.sha256) {|||    if (false) {  // MUTANT'
+
+# Hashing only the first block. Every byte after 0x400 becomes unchecked, so a
+# backup whose first 1024 bytes are intact restores whatever follows them.
+mutate kill "restore hashes only the first block of the image" "$FW" \
+'    const std::string sha = sha256Hex(raw.data(), raw.size());
+    if (sha != p.sha256) {|||    const std::string sha = sha256Hex(raw.data(), kBlockSize);  // MUTANT
+    if (sha != p.sha256) {'
+
+# The provenance gate must be an ADDITION to the shape checks, never a way past
+# them. 66560 identical bytes with a valid sidecar is a failed A0 07 loop that
+# someone backed up; writing it over a working application is the worst thing
+# this verb can do.
+mutate kill "restore skips the failed-read check when a sidecar is present" "$FW" \
+'    if (!varied) {
+        char b[64];|||    if (false) {  // MUTANT
+        char b[64];'
+
+mutate kill "restore accepts any file at least a full image long" "$FW" \
+'    if (raw.size() != kExpectedImageSize) {
+        error = imagePath + " is " + std::to_string(raw.size()) +|||    if (raw.size() < kExpectedImageSize) {  // MUTANT
+        error = imagePath + " is " + std::to_string(raw.size()) +'
+
+# The magic line is what stops any file called <image>.origin from counting.
+mutate kill "provenance accepts a sidecar written by something else" "$PV" \
+'    if (magic != kProvenanceMagic) {|||    if (false) {  // MUTANT'
+
+# A sidecar with no sha256 line at all would otherwise compare against "" --
+# and the empty string is not the hash of anything, so this one fails closed
+# rather than open. It is still a mutant worth planting: the failure it causes
+# is a real backup being REFUSED, which sends a user looking for an override.
+mutate kill "provenance accepts a sidecar that records no hash" "$PV" \
+'    if (vals[0].empty()) { p.reason = path + " records no sha256"; return p; }|||    if (false) { }  // MUTANT'
+
+# restore-firmware requires --backup (a fresh read of what is on the device NOW)
+# to be a DIFFERENT file from the image being restored. A lexical compare misses
+# ./x.bin vs x.bin, which is the same file spelled two ways -- and then the rule
+# "never erase without a saved copy of what is being erased" is satisfied by a
+# file that does not describe what is being erased.
+mutate kill "the same-file guard compares strings, so ./x and x differ" "$PV" \
+'    if (a == b) return true;
+    char ra[4096], rb[4096];|||    if (a == b) return true;
+    return false;  // MUTANT
+    char ra[4096], rb[4096];'
+
+mutate kill "the same-file guard calls two paths the same when neither resolves" "$PV" \
+'    if (!pa || !pb) return false;|||    if (!pa || !pb) return true;  // MUTANT'
+
+# The receipt lives in HOME, not the working directory: a Finder-launched .app
+# runs with cwd "/" and could never write one there, so a cwd-relative path made
+# the GUI's flash refuse every time. Reverting it to cwd must fail the suite.
+mutate kill "the receipt path goes back to the working directory" "$PV" \
+'    if (const char* home = std::getenv("HOME"))
+        if (*home) return std::string(home) + "/" + kEntryReceiptName;|||    // MUTANT'
+
+# ---- The entry receipt gate. ------------------------------------------------
+#
+# §4.2b: "EVERYTHING THAT TOUCHES FIRMWARE ENTERS BY A1 3A." Until 2026-09-06
+# that rule had no code behind it -- PID, bcdDevice and product string are
+# identical for a button entry, so nothing could tell them apart. These three
+# are the rule becoming enforceable and then not being enforced.
+
+# A receipt copied from another machine, or hand-edited to get past the gate,
+# is present and well-formed and describes something else. Without this
+# comparison the gate checks that a FILE exists rather than that THIS mouse was
+# entered by A1 3A, which is a different and much weaker claim.
+mutate kill "the entry gate ignores which bootloader the receipt describes" "$PV" \
+'    if (g.receipt.present &&
+        (g.receipt.bcdDevice != liveBcd || g.receipt.product != liveProduct)) {|||    if (false) {  // MUTANT'
+
+mutate kill "the entry gate checks the bcdDevice but not the product string" "$PV" \
+'        (g.receipt.bcdDevice != liveBcd || g.receipt.product != liveProduct)) {|||        (g.receipt.bcdDevice != liveBcd)) {  // MUTANT'
+
+# The reason must distinguish "no receipt" from "a receipt for something else".
+# They send a person to different places -- one to another directory, one to
+# work out where the file came from -- and collapsing them wastes the second.
+mutate kill "a wrong-device receipt is reported as simply absent" "$PV" \
+'        g.reason = entryReceiptPath() + " describes a different "
+                   "bootloader (" + b + " \"" + g.receipt.product +
+                   "\") than the one attached";|||        g.reason = g.receipt.reason;  // MUTANT'
+
+mutate kill "the entry gate allows anything, receipt or not" "$PV" \
+'    if (g.receipt.present) {
+        g.allowed = true;
+        return g;
+    }|||    g.allowed = true;  // MUTANT
+    return g;'
+
+# The escape hatch swallowing the normal path. Every allowed run then prints the
+# override warning, which trains the user to ignore it -- and the one run that
+# IS an override stops standing out, which is the only thing it is for.
+mutate kill "the entry gate reports every pass as an override" "$PV" \
+'    if (g.receipt.present) {
+        g.allowed = true;
+        return g;
+    }|||    if (g.receipt.present) {
+        g.allowed = true;
+        g.overridden = true;  // MUTANT
+        return g;
+    }'
+
+# The inverse: the override never marked, so a button-entered flash prints the
+# same line as an A1 3A one and the deviation from §4.2b goes unrecorded.
+mutate kill "the entry gate hides that the override was used" "$PV" \
+'        g.allowed = true;
+        g.overridden = true;
+        return g;|||        g.allowed = true;  // MUTANT
+        return g;'
+
+# A receipt written by anything else -- including one a user creates by hand to
+# get past the gate without reading what the gate is for -- must not count.
+mutate kill "any file at the receipt path counts as a receipt" "$PV" \
+'    if (magic != kReceiptMagic) {|||    if (false) {  // MUTANT'
+
+# clearEntryReceipt is called the moment the image is verified resident, because
+# a completed flash is what clears the A1 3A latch. A receipt that outlives the
+# latch it describes then vouches for a LATER button entry.
+mutate kill "the receipt is never cleared after a flash" "$PV" \
+'void clearEntryReceipt() { std::remove(entryReceiptPath().c_str()); }|||void clearEntryReceipt() { }  // MUTANT'
+
 mutate kill "whole-image sum shifted down two bytes" "$FC" \
 '    f[17] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);|||    f[15] = static_cast<std::uint8_t>(wholeChecksum & 0xFF);  // MUTANT'
 
@@ -897,6 +1077,119 @@ mutate equiv "removes an unreachable length guard in buildFrame" "$CS" \
     // MUTANT (equivalent): guard removed
 
     // Read-modify-write'
+
+# ---------------------------------------------------------------------------
+# `egg-config show` -- the decoders. Added 2026-09-06 with the feature.
+# ---------------------------------------------------------------------------
+# These read bytes off the mouse and turn them into sentences a person acts on.
+# A wrong reading here does not corrupt anything by itself; it tells someone
+# their lift-off distance is 1.0mm when it is 1.1mm, and they believe it.
+
+mutate kill "lod is off by one millimetre step" "$CR" \
+'    const int tenths = 7 + v;|||    const int tenths = 8 + v;  // MUTANT'
+
+mutate kill "polling shows the stored divisor instead of the frequency" "$CR" \
+'    std::snprintf(buf, n, "%ld Hz", 8000L / div);|||    std::snprintf(buf, n, "%u Hz", div);  // MUTANT'
+
+mutate kill "decodeBool accepts any byte as a boolean" "$CR" \
+'bool decodeBool(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 1) return false;|||bool decodeBool(std::uint8_t v, char* buf, std::size_t n) {
+    // MUTANT: no range check'
+
+mutate kill "sensor-angle decodes 0x80, a value the set path refuses" "$CR" \
+'    if (deg < -127) return false;          // 0x80 is outside what encode takes|||    if (deg < -128) return false;  // MUTANT'
+
+mutate kill "cpi-stage decodes a fifth stage that does not exist" "$CR" \
+'bool decodeCpiStage(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 3) return false;|||bool decodeCpiStage(std::uint8_t v, char* buf, std::size_t n) {
+    if (v > 7) return false;  // MUTANT'
+
+mutate kill "the downshift remap is read forwards instead of inverted" "$CR" \
+'    for (int i = 0; i < 4; ++i)
+        if (kMap[i] == stored) {|||    for (int i = 0; i < 4; ++i)
+        if (static_cast<std::uint8_t>(i) == stored) {  // MUTANT'
+
+mutate kill "the smoothing remap is read forwards instead of inverted" "$CR" \
+'    for (int i = 0; i < 3; ++i)
+        if (kMap[i] == stored) {|||    for (int i = 0; i < 3; ++i)
+        if (static_cast<std::uint8_t>(i) == stored) {  // MUTANT'
+
+mutate kill "a key binding is matched on +1 too, so every modifier hides it" "$CR" \
+'        const bool hit = a.payload == ButtonPayload::Key
+                             ? entry[0] == a.b0
+                             : entry[0] == a.b0 && entry[1] == a.b1;|||        const bool hit = entry[0] == a.b0 && entry[1] == a.b1;  // MUTANT'
+
+mutate kill "fixed-cpi Y is decoded from the X bytes" "$CR" \
+'        b.cpiY = entry[4] | (static_cast<long>(entry[5]) << 8);|||        b.cpiY = entry[2] | (static_cast<long>(entry[3]) << 8);  // MUTANT'
+
+mutate kill "hidKeyName loses the keypad zero, whose usage is out of run" "$CR" \
+'        v[0x62] = "kp0";|||        // MUTANT: kp0 dropped'
+
+# ---------------------------------------------------------------------------
+# bcdDevice -> the version Endgame's updater displays (EGGCore).
+# ---------------------------------------------------------------------------
+# CLAUDE.md §5: everything observed before 2026-09-05 07:53 is firmware 1.07 and
+# everything after is 1.10, and DEFAULTS differ between them. A version display
+# that is confidently wrong mislabels every observation made under it.
+
+mutate kill "the version field is read as a plain integer, not as BCD" "$DV" \
+'    const unsigned n = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];
+    major = n / 100;
+    minor = n % 100;|||    major = bcd / 100;  // MUTANT
+    minor = bcd % 100;'
+
+mutate kill "a nibble above 9 is accepted, so 0x01a0 becomes a version" "$DV" \
+'        if (d[i] > 9) return false;      // formats as a letter; __wtol stops|||        if (d[i] > 15) return false;  // MUTANT'
+
+mutate kill "the minor part loses its leading zero, so 1.07 prints as 1.7" "$DV" \
+'    std::snprintf(b, sizeof b, "%u.%02u", major, minor);|||    std::snprintf(b, sizeof b, "%u.%u", major, minor);  // MUTANT'
+
+mutate kill "the digit weights are wrong, so the top nibble is lost" "$DV" \
+'    const unsigned n = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];|||    const unsigned n = d[1] * 100 + d[2] * 10 + d[3];  // MUTANT'
+
+# ---------------------------------------------------------------------------
+# The write phase must not be silent, and must not be stoppable.
+# ---------------------------------------------------------------------------
+
+mutate kill "the write phase goes silent again" "$WP" \
+'        link.note("block " + std::to_string(p.blocksVerified) + "/" +|||        if (false) link.note("block " + std::to_string(p.blocksVerified) + "/" +  // MUTANT'
+
+# EQUIVALENT, and finding that out is why this mutant is here. I wrote it as a
+# `kill` on the assumption that the test named "under repair the count still
+# tracks VERIFIED blocks, not attempts" could tell the two apart. It cannot, and
+# neither can any other test, because THE TWO EXPRESSIONS ARE EQUAL ON EVERY
+# REACHABLE PATH: `p.blocksVerified` starts at 0 (WritePhase.h has the default
+# initialiser), the outer `for` over blocks has no `continue` and no `break`,
+# and the counter is incremented exactly once, immediately above the note. So
+# blocksVerified == i + 1 at that line, always. The retries live in an INNER
+# loop that only exits by `break`, so a repaired block still reaches the note
+# once, with both expressions equal.
+#
+# Left as equivalent rather than deleted, because it records the claim the
+# source comment used to make too strongly and now does not.
+mutate equiv "progress reports the loop index instead of verified blocks" "$WP" \
+'        link.note("block " + std::to_string(p.blocksVerified) + "/" +|||        link.note("block " + std::to_string(i + 1) + "/" +  // MUTANT'
+
+# The falsifiable half of the progress property: a line per ATTEMPT rather than
+# per block. A device repairing block 9 four times would report reaching block
+# 12, which is worse than silence -- see the test of the same name.
+mutate kill "progress announces a block on every write attempt" "$WP" \
+'            link.note("block " + hex2(idx) + " read back wrong (" +|||            link.note("block " + std::to_string(p.blocksVerified + 1) + "/" + std::to_string(img.blockCount()) + " verified");  // MUTANT
+            link.note("block " + hex2(idx) + " read back wrong (" +'
+
+mutate kill "progress stops mentioning rewrites" "$WP" \
+'                  (p.rewrites ? "  (" + std::to_string(p.rewrites) +
+                                " rewrite(s) so far)"
+                              : std::string()));|||                  std::string());  // MUTANT'
+
+mutate kill "SIGPIPE goes back to its default, which kills the process" "$NQ" \
+'const int kSignals[] = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};|||const int kSignals[] = {SIGINT, SIGTERM, SIGHUP};  // MUTANT'
+
+mutate kill "the guard restores SIG_DFL instead of what it saved" "$NQ" \
+'        if (prev_[i] != SIG_ERR) std::signal(kSignals[i], prev_[i]);|||        if (prev_[i] != SIG_ERR) std::signal(kSignals[i], SIG_DFL);  // MUTANT'
+
+mutate kill "the guard leaves the signals at their default" "$NQ" \
+'        prev_[i] = std::signal(kSignals[i], SIG_IGN);|||        prev_[i] = std::signal(kSignals[i], SIG_DFL);  // MUTANT'
 
 echo
 echo "killed $KILLED of $((KILLED+HOLES)) real defects; $EQUIV_OK of $((EQUIV_OK+EQUIV_BAD)) equivalent mutants behaved as predicted"

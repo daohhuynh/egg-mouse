@@ -34,9 +34,58 @@ final class ConfigModel: ObservableObject {
     @Published var gates: [String: String] = [:]
     @Published var buttons: [String] = []
     @Published var actions: [String] = []
+    /// Action name -> the kind of argument it needs: "cpi", "key", or "none".
+    /// Two of the nineteen actions take one, and until 2026-09-06 the app could
+    /// not express either -- the picker offered them bare and every selection
+    /// was a guaranteed refusal.
+    @Published var actionArg: [String: String] = [:]
+    /// The key names `key:` accepts, straight from the parser's own table.
+    @Published var keyNames: [String] = []
     @Published var output = ""
     @Published var busy = false
     @Published var loadError: String?
+
+    /// What the mouse is set to, decoded. Nil until someone asks -- reading it
+    /// puts an A1 12 on the wire and this screen never does that unprompted.
+    @Published var current: Commands.Shown?
+    /// Where `current` came from, for the pane's own heading: the device, or a
+    /// file. A decoded table with no provenance is the kind of thing someone
+    /// acts on believing it came off the mouse.
+    @Published var currentFrom = ""
+    /// Set when a write succeeds after `current` was read. The values on
+    /// screen are then older than the mouse, and saying so is free -- whereas
+    /// re-reading automatically would send a frame nobody asked for (§4.2a).
+    @Published var currentStale = false
+    @Published var currentError: String?
+
+    /// Load the decoded table. `from` nil means the device.
+    func loadCurrent(_ runner: ToolRunner, from path: String? = nil) async {
+        busy = true
+        defer { busy = false }
+        currentError = nil
+        do {
+            let r = try await runner.run(
+                "egg-config", Commands.showSettingsMachine(from: path))
+            guard r.ok else {
+                currentError = r.text.isEmpty
+                    ? "egg-config show exited non-zero." : r.text
+                return
+            }
+            let parsed = Commands.parseShow(r.text)
+            if parsed.isEmpty {
+                currentError = "egg-config show returned nothing this app "
+                             + "could parse. That is a build problem, not a "
+                             + "device problem."
+                return
+            }
+            current = parsed
+            currentFrom = path.map { URL(fileURLWithPath: $0).lastPathComponent }
+                       ?? "the mouse"
+            currentStale = false
+        } catch {
+            currentError = error.localizedDescription
+        }
+    }
 
     /// Loads the field table by asking the CLI and parsing its answer with
     /// Commands.parseFields, which Tests/test_app_commands.swift drives against
@@ -74,25 +123,43 @@ final class ConfigModel: ObservableObject {
     ///     them would produce a refusal the user cannot act on. The GUI must
     ///     not present a choice the tool will reject.
     func loadButtons(_ runner: ToolRunner) async {
-        guard let r = try? await runner.run("egg-config", ["map"]) else { return }
-        var b: [String] = [], a: [String] = []
-        var mode = 0
+        // `map --machine`, NOT `map`. This used to scrape the human listing,
+        // and an audit on 2026-09-06 found it offering `e.g.`, `for`, `minus`,
+        // `grave` and `pagedown` -- continuation lines of two descriptions,
+        // read as if they were actions. Five of twenty-four menu entries were
+        // therefore guaranteed refusals, and the two actions that TAKE an
+        // argument had nowhere to put one, so `key:` and `fixed-cpi:` bindings
+        // were unreachable from the app entirely.
+        //
+        // The fix is to stop parsing prose. `--machine` emits the tables one
+        // record per line with a leading keyword, and anything unrecognised is
+        // ignored -- so a wording change in the human listing can no longer
+        // reach this code.
+        guard let r = try? await runner.run("egg-config", ["map", "--machine"])
+        else { return }
+        var b: [String] = [], a: [String] = [], k: [String] = []
+        var arg: [String: String] = [:]
         for line in r.text.split(separator: "\n") {
-            let s = String(line)
-            if s.lowercased().contains("button") && s.hasSuffix(":") { mode = 1; continue }
-            if s.lowercased().contains("action") && s.hasSuffix(":") { mode = 2; continue }
-            let t = s.trimmingCharacters(in: .whitespaces)
-            guard s.hasPrefix("  "), !t.isEmpty, !t.hasSuffix(":") else { continue }
-            let word = String(t.split(separator: " ").first ?? "")
-            guard !word.isEmpty else { continue }
-            if mode == 1 {
-                if !t.contains("not offered") { b.append(word) }
-            } else if mode == 2 {
-                a.append(word)
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+                        .map(String.init)
+            switch (f.first, f.count) {
+            case ("BUTTON", 3):
+                // f[2] == "1" means the vendor's own page offers a row for it.
+                // `left` and `cpi-button` are 0 and the CLI refuses them, so
+                // showing them would be presenting a choice that cannot work.
+                if f[2] == "1" { b.append(f[1]) }
+            case ("ACTION", 4):
+                a.append(f[1]); arg[f[1]] = f[3]
+            case ("KEY", 2):
+                k.append(f[1])
+            default:
+                continue
             }
         }
         buttons = b
         actions = a
+        actionArg = arg
+        keyNames = k
     }
 }
 
@@ -113,12 +180,24 @@ struct ConfigView: View {
     }
     @State private var editor: Editor = .field
 
+    /// The right column shows one of two things. It is a switch and not a
+    /// second window because they answer different questions -- "what is my
+    /// mouse set to" and "what did the last command print" -- and a user who
+    /// wants the first should not have to read the second to find it.
+    enum RightPane: String, CaseIterable, Identifiable {
+        case current = "Current settings", output = "Tool output"
+        var id: String { rawValue }
+    }
+    @State private var rightPane: RightPane = .current
+
     @State private var selected: String = ""
     @State private var value: String = ""
     @State private var previewed = false
 
     @State private var button: String = ""
     @State private var action: String = ""
+    /// The argument for the two actions that take one (fixed-cpi, key).
+    @State private var argument: String = ""
 
     @State private var cpiStage: Int = 1
     @State private var cpiX: String = ""
@@ -175,9 +254,19 @@ struct ConfigView: View {
             }
 
             HStack(spacing: 10) {
+                Button("Show settings") {
+                    rightPane = .current
+                    Task { await model.loadCurrent(runner) }
+                }
+                .help("One A1 12 read, decoded into words. The same exchange "
+                    + "`Read from mouse` performs -- nothing extra goes out.")
                 Button("Read from mouse") { run(Commands.readSettings()) }
                 Button("Device info")     { run(Commands.deviceInfo()) }
-                Button("Save a copy")     { run(Commands.readSettings(savingTo: defaultSavePath())) }
+                Button("Save a copy\u{2026}") { chooseSaveTarget() }
+                    .help("Reads the record and writes it wherever you say. "
+                        + "Until 2026-09-06 this always overwrote one fixed "
+                        + "file in Documents, so two saved records could not "
+                        + "coexist and the second silently replaced the first.")
                 if FileManager.default.fileExists(
                         atPath: Commands.knownGoodVaultPath()) {
                     Button("Restore known-good") {
@@ -254,8 +343,21 @@ struct ConfigView: View {
                 }
                 .frame(width: 300)
 
-                OutputPane(text: runner.liveOutput.isEmpty ? model.output
-                                                           : runner.liveOutput)
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("", selection: $rightPane) {
+                        ForEach(RightPane.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+
+                    if rightPane == .current {
+                        currentPane
+                    } else {
+                        OutputPane(text: runner.liveOutput.isEmpty
+                                            ? model.output : runner.liveOutput)
+                    }
+                }
             }
             .padding(.horizontal)
             .padding(.bottom)
@@ -265,6 +367,212 @@ struct ConfigView: View {
             await model.loadFields(runner)
             await model.loadButtons(runner)
         }
+    }
+
+    // ------------------------------------------------- the decoded settings
+
+    /// Everything the mouse is set to, in words.
+    ///
+    /// THE RULE THIS PANE FOLLOWS. It renders what `show --machine` said and
+    /// nothing else. It does not compute a reading, does not fall back to a
+    /// plausible default, and does not hide a row it cannot explain: a field
+    /// whose byte is `undecodable` is shown in red with the CLI's own sentence,
+    /// and a button entry that matched none of the 19 derived actions says
+    /// UNKNOWN with its raw bytes beside it. §1.2a -- an absence shown as a
+    /// blank is a claim.
+    ///
+    /// Split into one small view per section because SwiftUI's type checker
+    /// gives up on the whole thing in one body. That is a real constraint, not
+    /// a style choice, and it is worth a line here so nobody merges them back.
+    @ViewBuilder private var currentPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let e = model.currentError {
+                    Text(e).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let c = model.current {
+                    shownHeader
+                    shownFields(c.fields)
+                    shownCpi(c.cpi)
+                    shownButtons(c)
+                    shownClicks(c.clicks)
+                    shownRaw(c.raw)
+                } else if model.currentError == nil {
+                    shownEmpty
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.06))
+    }
+
+    @ViewBuilder private var shownHeader: some View {
+        HStack(spacing: 8) {
+            Text("Read from \(model.currentFrom)")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Refresh") { Task { await model.loadCurrent(runner) } }
+            Button("From a file\u{2026}") { chooseShowFile() }
+                .help("Decode a record saved earlier. Opens no device and "
+                    + "sends nothing.")
+        }
+        if model.currentStale {
+            Text("A write has succeeded since this was read, so these values "
+               + "are older than the mouse. Refresh to send another read.")
+                .font(.caption).bold()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var shownEmpty: some View {
+        Text("Nothing read yet.").foregroundStyle(.secondary)
+        Text("`Show settings` sends one A1 12 read \u{2014} the same exchange "
+           + "`Read from mouse` performs \u{2014} and decodes every byte it "
+           + "understands. `From a file\u{2026}` does the same to a record "
+           + "saved earlier, with nothing plugged in.")
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Button("From a file\u{2026}") { chooseShowFile() }
+    }
+
+    @ViewBuilder
+    private func shownFields(_ fields: [Commands.Shown.FieldValue]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Settings").font(.headline)
+            ForEach(fields, id: \.name) { f in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(f.name)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(width: 170, alignment: .leading)
+                        Text(f.text)
+                            .foregroundStyle(f.ok ? Color.primary : Color.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(f.location)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .padding(.leading, 178)
+                    if !f.gate.isEmpty {
+                        Text("This device will not accept a write here: \(f.gate)")
+                            .font(.caption).bold()
+                            .padding(.leading, 178)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shownCpi(_ stages: [Commands.Shown.Stage]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CPI stages").font(.headline)
+            ForEach(stages, id: \.index) { s in
+                HStack(spacing: 8) {
+                    Text("stage \(s.index)")
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 90, alignment: .leading)
+                    Text(s.x == s.y ? "\(s.x) CPI" : "\(s.x) x \(s.y) CPI")
+                    if s.active { Text("active").font(.caption).bold() }
+                    if !s.inUse {
+                        Text("beyond CPI Levels; not selectable")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shownButtons(_ c: Commands.Shown) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Buttons").font(.headline)
+            Text(c.handed == "unknown"
+                 ? "Handedness: UNKNOWN \u{2014} neither entry holds the "
+                 + "primary-click value, a state the vendor's own UI cannot "
+                 + "produce."
+                 : "Handedness: \(c.handed)-handed")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(c.buttons, id: \.slot) { b in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(b.slot)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 90, alignment: .leading)
+                    if b.unknown {
+                        Text("UNKNOWN").bold().foregroundStyle(.red)
+                        Text(b.detail).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(b.action)
+                        if !b.detail.isEmpty {
+                            Text(b.detail).foregroundStyle(.secondary)
+                        }
+                    }
+                    if !b.offered {
+                        Text("not editable here")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shownClicks(_ clicks: [Commands.Shown.Click]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Click filter / SPDT").font(.headline)
+            ForEach(clicks, id: \.button) { m in
+                HStack(spacing: 8) {
+                    Text(m.button)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 90, alignment: .leading)
+                    if m.mode == "off" {
+                        Text("filter \(m.value)")
+                    } else if m.mode == "unknown" {
+                        Text("raw 0x\(m.raw) \u{2014} neither a filter value "
+                           + "nor a GX mode")
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(m.mode)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shownRaw(_ raw: [String: String]) -> some View {
+        if !raw.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Derived, shown but not settable").font(.headline)
+                ForEach(raw.keys.sorted(), id: \.self) { k in
+                    HStack(spacing: 8) {
+                        Text(k)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(width: 170, alignment: .leading)
+                        Text("0x\(raw[k] ?? "")").foregroundStyle(.secondary)
+                    }
+                }
+                Text("`egg-config set` lists why each of these is withheld "
+                   + "from writing. Reading one is free.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func chooseShowFile() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.allowsMultipleSelection = false
+        p.message = "Choose a settings record saved earlier"
+        guard p.runModal() == .OK, let u = p.url else { return }
+        Task { await model.loadCurrent(runner, from: u.path) }
     }
 
     // ---------------------------------------------------------------- panels
@@ -325,7 +633,63 @@ struct ConfigView: View {
                                                         : "Preview it first.")
                         }
                     }
+
+                    withheldList
         }
+    }
+
+    /// "Why is glass-mode not in the list?"
+    ///
+    /// The CLI prints a paragraph for each field it derived and deliberately
+    /// does NOT offer, and the app has parsed those into `model.withheld` since
+    /// the day it shipped -- and never rendered them. So a user looking for
+    /// `glass-mode`, `multiclick-filter` or the vendor's inverted "Disable LED
+    /// on Lift-Off" saw no trace of it and no explanation. CLAUDE.md §1.2a: an
+    /// absence is a claim, and that rule applies to our own UI.
+    @ViewBuilder private var withheldList: some View {
+        if !model.withheld.isEmpty {
+            DisclosureGroup("Derived, deliberately not settable "
+                          + "(\(model.withheld.count))") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.withheld, id: \.0) { name, why in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(name)
+                                .font(.system(.caption, design: .monospaced))
+                                .bold()
+                            Text(why)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .font(.caption)
+            .padding(.top, 6)
+        }
+    }
+
+    /// `fixed-cpi` plus "1600" is the single token `fixed-cpi:1600` on the
+    /// command line. Built in ONE place so preview and apply cannot disagree
+    /// about what is being asked for -- the whole point of a preview is that it
+    /// showed you the thing that then happens.
+    private var composedAction: String {
+        let kind = model.actionArg[action] ?? "none"
+        if kind == "none" { return action }
+        let a = argument.trimmingCharacters(in: .whitespaces)
+        return a.isEmpty ? action : action + ":" + a
+    }
+
+    /// Why the mapping buttons are disabled, as a Bool. An action that needs an
+    /// argument and has none would produce `egg-config map right fixed-cpi`,
+    /// which the CLI refuses -- so the app must not offer to send it.
+    private var mapBlocked: Bool {
+        if button.isEmpty || action.isEmpty { return true }
+        let kind = model.actionArg[action] ?? "none"
+        if kind != "none" && argument.trimmingCharacters(in: .whitespaces).isEmpty {
+            return true
+        }
+        return false
     }
 
     @ViewBuilder private var buttonEditor: some View {
@@ -344,7 +708,27 @@ struct ConfigView: View {
                 Text("—").tag("")
                 ForEach(model.actions, id: \.self) { Text($0).tag($0) }
             }
-            .onChange(of: action) { _, _ in previewed = false }
+            .onChange(of: action) { _, _ in previewed = false; argument = "" }
+
+            // The two actions that take an argument. Shown only for those two,
+            // because an always-visible field would imply the other seventeen
+            // accept one.
+            if model.actionArg[action] == "cpi" {
+                TextField("CPI, e.g. 1600 or 1600x800", text: $argument)
+                    .onChange(of: argument) { _, _ in previewed = false }
+                Text("10 to 30000 in steps of 10. Give one number for both axes, "
+                   + "or XxY for independent ones.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if model.actionArg[action] == "key" {
+                TextField("Key, e.g. a  ctrl+shift+a  f5", text: $argument)
+                    .onChange(of: argument) { _, _ in previewed = false }
+                Text("Modifiers ctrl, shift, alt and gui may be combined with +. "
+                   + "Names: " + model.keyNames.prefix(14).joined(separator: " ")
+                   + (model.keyNames.count > 14 ? " …" : ""))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Left click and the CPI button are absent from the list on
             // purpose; say why rather than leaving a person hunting for them.
@@ -357,11 +741,11 @@ struct ConfigView: View {
             HStack {
                 Button("Preview") {
                     previewed = true
-                    run(Commands.previewMap(button: button, action: action))
+                    run(Commands.previewMap(button: button, action: composedAction))
                 }
-                .disabled(button.isEmpty || action.isEmpty)
-                Button("Apply") { run(Commands.applyMap(button: button, action: action)) }
-                    .disabled(!previewed || button.isEmpty || action.isEmpty)
+                .disabled(mapBlocked)
+                Button("Apply") { run(Commands.applyMap(button: button, action: composedAction)) }
+                    .disabled(!previewed || mapBlocked)
                     .help(previewed ? "Write it, read it back, verify."
                                     : "Preview it first.")
             }
@@ -544,10 +928,23 @@ struct ConfigView: View {
         run(Commands.previewRestore(record: u.path)) { restorePreviewed = true }
     }
 
-    private func defaultSavePath() -> String {
-        let d = FileManager.default.urls(for: .documentDirectory,
-                                         in: .userDomainMask).first!
-        return d.appendingPathComponent("egg-mouse-settings.bin").path
+    /// A save panel, not a fixed path. The old fixed path meant every click of
+    /// "Save a copy" overwrote the previous one -- so a user who saved before a
+    /// change and again after it had only the second, and the whole point of
+    /// saving was to be able to compare them (`Advanced` -> Compare).
+    private func chooseSaveTarget() {
+        let p = NSSavePanel()
+        p.message = "Where to save this settings record"
+        p.nameFieldStringValue = defaultSaveName()
+        guard p.runModal() == .OK, let u = p.url else { return }
+        run(Commands.readSettings(savingTo: u.path))
+    }
+
+    /// Dated, so the panel's own default no longer collides with itself.
+    private func defaultSaveName() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmm"
+        return "egg-mouse-settings-\(f.string(from: Date())).bin"
     }
 
     /// `ok` is called only when egg-config both ran AND exited 0. The
@@ -571,6 +968,13 @@ struct ConfigView: View {
                 // anyway, while a cleared one would re-offer a field that is
                 // still unsafe.
                 if args.first == "read" { model.gates = Commands.parseGates(r.text) }
+                // A write that succeeded makes the decoded table older than
+                // the mouse. Said, not silently corrected: correcting it means
+                // another A1 12, and this screen does not send frames the user
+                // did not ask for.
+                if r.ok && args.contains("--yes") && model.current != nil {
+                    model.currentStale = true
+                }
             } catch {
                 model.output = error.localizedDescription
             }

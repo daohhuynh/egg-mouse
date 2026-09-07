@@ -26,6 +26,109 @@ enum Commands {
 
     static func deviceInfo() -> [String] { ["info"] }
 
+    // ------------------------------------------------------- `show`, decoded
+    /// Every setting in words. `read` prints 1024 bytes of hex; this prints
+    /// what the mouse is actually set to, and until 2026-09-06 the app had no
+    /// way to answer "what is my polling rate?" at all.
+    ///
+    /// `from` makes it entirely offline -- a record saved earlier, decoded with
+    /// nothing plugged in.
+    static func showSettings(from path: String? = nil) -> [String] {
+        var a = ["show"]
+        if let p = path, !p.isEmpty { a += ["--from", p] }
+        return a
+    }
+
+    /// The same thing as TSV. The GUI parses THIS, never the human layout --
+    /// same rule as `map --machine` and for the same reason: a wording change
+    /// in a printf must not be able to reach the app's data model.
+    static func showSettingsMachine(from path: String? = nil) -> [String] {
+        showSettings(from: path) + ["--machine"]
+    }
+
+    /// What `show --machine` says, as values. Every field is carried through
+    /// verbatim -- including `status`, which is "undecodable" for a byte no
+    /// `set` could have produced, and `gate`, which is why a field's reading
+    /// may not mean what it usually means (§7.25). Neither is cosmetic: a GUI
+    /// that dropped them would show a confident number for a byte the CLI
+    /// itself refuses to interpret.
+    struct Shown: Equatable {
+        struct FieldValue: Equatable {
+            var name = "", location = "", text = "", status = "", gate = ""
+            var ok: Bool { status == "ok" }
+        }
+        struct Stage: Equatable {
+            var index = 0, x = 0, y = 0
+            var active = false, inUse = false
+        }
+        struct Binding: Equatable {
+            var slot = "", action = "", detail = "", raw = ""
+            var offered = false
+            /// The CLI leaves `action` empty when +0/+1 match none of the 19
+            /// derived actions. That is a finding, not a blank.
+            var unknown: Bool { action.isEmpty }
+        }
+        struct Click: Equatable {
+            var button = "", mode = "", value = 0, raw = ""
+        }
+        var fields: [FieldValue] = []
+        var cpi: [Stage] = []
+        var buttons: [Binding] = []
+        var clicks: [Click] = []
+        var handed = ""
+        /// What firmware the reading came off. §5: the record LAYOUT is stable
+        /// across 1.07 -> 1.10 by measurement and the DEFAULTS are not, so a
+        /// decoded table with no version beside it has lost its provenance.
+        /// Empty when the read came from a file rather than a device, and
+        /// `firmware` is empty when bcdDevice is not valid BCD.
+        var firmware = "", firmwareBcd = ""
+        /// Derived but not settable, shown read-only: "glass-mode" -> "00".
+        var raw: [String: String] = [:]
+        var isEmpty: Bool { fields.isEmpty && cpi.isEmpty && buttons.isEmpty }
+    }
+
+    static func parseShow(_ text: String) -> Shown {
+        var out = Shown()
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+                        .map(String.init)
+            switch (f.first, f.count) {
+            case ("FIELD", 6):
+                // A nameless row is not a field. Dropped rather than shown
+                // blank, and dropped rather than kept because SwiftUI keys the
+                // pane's rows on the name -- two of them would collide.
+                guard !f[1].isEmpty else { continue }
+                out.fields.append(.init(name: f[1], location: f[2], text: f[3],
+                                        status: f[4], gate: f[5]))
+            case ("CPI", 6):
+                guard let n = Int(f[1]), let x = Int(f[2]), let y = Int(f[3])
+                else { continue }
+                out.cpi.append(.init(index: n, x: x, y: y,
+                                     active: f[4] == "1", inUse: f[5] == "1"))
+            case ("BUTTON", 6):
+                guard !f[1].isEmpty else { continue }
+                out.buttons.append(.init(slot: f[1], action: f[2], detail: f[3],
+                                         raw: f[4], offered: f[5] == "1"))
+            case ("MULTICLICK", 5):
+                guard !f[1].isEmpty else { continue }
+                out.clicks.append(.init(button: f[1], mode: f[2],
+                                        value: Int(f[3]) ?? 0, raw: f[4]))
+            case ("FIRMWARE", 3):
+                out.firmwareBcd = f[1]
+                out.firmware    = f[2]
+            case ("HANDED", 2):
+                out.handed = f[1]
+            case ("RAW", 4):
+                guard !f[1].isEmpty else { continue }
+                out.raw[f[1]] = f[3]
+            default:
+                continue
+            }
+        }
+        return out
+    }
+
+
     /// Enumerate. `egg-config devices` calls `hid_enumerate` and nothing else --
     /// it opens no handle and sends no frame -- so this is safe to run on a
     /// timer and safe to run on a mouse that is mid-recovery.
@@ -72,6 +175,78 @@ enum Commands {
         if app { return .application }
         return .unclear
     }
+
+    /// The application-mode firmware version out of `egg-config devices`, or
+    /// nil. The tool prints the decoded version in its own column, so this
+    /// reads THAT rather than decoding bcdDevice a second time in Swift -- the
+    /// decode is [D] from updater 1.10 FUN_004011f0 and belongs in one place.
+    ///
+    /// Bootloader rows are skipped on purpose: their bcdDevice is 0x0006, which
+    /// decodes to a perfectly well-formed "0.06" that is not a firmware version
+    /// anybody would recognise as one.
+    static func firmwareVersion(fromDevices text: String) -> String? {
+        for raw in text.split(separator: "\n") {
+            let line = String(raw)
+            guard line.hasPrefix("0x"), line.contains("(application)") else {
+                continue
+            }
+            let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+            // PID, usagepage, usage, version, firmware, ...
+            guard cols.count >= 5 else { continue }
+            let v = String(cols[4])
+            // "not BCD" is the tool's own word for a field it will not read as
+            // a version, and it must not reach the UI as if it were one.
+            guard v != "not", v.contains(".") else { return nil }
+            return v
+        }
+        return nil
+    }
+
+    // -------------------------------------------- offline / read-only verbs
+    // Everything below opens no device and sends no frame. They were reachable
+    // only from a terminal until 2026-09-06, which meant the app told people to
+    // go and run `egg-config diff` in Terminal at the exact moment it had just
+    // finished a firmware operation. A read-only verb the GUI cannot reach is a
+    // read-only verb most users do not have.
+
+    /// Compare two saved records. Needs no mouse.
+    static func diffRecords(_ a: String, _ b: String) -> [String] {
+        ["diff", a, b]
+    }
+
+    /// Every fixed command frame this build can put on the wire, as hex.
+    /// Sends nothing; it is the config counterpart of `egg-flash stream`.
+    static func frames() -> [String] { ["frames"] }
+
+    /// The 4-argument `dryrun`: what a field change would send, against a
+    /// SAVED record, with the mouse unplugged. The app's other preview
+    /// (`set FIELD VALUE` with no --yes) opens the device; this one does not.
+    static func dryRunField(record: String, field: String,
+                            value: String) -> [String] {
+        ["dryrun", record, field, value]
+    }
+
+    /// Apply a field to a saved record and write a new file. Offline.
+    static func encodeField(field: String, value: String,
+                            from input: String, to output: String) -> [String] {
+        ["encode", field, value, input, output]
+    }
+
+    /// `handedness SIDE --from FILE` -- the offline plan, nothing on the wire.
+    static func previewHandedness(_ side: String, from path: String) -> [String] {
+        ["handedness", side, "--from", path]
+    }
+
+    /// `-v` on either tool. It is a LOGGING flag and nothing else: both CLIs
+    /// parse it into `Log` and no code path branches on it, so the byte stream
+    /// for a given verb is identical with and without it. Tests/test_config_set.sh
+    /// checks that by diffing `dryrun` output both ways -- an assertion about
+    /// the frames themselves, not about the parser.
+    static func verbose(_ args: [String]) -> [String] { ["-v"] + args }
+
+    /// Is the bootloader present? `read-firmware --check` reports and stops --
+    /// it reads no blocks and writes no file.
+    static func checkBootloader() -> [String] { ["read-firmware", "--check"] }
 
     static func factoryReset() -> [String] { ["factory-reset", "--yes"] }
 
@@ -202,6 +377,34 @@ enum Commands {
         ["read-firmware", path]
     }
 
+    /// Put the mouse into update mode. ADDED 2026-09-06 and it should have been
+    /// here from the start: `read-firmware` REQUIRES the mouse to already be in
+    /// the bootloader and cannot get it there, so before this the app's only
+    /// route was the buttons, which step 1's own text did not say.
+    ///
+    /// It also matters for the entry receipt. `egg-flash` refuses to write to a
+    /// bootloader it did not enter itself unless told the buttons were used; a
+    /// GUI with no way to send A1 3A could only ever take the override path,
+    /// which is the weaker one.
+    ///
+    /// Sends ONE report and then only watches. No erase, no write.
+    static func enterBootloader() -> [String] {
+        ["enter-bootloader", "--yes"]
+    }
+
+    /// The way back out WITHOUT flashing. Sends one report (A1 09), the
+    /// vendor's own exit. No erase, no write.
+    ///
+    /// ADDED 2026-09-06 alongside enterBootloader, and it would have been a bad
+    /// asymmetry to ship one without the other: an app that can put the mouse
+    /// into a mode it cannot get it out of is worse than an app that can do
+    /// neither. It does not always succeed -- a bootloader that has never been
+    /// flashed comes back into the bootloader, which is [O] twice -- and the
+    /// tool's own output explains that case, so the app shows it verbatim.
+    static func leaveBootloader() -> [String] {
+        ["leave-bootloader", "--yes"]
+    }
+
     /// Validate the image and stop. Reaches no device.
     static func checkImage(updater: String, version: String?) -> [String] {
         var a = ["image", updater]
@@ -228,11 +431,19 @@ enum Commands {
     ///
     /// Safe by construction: the refusal happens host-side, before the device
     /// is enumerated (§4.2, "preflight sends nothing").
+    /// `buttonEntered` adds --i-know-this-is-button-entered.
+    ///
+    /// NEEDED HERE TOO, not only on the flash itself, and that is not obvious:
+    /// egg-flash checks the entry receipt BEFORE it returns the token, so a
+    /// preview against a button-entered mouse is refused and prints no code at
+    /// all. Without this the app could not even reach step 3.
     static func requestToken(updater: String, backup: String,
-                             version: String?) -> [String] {
+                             version: String?,
+                             buttonEntered: Bool = false) -> [String] {
         var a = ["flash", updater]
         if !backup.isEmpty { a += ["--backup", backup] }
         if let v = version, !v.isEmpty { a += ["--version", v] }
+        if buttonEntered { a.append("--i-know-this-is-button-entered") }
         return a          // deliberately no --yes and no --confirm
     }
 
@@ -275,7 +486,8 @@ enum Commands {
                       backup: String,
                       token: String,
                       version: String?,
-                      versionIsProven: Bool) -> [String] {
+                      versionIsProven: Bool,
+                      buttonEntered: Bool = false) -> [String] {
         precondition(!updater.isEmpty && !backup.isEmpty && !token.isEmpty,
                      "Commands.flash called without updater, backup and token")
         var a = ["flash", updater,
@@ -284,6 +496,42 @@ enum Commands {
                  "--yes"]
         if let v = version, !v.isEmpty { a += ["--version", v] }
         if !versionIsProven { a.append("--i-know-this-version-is-untested") }
+        // Two overrides, two separate flags, deliberately never merged: one says
+        // "this firmware version is unproven", the other says "this bootloader
+        // was entered with the buttons". They are different admissions and a
+        // single checkbox for both would get ticked for the wrong reason.
+        if buttonEntered { a.append("--i-know-this-is-button-entered") }
+        return a
+    }
+
+    /// Write a previously-saved backup back to the mouse. The backup must carry
+    /// the <image>.origin sidecar `read-firmware` writes; egg-flash refuses any
+    /// other file, so there is no way for this to write something the tool did
+    /// not itself read off this device.
+    ///
+    /// `current` is a FRESH backup of what is on the mouse right now — the thing
+    /// about to be erased — and must be a different file from `backup`.
+    static func restoreFirmware(backup: String,
+                                current: String,
+                                token: String,
+                                buttonEntered: Bool = false) -> [String] {
+        precondition(!backup.isEmpty && !current.isEmpty && !token.isEmpty,
+                     "Commands.restoreFirmware called without all three")
+        var a = ["restore-firmware", backup,
+                 "--backup", current,
+                 "--confirm", token.trimmingCharacters(in: .whitespaces),
+                 "--yes"]
+        if buttonEntered { a.append("--i-know-this-is-button-entered") }
+        return a
+    }
+
+    /// The preview for a restore: same command, no --confirm, so it prints the
+    /// plan and the code and sends nothing.
+    static func requestRestoreToken(backup: String, current: String,
+                                    buttonEntered: Bool = false) -> [String] {
+        var a = ["restore-firmware", backup]
+        if !current.isEmpty { a += ["--backup", current] }
+        if buttonEntered { a.append("--i-know-this-is-button-entered") }
         return a
     }
 

@@ -59,3 +59,16 @@ mut*.log
 # so they are ignored here too, and Tools/no-mutants.sh refuses a commit while
 # one is present. A planted DEFECT reaching a commit is the failure mode.
 notes/zzz-planted-*.md
+
+# The bootloader entry receipt (Sources/EGGFlashCore/include/egg/Provenance.h).
+# `enter-bootloader` writes it to $HOME, not to the working directory -- a
+# Finder-launched .app runs with a cwd of "/", so a cwd-relative receipt could
+# never be written from the GUI and every flash from the app would refuse. It
+# is listed here anyway for the HOME-less fallback path, and because a
+# committed receipt would vouch for an A1 3A entry that happened on someone
+# else's machine.
+.egg-mouse-entry-receipt
+
+# Backup provenance sidecars. The images themselves are already ignored above
+# (*.bin); these say where one came from and are equally local.
+*.bin.origin

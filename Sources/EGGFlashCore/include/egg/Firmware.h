@@ -102,6 +102,31 @@ public:
     bool loadFromRelease(const std::string& exePath, const Release& rel,
                          std::string& error);
 
+    // The THIRD and last loader: an image this tool read off this device with
+    // A0 07 and saved with `read-firmware`. the owner's call, 2026-09-06 -- restoring
+    // a backup is allowed, but ONLY a backup, and only one whose bytes have not
+    // changed since it was taken.
+    //
+    // It refuses unless a sidecar written by `read-firmware` sits beside the
+    // file AND records the sha256 the file hashes to right now. See
+    // Provenance.h. The size and block-count checks are the same as the other
+    // two loaders'; what it deliberately does NOT check is kExpectedSha256,
+    // because the whole point is to write back something OTHER than the image
+    // this build was derived against.
+    //
+    // WHY THIS DOES NOT WEAKEN §1.4. That rule exists so a resource belonging
+    // to another product can never be flashed, and it is about resource
+    // SELECTION: "never a variable, never selected at runtime, never chosen
+    // from a list." Nothing here opens a PE, reads a resource directory or
+    // consults an id -- there is no selection to influence. The bytes can only
+    // have arrived from this device's own flash, and the sidecar is what makes
+    // that checkable rather than assumed.
+    //
+    // What it is NOT: a defence against a forged sidecar. The threat model (§2)
+    // is bugs in our own code and mistakes at the keyboard -- naming the wrong
+    // file -- not an adversary with write access to the backup directory.
+    bool loadFromBackup(const std::string& imagePath, std::string& error);
+
     const std::vector<std::uint8_t>& bytes() const { return bytes_; }
     std::size_t blockCount() const { return bytes_.size() / kBlockSize; }
     std::uint32_t checksum() const { return checksum_; }

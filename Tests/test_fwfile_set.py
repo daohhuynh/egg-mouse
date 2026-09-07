@@ -163,5 +163,99 @@ class NoOtherCodePathCanNameFwfile(unittest.TestCase):
                              "%s is imported; the directory could be walked" % nm)
 
 
+# ---------------------------------------------------------------------------
+# The two predictions in notes/wire-predictions.md whose citation named a file
+# that does not exist.
+# ---------------------------------------------------------------------------
+# `#13 alternate-updater-payloads` and `#14 config-tool-sends-no-firmware` both
+# cited "scratchpad/fw.py". That file is not in the repo, so §1.2's rule -- a
+# citation must be something someone else can go and check -- was not met, and
+# the two were unverifiable as written however true they were.
+#
+# Fixed by re-deriving every number with the COMMITTED parser
+# (Tools/pe/fwfile.py) and pinning the result here, so the citation now names a
+# test that runs in ctest rather than a script nobody has. All values below
+# reproduced exactly on 2026-09-06; nothing in either prediction changed.
+
+CFG_TOOLS = [
+    "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.00.exe",
+    "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.01.exe",
+    "old-config-executables/Endgame Gear OP1 8k v2 Configuration Tool v1.04.exe",
+    "Endgame Gear OP1 8k v2 Configuration Tool v1.07.exe",
+]
+
+# id 140 of each updater: (sha256, 32-bit sum, first 16 bytes).
+PAYLOAD_140 = {
+    V110: ("8148ebe9f8d2848abe483aee98df6e42bab341c6a17523bfef0f85f1f66754d0",
+           0x0081D57D, "29C4D0EA8AE8D61CEF8DAB9E7803F7D9"),
+    V107: ("3922b14157eff4268ca28c8fe7f284ba1ec0880dae2d9137d01eb1c42e297940",
+           0x0081D408, "CA774E197B457109B2FC214FD83BEAD7"),
+    V106: ("9f01d732913fcfc6799d699d19a92878c97a5f4dc76ed18b4a307125b35514dd",
+           0x0081F40B, "4931DA122BEF4AA4454678462ED79252"),
+    V104: ("41d5397ec84c4f167e6dce4d05f649f425e5c38ee066b8931721898d5dc013c3",
+           0x0081F627, "4931DA122BEF4AA4454678462ED79252"),
+}
+
+
+class PredictionThirteenAlternateUpdaterPayloads(unittest.TestCase):
+    """Every updater's own FWFILE/140 -- the A0 03 checksum identifies which
+    .exe was run, from the capture alone, with no filesystem access."""
+
+    def test_all_four_payloads_match_what_the_prediction_states(self):
+        for rel, (sha, sum32, first16) in PAYLOAD_140.items():
+            if not have(rel):
+                self.skipTest("%s not present" % rel)
+            with open(path(rel), "rb") as f:
+                b = f.read()
+            got = [x for x in fwfile.fwfiles(path(rel)) if x[0] == FLASHED_ID]
+            self.assertEqual(len(got), 1, rel)
+            name, lang, off, size, h = got[0]
+            img = b[off:off + size]
+            self.assertEqual(size, IMAGE_SIZE, rel)
+            self.assertEqual(size % 1024, 0, rel)
+            self.assertEqual(size // 1024, 65, rel)
+            self.assertEqual(h, sha, rel)
+            self.assertEqual(sum(img) & 0xFFFFFFFF, sum32, rel)
+            self.assertEqual(img[:16].hex().upper(), first16, rel)
+
+    def test_1_06_and_1_04_share_a_first_block_but_not_an_image(self):
+        # Stated in the prediction as "first16 identical to 1.06's", and it is
+        # the reason first-bytes are not an identity check: only the whole-image
+        # sum separates those two.
+        self.assertEqual(PAYLOAD_140[V106][2], PAYLOAD_140[V104][2])
+        self.assertNotEqual(PAYLOAD_140[V106][0], PAYLOAD_140[V104][0])
+        self.assertNotEqual(PAYLOAD_140[V106][1], PAYLOAD_140[V104][1])
+
+
+class PredictionFourteenConfigToolsCannotFlash(unittest.TestCase):
+    """CLAUDE.md §3's two-executable split assumes the config tool has no flash
+    path. If it had one, the contradictory-quit-semantics argument would need
+    revisiting -- so this is load-bearing, not trivia."""
+
+    def test_each_config_tool_has_74_leaves_and_no_FWFILE(self):
+        needle = "FWFILE".encode("utf-16-le")
+        for rel in CFG_TOOLS:
+            if not have(rel):
+                self.skipTest("%s not present" % rel)
+            b, leaves = fwfile.resources(path(rel))
+            self.assertEqual(len(leaves), 74, rel)
+            self.assertEqual(len(fwfile.fwfiles(path(rel))), 0, rel)
+            self.assertFalse(any(l[4] == IMAGE_SIZE for l in leaves),
+                             "%s has a 66,560-byte resource" % rel)
+            self.assertEqual(b.count(needle), 0,
+                             "%s contains the UTF-16 string FWFILE" % rel)
+
+    def test_the_updaters_would_fail_that_same_check(self):
+        # §6.2: the check has to be able to fail. Run it against the binaries
+        # that DO carry firmware and confirm it objects.
+        for rel in (V110, V104):
+            if not have(rel):
+                self.skipTest("%s not present" % rel)
+            b, leaves = fwfile.resources(path(rel))
+            self.assertNotEqual(len(leaves), 74, rel)
+            self.assertGreater(len(fwfile.fwfiles(path(rel))), 0, rel)
+            self.assertGreater(b.count("FWFILE".encode("utf-16-le")), 0, rel)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

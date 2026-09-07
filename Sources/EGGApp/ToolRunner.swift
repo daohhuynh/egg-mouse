@@ -74,6 +74,22 @@ final class ToolRunner: ObservableObject {
 
     @Published private(set) var running: String?
 
+    /// Hex-dump every frame. Off by default, and a user-visible switch on the
+    /// Advanced screen.
+    ///
+    /// WHY IT IS SAFE TO APPLY GLOBALLY, which is not obvious and is the whole
+    /// reason this lives here rather than in Commands. `-v` is a LOGGING flag
+    /// in both CLIs: each parses it into a `Log` and nothing else branches on
+    /// it, so the byte stream a verb produces is identical with and without it.
+    /// Tests/test_config_set.sh proves that by diffing `dryrun`'s emitted frame
+    /// both ways -- an assertion about the frames, not about the parser.
+    ///
+    /// Every OTHER argument is built by Commands and driven by
+    /// Tests/test_app_commands.swift against the real tools. This one is the
+    /// single exception and it is the only kind that could be: a flag that
+    /// cannot change what is sent.
+    @Published var verbose = false
+
     /// Where the executables are. Searched next to the app, then in ./build,
     /// then on PATH -- so a developer running from the repo and a user running
     /// a copied bundle both work without configuration.
@@ -102,6 +118,9 @@ final class ToolRunner: ObservableObject {
              isWritePhase: Bool = false) async throws -> ToolResult {
         guard let exe = Self.locate(tool) else { throw ToolError.notFound(tool) }
 
+        // See `verbose`. Prepended, because both tools' parsers take flags
+        // anywhere but their verb dispatch reads args[0].
+        let args = verbose ? ["-v"] + args : args
         running = ([tool] + args).joined(separator: " ")
         liveOutput = ""
         if isWritePhase { writePhaseInProgress = true }

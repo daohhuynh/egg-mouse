@@ -128,6 +128,57 @@ let g = Commands.flash(updater: "u.exe", backup: "b.bin", token: "c0ffee12",
 check(g.contains("--i-know-this-version-is-untested"),
       "an UNPROVEN version must carry the untested acknowledgement")
 
+// The two overrides are SEPARATE flags and must never leak into each other.
+// They are different admissions -- "this firmware is unproven" and "I used the
+// buttons" -- and a builder that emitted one for the other would be approving
+// something the person never said.
+check(!f.contains("--i-know-this-is-button-entered"),
+      "flash must not carry the button-entry override unless asked")
+let fb = Commands.flash(updater: "u.exe", backup: "b.bin", token: "c0ffee12",
+                        version: "1.10", versionIsProven: true,
+                        buttonEntered: true)
+check(fb.contains("--i-know-this-is-button-entered"),
+      "flash carries the button-entry override when the box is ticked")
+check(!fb.contains("--i-know-this-version-is-untested"),
+      "ticking button-entry must NOT also claim the version is untested")
+
+// requestToken needs the override too, and that is not obvious: egg-flash
+// checks the entry receipt BEFORE it prints the token, so a preview against a
+// button-entered mouse is refused and produces no code at all. Without this the
+// app could never reach the confirm field.
+check(!Commands.requestToken(updater: "u", backup: "b", version: nil)
+        .contains("--i-know-this-is-button-entered"),
+      "requestToken must not carry the override unless asked")
+check(Commands.requestToken(updater: "u", backup: "b", version: nil,
+                            buttonEntered: true)
+        .contains("--i-know-this-is-button-entered"),
+      "requestToken carries the override when the box is ticked")
+
+// enter-bootloader: the app could not reach update mode at all before this.
+let eb = Commands.enterBootloader()
+equal(eb, ["enter-bootloader", "--yes"], "enterBootloader is the exact verb")
+// An app that can enter a mode it cannot leave is worse than one that can do
+// neither, so these two ship together or not at all.
+equal(Commands.leaveBootloader(), ["leave-bootloader", "--yes"],
+      "leaveBootloader is the exact verb")
+
+// restore-firmware carries every guard the flash does.
+let rf = Commands.restoreFirmware(backup: "old.bin", current: "now.bin",
+                                  token: " deadbeef ")
+check(rf.first == "restore-firmware", "restoreFirmware names the right verb")
+check(rf.contains("old.bin"), "the image to WRITE is the positional argument")
+check(rf.contains("--backup") && rf.contains("now.bin"),
+      "--backup is the FRESH read of what is on the device now")
+check(rf.contains("--confirm") && rf.contains("deadbeef"),
+      "restoreFirmware carries a trimmed --confirm")
+check(rf.contains("--yes"), "restoreFirmware carries --yes")
+check(!Commands.requestRestoreToken(backup: "old.bin", current: "now.bin")
+        .contains("--confirm"),
+      "the restore PREVIEW must never carry --confirm")
+check(!Commands.requestRestoreToken(backup: "old.bin", current: "now.bin")
+        .contains("--yes"),
+      "the restore PREVIEW must never carry --yes")
+
 // --------------------------------------------------------------------------
 // 4. Parsing, against the real tools' real output
 // --------------------------------------------------------------------------
@@ -576,6 +627,28 @@ do {
     // attached it is whatever the mouse is, and either way it must not crash
     // or read as `unclear`, which would mean the parser and the printf have
     // drifted apart.
+    // The firmware version column. Real rows, in the tool's own layout --
+    // `manufacturer` contains a space, which is exactly the thing a naive
+    // column split gets wrong.
+    let appV  = "0x1970   0xff00     0x01    0x0110    1.10      "
+              + "Endgame Gear   OP1 8k v2 (application)"
+    let bootV = "0x1977   0xff00     0x01    0x0006    0.06      "
+              + "Endgame Gear   Bootloader (BOOTLOADER)"
+    let badV  = "0x1970   0xff00     0x01    0x01a0    not BCD   "
+              + "Endgame Gear   OP1 8k v2 (application)"
+    equal(Commands.firmwareVersion(fromDevices: appV), "1.10",
+          "the firmware column is read from the application row")
+    equal(Commands.firmwareVersion(fromDevices: bootV), nil,
+          "the bootloader's 0.06 is not offered as a firmware version")
+    equal(Commands.firmwareVersion(fromDevices: badV), nil,
+          "`not BCD` must not reach the UI as if it were a version")
+    equal(Commands.firmwareVersion(fromDevices: bootV + "\n" + appV), "1.10",
+          "with both modes present, the application row is the one that counts")
+    equal(Commands.firmwareVersion(fromDevices: "no VID 0x3367 device attached."),
+          nil, "no mouse means no version")
+    equal(Commands.firmwareVersion(fromDevices: ""), nil,
+          "empty output means no version")
+
     let (drc, dtext) = run("egg-config", Commands.listDevices())
     if drc == -1 {
         print("SKIP: build/egg-config not present; device state parsed offline only")
@@ -588,6 +661,190 @@ do {
         check(!Commands.listDevices().contains("--yes"),
               "enumerating must never carry --yes")
     }
+}
+
+// --------------------------------------------------------------------------
+// The offline / read-only verbs the Advanced screen exposes
+// --------------------------------------------------------------------------
+// The organising claim of that screen is "nothing here writes". These check it
+// as an argument-list property -- no --yes anywhere -- and then check each verb
+// against the real CLI, because a builder that produced a refusal would be a
+// button that cannot work.
+do {
+    equal(Commands.diffRecords("a.bin", "b.bin"), ["diff", "a.bin", "b.bin"],
+          "diff takes two files")
+    equal(Commands.frames(), ["frames"], "frames takes nothing")
+    equal(Commands.dryRunField(record: "r.bin", field: "polling", value: "1000"),
+          ["dryrun", "r.bin", "polling", "1000"],
+          "the offline dryrun is the 4-argument form")
+    equal(Commands.encodeField(field: "lod", value: "5",
+                               from: "in.bin", to: "out.bin"),
+          ["encode", "lod", "5", "in.bin", "out.bin"], "encode is field-first")
+    equal(Commands.previewHandedness("left", from: "r.bin"),
+          ["handedness", "left", "--from", "r.bin"],
+          "handedness --from decides offline")
+    equal(Commands.checkBootloader(), ["read-firmware", "--check"],
+          "--check reports and stops")
+    equal(Commands.verbose(["frames"]), ["-v", "frames"], "-v goes in front")
+
+    let readOnly: [[String]] = [
+        Commands.diffRecords("a", "b"), Commands.frames(),
+        Commands.dryRunField(record: "r", field: "f", value: "v"),
+        Commands.encodeField(field: "f", value: "v", from: "i", to: "o"),
+        Commands.previewHandedness("left", from: "r"),
+        Commands.checkBootloader(), Commands.listDevices(),
+        Commands.deviceInfo(), Commands.showSettings(from: "r"),
+    ]
+    check(readOnly.allSatisfy { !$0.contains("--yes") },
+          "no verb on the Advanced screen carries --yes")
+    check(readOnly.allSatisfy { !$0.contains("--confirm") },
+          "no verb on the Advanced screen carries an approval token")
+
+    // Against the real tools. `frames` and `--check` are the two that can be
+    // run here with no arguments and no device.
+    let (fs, fsText) = run("egg-config", Commands.frames())
+    if fs == -1 {
+        print("SKIP: build/egg-config not present; frames not driven")
+    } else {
+        check(fs == 0, "egg-config frames exits 0 with no device attached", fsText)
+        check(fsText.contains("a1") || fsText.contains("a0"),
+              "frames prints frames", String(fsText.prefix(200)))
+    }
+
+    // `diff` on two identical files must succeed and say nothing differs --
+    // this is the command the firmware screen's success text points people at.
+    let root = repoRoot()
+    let cap = root.appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    let t1 = FileManager.default.temporaryDirectory
+                 .appendingPathComponent("egg-diff-a-\(getpid()).bin")
+    let t2 = FileManager.default.temporaryDirectory
+                 .appendingPathComponent("egg-diff-b-\(getpid()).bin")
+    if let d = try? Data(contentsOf: cap), d.count == 1040 {
+        try? (d + Data([0])).write(to: t1)
+        try? (d + Data([0])).write(to: t2)
+        defer { try? FileManager.default.removeItem(at: t1)
+                try? FileManager.default.removeItem(at: t2) }
+        let (ds, dText) = run("egg-config", Commands.diffRecords(t1.path, t2.path))
+        if ds != -1 {
+            check(ds == 0, "diff of a record against itself exits 0", dText)
+            check(dText.contains("0 of 1024") || dText.contains("0 differ")
+                  || dText.contains(" 0 "),
+                  "diff of a record against itself reports no differences",
+                  String(dText.suffix(200)))
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
+// `show --machine` -- the decoded-settings pane's only input
+// --------------------------------------------------------------------------
+// Driven against the REAL CLI, decoding the vendor's own captured record, for
+// the same reason loadButtons is: a fixture would let the app and the tool
+// drift together, and this parser is what decides whether the Settings screen
+// tells a user the truth about their mouse.
+do {
+    // Rebuild the factory-default record from the capture, exactly as
+    // Tests/test_show.sh does. 1040 bytes as Windows saw it, plus the trailing
+    // pad a 1041-byte record carries.
+    let root = repoRoot()
+    let src  = root.appendingPathComponent("frames/01-baseline-003-in-01.bin")
+    let tmp  = FileManager.default.temporaryDirectory
+                   .appendingPathComponent("egg-show-\(getpid()).bin")
+    if let d = try? Data(contentsOf: src), d.count == 1040 {
+        try? (d + Data([0])).write(to: tmp)
+    }
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    equal(Commands.showSettings(), ["show"], "show takes no flags by default")
+    equal(Commands.showSettings(from: "/tmp/r.bin"), ["show", "--from", "/tmp/r.bin"],
+          "--from names the file")
+    equal(Commands.showSettingsMachine(from: "/tmp/r.bin"),
+          ["show", "--from", "/tmp/r.bin", "--machine"],
+          "the machine form is the human one plus --machine")
+    check(!Commands.showSettingsMachine().contains("--yes"),
+          "reading must never carry --yes")
+
+    let (rc, text) = run("egg-config", Commands.showSettingsMachine(from: tmp.path))
+    if rc == -1 || !FileManager.default.fileExists(atPath: tmp.path) {
+        print("SKIP: build/egg-config or the capture is missing; show parsed offline only")
+    } else {
+        check(rc == 0, "egg-config show --machine --from <capture> exits 0", text)
+        let c = Commands.parseShow(text)
+
+        equal(c.fields.count, 13, "one row per settable field")
+        equal(c.cpi.count, 4, "four CPI stages")
+        equal(c.buttons.count, 8, "all eight button entries, not the six offered")
+        equal(c.clicks.count, 5, "five multiclick sliders")
+        equal(c.handed, "right", "the factory record is right-handed")
+
+        // Against the screenshots (notes/config-wire-observed.md §7), so the
+        // PARSER is pinned to the same anchor the decoder is -- a parser that
+        // silently mapped a value to the wrong field would pass a shape check.
+        func field(_ n: String) -> Commands.Shown.FieldValue? {
+            c.fields.first { $0.name == n }
+        }
+        check(field("polling")?.text == "8000 Hz",
+              "polling parses as 8000 Hz (basic.png)", field("polling")?.text ?? "nil")
+        check(field("lod")?.text.contains("1.0mm") == true,
+              "lod parses as 1.0mm (basic.png)", field("lod")?.text ?? "nil")
+        check(field("led-on-liftoff")?.text.contains("stays lit") == true,
+              "the inverted LED checkbox is not flipped by the parser")
+        check(c.fields.allSatisfy { $0.ok },
+              "every factory byte decodes; none is flagged undecodable")
+        check(c.fields.allSatisfy { !$0.location.isEmpty },
+              "every field carries the record offset it came from")
+        check(c.fields.allSatisfy { $0.gate.isEmpty },
+              "no field is gated on this record (0x6f is 0)")
+        equal(c.raw["glass-mode"], "00", "glass-mode is off, so `lod` is the 11-step scale")
+
+        let active = c.cpi.filter { $0.active }
+        equal(active.count, 1, "exactly one CPI stage is active")
+        equal(active.first?.index, 2, "CPI 2 is the selected radio (basic.png)")
+        equal(c.cpi.map { $0.x }, [400, 800, 1600, 3200],
+              "the four stages parse as 400/800/1600/3200 (CPI-levels.png)")
+        check(c.cpi.allSatisfy { $0.x == $0.y }, "X equals Y on every stage")
+
+        // `offered` is what the GUI keys its editability hint off, and it must
+        // match the six rows the vendor's own page shows.
+        equal(c.buttons.filter { $0.offered }.count, 6,
+              "six of eight entries are the ones `map` will touch (§7.15)")
+        check(c.buttons.allSatisfy { !$0.unknown },
+              "no factory entry decodes to UNKNOWN")
+        check(c.buttons.first { $0.slot == "wheel-down" }?.action == "scroll-down",
+              "wheel-down parses as scroll-down (button-mapping.png)")
+        check(c.buttons.allSatisfy { $0.raw.split(separator: " ").count == 7 },
+              "every binding carries all seven of its raw bytes")
+        check(c.clicks.allSatisfy { $0.mode == "off" && $0.value == 8 },
+              "all five sliders parse as filter 8 (buttons.png)")
+    }
+
+    // FALSIFICATION (§6.2). The parser must reject rows it cannot trust rather
+    // than half-filling a struct: a FIELD row with a missing column, or a CPI
+    // row whose numbers are not numbers, would otherwise reach the pane as a
+    // confident-looking zero.
+    let junk = """
+    FIELD\tpolling\t0x05 = 01\t8000 Hz
+    FIELD\t\t\t\t\t
+    CPI\t1\tnot-a-number\t400\t0\t1
+    BUTTON\tright\tright-click
+    MULTICLICK\tleft
+    HANDED
+    RAW\tglass-mode\t6f
+    NONSENSE\ta\tb\tc
+    """
+    let j = Commands.parseShow(junk)
+    equal(j.cpi.count, 0, "a CPI row with a non-numeric field is dropped, not zeroed")
+    equal(j.buttons.count, 0, "a short BUTTON row is dropped")
+    equal(j.clicks.count, 0, "a short MULTICLICK row is dropped")
+    equal(j.handed, "", "a HANDED row with no value leaves handedness unset")
+    equal(j.raw.count, 0, "a short RAW row is dropped")
+    equal(j.fields.count, 0,
+          "a FIELD row with the wrong column count is dropped, and so is one "
+          + "whose name is empty -- the pane keys its rows on the name")
+    check(j.isEmpty, "nothing in that block was usable, and isEmpty says so")
+    check(Commands.parseShow("").isEmpty, "empty input parses to an empty result")
+    check(Commands.parseShow("total nonsense\nwith no tabs").isEmpty,
+          "prose parses to nothing rather than to a guess")
 }
 
 // --------------------------------------------------------------------------

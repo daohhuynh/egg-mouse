@@ -1,9 +1,19 @@
 # Build design — `EGGCore`, `EGGFlashCore`, `EGGConfigCore`
 
-**Status: a document for review, per LIST 1 item 18. No code has been written.**
-Building is a LIST 2 item and needs the owner. Nothing here has touched hardware, and
-nothing here may reach hardware until the device exists and §4.4's stages have
-run in order.
+**Status, corrected 2026-09-06: THIS IS NO LONGER A PRE-IMPLEMENTATION
+DOCUMENT.** It said "no code has been written" and "nothing here has touched
+hardware" for a day after both stopped being true, which is the worst thing a
+design document can say to the fresh reader who opens it first.
+
+All three libraries and both executables exist and are tested. `CLAUDE.md`
+§4.4's four staged bring-up steps all completed on 2026-09-05, on the device:
+read-only round trip, bootloader entry and exit, firmware read-back, and a real
+65-block flash. A SwiftUI front end drives both CLIs.
+
+**What this document is now**: the record of the design and the reasoning behind
+it, including the parts that were later overruled. Where it disagrees with the
+code, the code is what runs and `working-memory.md` holds the current state.
+§5's open questions have been individually re-checked and marked.
 
 This is the design that follows from what has actually been derived. Every
 protocol constant below cites the section that derives it; anything without a
@@ -257,29 +267,40 @@ gate does not apply to flashing** (§4.4).
 
 ## 5. Open questions this design cannot close
 
-Stated here so they are not silently resolved by an implementation detail:
+**RE-CHECKED 2026-09-06. Five of the seven are closed, all five by the device.**
+They are kept with their answers rather than deleted, because what a design
+could not settle in advance and what settled it is the useful part. One is
+genuinely still open and is marked as such.
 
-- **Whether the bootloader validates the image it is given.** Assumed *not*
-  (`CLAUDE.md` §2, decided 2026-09-03). Every guard is therefore ours and runs
-  before the first byte.
-- **Whether `A0 07` read-back works before any write.** If it does not, stage 3
-  collapses into stage 4 and we lose the last zero-risk check.
-- **The report descriptor's actual feature-report lengths** — device-gated (§5).
-- **Whether entering the bootloader re-enumerates on macOS the way it does on
-  Windows**, and how long it takes. The vendor polls with 500 ms sleeps to a
-  10-second ceiling (§5.3); we have no basis for a different number.
-- **Whether we send `A1 13` at all** — Flagged for decision #1.
-- **Whether the *bootloader* presents `UsagePage 0xFF01` / `Usage 0x02`.** The
-  vendor's updater requires it (`updater-protocol.md` §1: the same four-part
-  predicate is applied with PID `0x1977`), so it must — otherwise their own tool
-  could never find the device in bootloader mode. That is an inference from the
-  vendor's code, not an observation, and §5 of `CLAUDE.md` puts it on the
-  device-gated list. It matters because the mouse presents **two** vendor
-  collections in application mode (`config-protocol.md` §10) and we do not know
-  how many it presents in bootloader mode.
-- **Settings preservation policy if the pre-flash capture fails** — Flagged for
-  the owner #2, and a genuine tradeoff: `§4.1` says never write after a failed read,
-  which if applied here lets a config failure block a firmware update.
+- **CLOSED `[O]`, 2026-09-05. Whether `A0 07` read-back works before any write.**
+  It does. `read-firmware` read all 65 blocks twice and returned byte-identical
+  images. Stage 3 did not collapse into stage 4.
+- **CLOSED `[O]`. The report descriptor's actual feature-report lengths.**
+  Read off the device; `0x411` and `0x40` as derived.
+- **CLOSED `[O]`. Whether entering the bootloader re-enumerates on macOS the way
+  it does on Windows, and how long it takes.** It does, and it is fast — the
+  application came back in ~900 ms after the flash. The vendor's own generous
+  budget is matched rather than shortened, for the reason in `egg-flash`'s
+  `[4/4]` comment.
+- **CLOSED. Whether we send `A1 13` at all.** Yes — it is the vendor's last
+  step, and skipping it would leave stale settings under new firmware. It has
+  since been shown to mean the same thing as the config tool's Factory Reset:
+  the post-flash record scored 21/21 against the predicted default table. So
+  **flashing wipes settings**, and `egg-flash` refuses to start without a
+  settings undo on disk.
+- **CLOSED `[O]`. Whether the bootloader presents `UsagePage 0xFF01` /
+  `Usage 0x02`.** It does. The four-part predicate finds it with PID `0x1977`,
+  exactly as the vendor's updater assumes.
+- **CLOSED by decision, not by evidence. Settings preservation policy if the
+  pre-flash capture fails.** `egg-flash` refuses to start unless a settings undo
+  already exists, and says so on stderr. A config failure does block a firmware
+  update, deliberately: `A1 13` at the end of the flash wipes the settings, so
+  starting without an undo means losing them with no way back.
+- **STILL OPEN. Whether the bootloader validates the image it is given.**
+  Assumed *not* (`CLAUDE.md` §2, decided 2026-09-03), and still `[G]`: a
+  successful flash of the RIGHT image tells you nothing about what the device
+  would have done with a wrong one, and finding out costs the mouse. Every guard
+  is therefore ours and runs before the first byte.
 
 ## Sanitizer build — clean as of 2026-09-05
 
