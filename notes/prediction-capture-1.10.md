@@ -176,6 +176,12 @@ every existing capture is X=Y.
 
 400 = `0x0190` = `90 01`; 2500 = `0x09c4` = `c4 09`; 2510 = `0x09ce` = `ce 09`.
 
+**The owner reports ending at X = 2510, Y = 400** (2026-09-06), which is an X != Y pair
+with two distinct values, so **the order question is answered by that apply alone**
+-- `ce 09 90 01` confirms X at `+2`/`+3`, `90 01 ce 09` refutes it. Score the
+capture's actual writes; the table below is what was asked for, not necessarily
+what was performed.
+
 **Steps 1 and 2 are deliberate mirror images.** Be precise about what that buys:
 the order is **already `[D]`** and is not in doubt -- §7.31 traces
 `0x00407c7e movl 0x57f328,%edx` -> entry `+2` from member `0x300` (the X box's
@@ -183,8 +189,10 @@ the order is **already `[D]`** and is not in doubt -- §7.31 traces
 from member `0x304` (`0x00401813`). `encodeButtonEntry` matches, X at
 `out[2]`/`out[3]` and Y at `out[4]`/`out[5]`.
 
-What step 2 adds is the **only `[O]` confirmation of that order obtainable at
-all**, and it is free. Every FIXED CPI ever captured is X=Y
+What the section adds is the **only `[O]` confirmation of that order obtainable
+at all**, and it is free. Step 2's swap is redundancy on top -- a single
+asymmetric pair already determines the order, so the swap guards against a fluke
+(a stale value, a mis-parsed frame) rather than against the ambiguity itself. Every FIXED CPI ever captured is X=Y
 (`0c 00 40 06 40 06`) -- precisely the input under which a swapped mapping is
 invisible -- so no existing capture can distinguish the two. A swap would return
 identical bytes for steps 1 and 2. The uncited `26000` bound survived a 14/14
