@@ -149,27 +149,51 @@ EDIT + trackbar, an `X/Y Settings` checkbox with its own X and Y pair, and
 2026-09-06 — corroboration of a `[D]`, not new evidence.
 
 It revises the steps: the tick goes on FIRST, every time the popup opens, and
-one box changes at a time. My original step "change Y to 800, leave X at 2500"
-would have snapped X to 800 as well, and the section would have proved nothing.
-This is also the likely reason every existing capture is X=Y.
+**both boxes are typed explicitly** (the popup does not retain either). My
+original step "change Y to 800, leave X at 2500" would have snapped X to 800 as
+well, and the section would have proved nothing. This is also the likely reason
+every existing capture is X=Y.
 
 | step | do | predicted entry bytes |
 | --- | --- | --- |
-| 1 | X = Y = 2500 | `0c 00 c4 09 c4 09 <+6 kept>` |
-| 2 | Y -> 800, X stays 2500 | `0c 00 c4 09 20 03 <+6 kept>` |
-| 3 | type X = 2505, Y stays 800 | X normalises to **2510** -> `0c 00 ce 09 20 03`, never `c9 09` (`0x401e70` clamps `[10,30000]` then rounds to 10, ties up) |
+| 1 | X = 2500, Y = 400 | `0c 00 c4 09 90 01 <+6 kept>` |
+| 2 | **swapped:** X = 400, Y = 2500 | `0c 00 90 01 c4 09 <+6 kept>` |
+| 3 | X = 2505, Y = 2500 | X normalises to **2510** -> `0c 00 ce 09 c4 09`, never `c9 09` (`0x401e70` clamps `[10,30000]` then rounds to 10, ties up) |
+
+400 = `0x0190` = `90 01`; 2500 = `0x09c4` = `c4 09`; 2510 = `0x09ce` = `ce 09`.
+
+**Steps 1 and 2 are deliberate mirror images.** Be precise about what that buys:
+the order is **already `[D]`** and is not in doubt -- §7.31 traces
+`0x00407c7e movl 0x57f328,%edx` -> entry `+2` from member `0x300` (the X box's
+`EN_CHANGE` at `0x004016e0`), and `0x00407ca0 movw 0x57f32c,%cx` -> entry `+4`
+from member `0x304` (`0x00401813`). `encodeButtonEntry` matches, X at
+`out[2]`/`out[3]` and Y at `out[4]`/`out[5]`.
+
+What step 2 adds is the **only `[O]` confirmation of that order obtainable at
+all**, and it is free. Every FIXED CPI ever captured is X=Y
+(`0c 00 40 06 40 06`) -- precisely the input under which a swapped mapping is
+invisible -- so no existing capture can distinguish the two. A swap would return
+identical bytes for steps 1 and 2. The uncited `26000` bound survived a 14/14
+replay test for exactly this reason, so the cost of leaving a `[D]`-only chain
+untested where testing is free is a cost this project has already paid once.
 
 **Step 3's UI half is already confirmed, `[O]`.** the owner, 2026-09-06, before
 capturing: *"2505 doesnt work it automatically corrects me to 2510"*. That is
-`0x401e70`'s round-to-10-ties-up behaving exactly as derived, and it is the first
-`[O]` on the FIXED CPI normaliser -- the domain whose uncited `26000` bound was
-the shipping bug the audit found. The capture is still wanted for the **wire**
-bytes: the UI showing 2510 does not prove the record receives `ce 09`.
+`0x401e70` behaving exactly as derived, and the first `[O]` on the FIXED CPI
+normaliser -- the domain whose uncited `26000` bound was the shipping bug the
+audit found. The capture is still wanted for the **wire** bytes: the UI showing
+2510 does not prove the record receives `ce 09`.
 
-Step 2 is the one that matters: first evidence either way that the two boxes
-reach the record independently (§7.31, `0x401eb0` reads members `0x300`/`0x304`;
-`0x407c7e`/`0x407ca0` store them to `+2`/`+4`). Step 3 doubles as a second
-independence check, since Y must stay `20 03` while X moves.
+Also `[O]` from the owner, 2026-09-06, and why the steps set both boxes every time:
+**the popup does not retain values between openings, it reopens at 400.** So an
+"unchanged" box is not a held value, and a step that typed only X twice would
+have emitted two identical applies -- possibly zero writes, since
+`gui-surface.md` §5's dirty gate greys APPLY when nothing changed.
+
+All three steps have X != Y, so any one of them is first evidence that the two
+boxes reach the record independently (§7.31, `0x401eb0` reads members
+`0x300`/`0x304`; `0x407c7e`/`0x407ca0` store them to `+2`/`+4`). Step 2
+additionally fixes the **order**, which independence alone does not.
 
 **Three ways this can come back, and all are answers:**
 - as predicted -> §7.31 confirmed, `encodeButtonEntry`'s separate `out[4]`/`out[5]`
