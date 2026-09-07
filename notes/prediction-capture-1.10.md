@@ -140,20 +140,50 @@ computes something incorrectly.
 ### §4 `14-fixed-cpi.pcapng` — FIXED CPI with X ≠ Y
 
 Never observed; every captured FIXED CPI is `0c 00 40 06 40 06`. Middle Button
-is entry 2, record `0x45`–`0x4b`.
+is entry 2, record `0x45`-`0x4b`.
+
+**The popup carries its own `X/Y Settings` tick.** `[D]` already, and I missed
+it when drafting the steps: `gui-surface.md` line 58 has DIALOG 150 as *"a value
+EDIT + trackbar, an `X/Y Settings` checkbox with its own X and Y pair, and
+`OK`"*, read from the dialog resource. the owner restated it from the running tool on
+2026-09-06 — corroboration of a `[D]`, not new evidence.
+
+It revises the steps: the tick goes on FIRST, every time the popup opens, and
+one box changes at a time. My original step "change Y to 800, leave X at 2500"
+would have snapped X to 800 as well, and the section would have proved nothing.
+This is also the likely reason every existing capture is X=Y.
 
 | step | do | predicted entry bytes |
 | --- | --- | --- |
-| 2 | X = Y = 2500 | `0c 00 c4 09 c4 09 <+6 kept>` |
-| 3 | Y → 800, X stays | `0c 00 c4 09 20 03 <+6 kept>` |
-| 4 | type X = 2505 | normalises to **2510** → `ce 09`, never `c9 09` (`0x401e70` clamps `[10,30000]` then rounds to 10, ties up) |
+| 1 | X = Y = 2500 | `0c 00 c4 09 c4 09 <+6 kept>` |
+| 2 | Y -> 800, X stays 2500 | `0c 00 c4 09 20 03 <+6 kept>` |
+| 3 | type X = 2505, Y stays 800 | X normalises to **2510** -> `0c 00 ce 09 20 03`, never `c9 09` (`0x401e70` clamps `[10,30000]` then rounds to 10, ties up) |
 
-Step 3 is the one that matters: first evidence either way that the two boxes
+**Step 3's UI half is already confirmed, `[O]`.** the owner, 2026-09-06, before
+capturing: *"2505 doesnt work it automatically corrects me to 2510"*. That is
+`0x401e70`'s round-to-10-ties-up behaving exactly as derived, and it is the first
+`[O]` on the FIXED CPI normaliser -- the domain whose uncited `26000` bound was
+the shipping bug the audit found. The capture is still wanted for the **wire**
+bytes: the UI showing 2510 does not prove the record receives `ce 09`.
+
+Step 2 is the one that matters: first evidence either way that the two boxes
 reach the record independently (§7.31, `0x401eb0` reads members `0x300`/`0x304`;
-`0x407c7e`/`0x407ca0` store them to `+2`/`+4`).
+`0x407c7e`/`0x407ca0` store them to `+2`/`+4`). Step 3 doubles as a second
+independence check, since Y must stay `20 03` while X moves.
 
-**If the popup has only ONE box**, §7.31's independence reading is wrong and the
-`1600x800` syntax must be withdrawn.
+**Three ways this can come back, and all are answers:**
+- as predicted -> §7.31 confirmed, `encodeButtonEntry`'s separate `out[4]`/`out[5]`
+  stores are `[O]`-backed and the `1600x800` syntax stands.
+- **the tick exists but Y still drags X** -> the mirror is below the checkbox,
+  X=Y is structural, and `1600x800` must be withdrawn even though the record has
+  room for it.
+- **the popup has only ONE box** -> this contradicts a `[D]` reading of DIALOG
+  150's own resource (`gui-surface.md` line 58), not merely a guess, so it would
+  mean `dlgdump.py` is mis-parsing the dialog and every control inventory built
+  on it needs rechecking. Least likely, most expensive if true.
+
+Also asked: does the tick persist between popup openings? Unknown, and it decides
+whether a user of our tool can be told the vendor tool keeps the mode.
 
 ### §5 `15-media.pcapng` — the seven MEDIA actions never captured
 
@@ -211,6 +241,35 @@ reset returns the whole record to §2's values.
 `00`, `01`, `02`, `03`, `04`, `07`, `08`, `09`, `10` — held, and checked by
 `test_config_replay.py`, `test_button_map.py`, `test_golden_vendor.py`,
 `test_defaults.py`. Re-taking them buys nothing.
+
+### 5c. Does an X≠Y record survive being re-loaded?  [G]
+
+Raised 2026-09-06, when the owner restated that `X/Y Settings` is a view mode: *"Apply
+only works on the condition that a setting changes. Clicking X/Y Settings
+maintains Apply greyed out because you are not actually changing a setting."*
+
+Nothing new in that — it is the same `[O]` as `gui-surface.md` §6, which quotes
+him saying it on 2026-09-05. It is recorded here only because restating it made
+me notice the consequence below, which nobody had written down.
+
+The hazard it exposes: **`A0 11` writes all 115 bytes from the tool's in-memory
+model**, so the model's state at APPLY time matters even for bytes the user never
+touched. Sections 4-6 each open fresh on the record section 3 leaves behind,
+where CPI3 is 1200/2400 and `0x2d` should be `01`.
+
+- **Predicted: the mirror is an edit-time control behaviour, not a load-time
+  one**, so the record survives and `0x2d`-`0x36` are byte-identical across the
+  opening `A1 12` of sections 4, 5 and 6 and every `A0 11` in them.
+- **If instead** the first `A0 11` of section 4 carries `0x30`/`0x31` = `b0 04`
+  (Y snapped to X's 1200), the mirror runs at load and **sections 4-6 cannot be
+  read as starting from section 3's state.** They are still valid for the button
+  block, which is what they are for; the CPI block in them is then tool-authored
+  and must not be cited.
+
+Checked by: `diff <(recdump 13-cpi-stage34 last) <(recdump 14-fixed-cpi first)`
+restricted to `0x23`-`0x36`. the owner is also asked to read the CPI 3 box aloud at the
+top of section 4, which answers it without needing the capture parsed first.
+
 
 ## 6. Scoring
 
