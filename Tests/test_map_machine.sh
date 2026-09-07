@@ -105,6 +105,33 @@ out=$("$BIN" map right "key:$(printf '%s\n' "$M" | grep '^KEY' | head -1 | cut -
 ! printf '%s' "$out" | grep -qE "$REJECT"
 check "...and the first of them is accepted by the CLI" $?
 
+# THE TWO LISTINGS MUST AGREE. `map --machine` builds the GUI's picker from
+# kNamedKeys; `map` with no arguments is what a person reads. Until 2026-09-07
+# the second was four hardcoded prose lines listing 27 of 51 names, unchanged
+# since §7.32 added 21 more -- so `leftshift`, the key in the vendor's own
+# KEYBOARD KEY screenshot, worked and could not be discovered from the tool.
+# Every name the machine form emits must appear in the human form.
+H=$("$BIN" map 2>&1)
+missing=""
+for k in $(printf '%s\n' "$M" | grep '^KEY' | cut -f2); do
+  printf '%s' "$H" | grep -qE "(^|[ ,])$k([ ,.]|$)" || missing="$missing $k"
+done
+[ -z "$missing" ]
+check "every --machine KEY name is in the human listing too (missing:${missing:-none})" $?
+
+# ...and the ranges the table does NOT contain are still advertised, because
+# they are parsed algorithmically and would otherwise vanish from the help the
+# moment the list started being generated. That is the mistake this test caught
+# in its own fix: the first generated version dropped a-z, 0-9, f1-f12, kp0-kp9.
+for r in "a-z" "0-9" "f1-f12" "kp0-kp9"; do
+  printf '%s' "$H" | grep -qF -- "$r"
+  check "the human listing still advertises the $r range" $?
+done
+
+# A name that is NOT in the table must not appear as if it were offered.
+printf '%s' "$H" | grep -qE "(^|[ ,])nosuchkey([ ,.]|$)"
+check "the listing does not name a key the table lacks" $([ $? = 1 ] && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

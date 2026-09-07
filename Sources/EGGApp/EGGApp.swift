@@ -4,16 +4,32 @@
 // argument for having a GUI at all:
 //
 //   - It builds command lines. It does not talk to the mouse.
-//   - It never kills a running flash, and it refuses to close its own window
-//     while one is in the write phase (§4.2: after erase, quitting is the bug).
+//   - It never kills a running flash.
 //   - It shows a dry run before anything is written, and for a flash it makes
 //     the user carry the --confirm token across from that dry run (§4.2c: an
 //     approval must be bound to the exact bytes it approves, and a button you
 //     click without reading is a reflex, not a decision).
 //
-// CLAUDE.md §3 says a GUI must not own the flash write phase. It does not: the
-// write phase lives inside `egg-flash`, a process that ignores SIGINT, SIGTERM
-// and SIGHUP from erase to verified image, and this app is only its window.
+// WHAT IT DOES NOT DO, corrected 2026-09-07 because this block used to claim it.
+// **It does not refuse to close its own window during a write phase.** There is
+// no NSWindowDelegate and no applicationShouldTerminate anywhere in this target,
+// and the comment 20 lines below has always said so -- the header and the code
+// disagreed, in the paragraph the file calls "the whole safety argument".
+//
+// The claim was not merely false, it was the wrong argument. Closing this window
+// does not endanger a flash, because CLAUDE.md §3 puts the write phase in
+// ANOTHER PROCESS. `egg-flash` is spawned, not embedded: when this app exits the
+// child is reparented and keeps running, and NoQuitDuringWrite ignores SIGINT,
+// SIGTERM, SIGHUP *and SIGPIPE* from erase to verified image -- SIGPIPE being
+// exactly the signal a dying parent delivers when the pipes close. So the flash
+// finishes whether this window is open or not; what is lost by quitting is the
+// user's view of it, which is why the state is made loud instead of blocked.
+//
+// A quit blocker would also be ceremony: Cmd-Q and the Dock item can be
+// intercepted, force-quit cannot, and none of the three can stop the child. It
+// would add untestable GUI code for a property already guaranteed by the
+// process boundary (§4.4: if a step cannot prove something the next step depends
+// on, cut it rather than pay for it).
 import SwiftUI
 
 @main
@@ -29,10 +45,11 @@ struct EGGApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
-            // The Dock quit item and Cmd-Q are the GUI-specific hazard the CLI
-            // does not have. Neither can be removed, so the app makes the state
-            // loud instead: FirmwareView shows a full-window banner and the
-            // window title changes while a write is in flight.
+            // The Dock quit item and Cmd-Q cannot be removed, so the app makes
+            // the state loud instead: FirmwareView shows a full-window banner
+            // and the window title changes while a write is in flight. See the
+            // header for why loud is the right answer rather than blocked --
+            // the write phase is in a child process that outlives this one.
             CommandGroup(replacing: .newItem) { }
         }
     }
@@ -58,7 +75,38 @@ struct RootView: View {
             case .updates:  UpdatesView(screen: $screen)
             case .advanced: AdvancedView(screen: $screen)
             }
+            if let cmd = runner.running { RunningBar(command: cmd) }
         }
+    }
+}
+
+/// The command line currently executing, across the bottom of every screen.
+///
+/// `ToolRunner.running` held exactly this string from the day it was written
+/// and NOTHING read it (found 2026-09-07, by the same sweep that found
+/// `FirmwareModel.busy` written five times and read nowhere). Two ways to fix a
+/// property nobody reads: delete it, or show it. Showing it is right here --
+/// every screen's own output pane only fills in once the tool EXITS, so until
+/// then a long command like `read-firmware`'s 65-block read looked to the user
+/// exactly like a hung app.
+///
+/// It prints the argument list verbatim, including `-v` when the Advanced
+/// screen's switch is on, because "what is this app doing to my mouse" should
+/// be answerable without trusting a summary of it.
+struct RunningBar: View {
+    let command: String
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(command)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1).truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(Color.secondary.opacity(0.12))
     }
 }
 

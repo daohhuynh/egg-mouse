@@ -63,10 +63,18 @@ final class ToolRunner: ObservableObject {
     ///
     /// §4.2: "After erase: quitting is the bug. The device has no valid
     /// application; exiting cleanly guarantees the bad outcome." The CLI already
-    /// ignores SIGINT/SIGTERM/SIGHUP for that window (NoQuitDuringWrite). What a
-    /// GUI adds is a window close button, a Dock quit item, and a user who
-    /// thinks closing a window is free. This flag is what the app checks before
-    /// it lets any of those do anything.
+    /// ignores SIGINT/SIGTERM/SIGHUP/SIGPIPE for that window
+    /// (NoQuitDuringWrite), in the CHILD process, which outlives this app.
+    ///
+    /// So this flag does NOT gate the window close button or the Dock quit item
+    /// -- it cannot, and it does not need to (see EGGApp.swift's header). It
+    /// gates what this app can actually get wrong: starting a second command
+    /// while one is in flight, and navigating away from the screen showing it.
+    /// Every one of its readers is a banner, a title, or a `.disabled`.
+    ///
+    /// CORRECTED 2026-09-07. This comment used to end "This flag is what the app
+    /// checks before it lets any of those do anything", naming a window-close
+    /// guard that has never existed in this target.
     @Published private(set) var writePhaseInProgress = false
 
     /// Live output of the running command, appended as it arrives.
@@ -120,7 +128,14 @@ final class ToolRunner: ObservableObject {
 
         // See `verbose`. Prepended, because both tools' parsers take flags
         // anywhere but their verb dispatch reads args[0].
-        let args = verbose ? ["-v"] + args : args
+        //
+        // Through `Commands.verbose` rather than inline `["-v"] + args`: that
+        // function existed, carried the whole argument for why the flag is safe
+        // to apply globally, and was called from nowhere -- so the reasoning
+        // lived next to dead code while the live code did the same thing a
+        // second time (2026-09-07). Tests/test_gui_state.py now fails on a
+        // Commands builder no view or runner calls.
+        let args = verbose ? Commands.verbose(args) : args
         running = ([tool] + args).joined(separator: " ")
         liveOutput = ""
         if isWritePhase { writePhaseInProgress = true }

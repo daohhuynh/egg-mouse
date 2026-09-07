@@ -33,6 +33,9 @@ struct AdvancedView: View {
     @State private var encRecord = ""
     @State private var encField = ""
     @State private var encValue = ""
+    /// Which side the offline handedness preview asks for. `handedness` is not
+    /// one of `set`'s fields, so the three boxes above cannot reach it.
+    @State private var handSide = "left"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -174,6 +177,41 @@ struct AdvancedView: View {
             }
             .help("`show --from` \u{2014} the same decoded table the Settings "
                 + "screen shows, from a file.")
+
+            // THE OFFLINE HANDEDNESS PREVIEW (added 2026-09-07). It was built
+            // in Commands, unit-tested in test_app_commands.swift under a list
+            // named `readOnly` whose message says "no verb on the Advanced
+            // screen carries --yes", and reachable from NO screen: the Settings
+            // screen calls only the DEVICE form, and `handedness` is not one of
+            // `set`'s fields so the three boxes above cannot build it either.
+            // A capability the CLI has, the app could not ask for, and a test
+            // asserted a property of.
+            //
+            // It belongs here and not on the Settings screen because §7.20
+            // makes it a MOVE plus a reset rather than a swap -- the whole
+            // button block changes -- so seeing the plan before touching the
+            // mouse is worth more here than a one-line preview would be.
+            Divider().padding(.vertical, 2)
+            Text("Preview a handedness change from a file")
+                .font(.subheadline).bold()
+            HStack {
+                Picker("Side", selection: $handSide) {
+                    Text("left").tag("left")
+                    Text("right").tag("right")
+                }
+                .pickerStyle(.segmented).frame(width: 180)
+                Spacer()
+                Button("Show what it would write") {
+                    let p = NSOpenPanel()
+                    p.canChooseFiles = true
+                    p.message = "Choose a settings record saved earlier"
+                    guard p.runModal() == .OK, let u = p.url else { return }
+                    run("egg-config",
+                        Commands.previewHandedness(handSide, from: u.path))
+                }
+                .help("`handedness SIDE --from FILE` \u{2014} prints the record "
+                    + "range it would rewrite and opens no device.")
+            }
         }
     }
 

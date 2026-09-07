@@ -126,11 +126,11 @@ struct FirmwareView: View {
                 Button("Put the mouse into update mode") {
                     run(Commands.enterBootloader())
                 }
-                .disabled(runner.writePhaseInProgress)
+                .disabled(runner.writePhaseInProgress || m.busy)
                 Button("Try to leave update mode") {
                     run(Commands.leaveBootloader())
                 }
-                .disabled(runner.writePhaseInProgress)
+                .disabled(runner.writePhaseInProgress || m.busy)
             }
             Text("Leaving works if the mouse has firmware to go back to. If it "
                  + "was already mid-update it will come straight back into "
@@ -168,11 +168,12 @@ struct FirmwareView: View {
             HStack {
                 TextField("Where to save", text: $m.backupPath)
                 Button("Choose…") { chooseSave() }
+                    .disabled(m.busy)
             }
             Button("Back up firmware") {
                 run(Commands.backupFirmware(to: effectiveBackup))
             }
-            .disabled(runner.writePhaseInProgress)
+            .disabled(runner.writePhaseInProgress || m.busy)
         }
     }
 
@@ -188,6 +189,7 @@ struct FirmwareView: View {
             HStack {
                 TextField("Updater .exe", text: $m.updaterPath)
                 Button("Choose…") { chooseUpdater() }
+                    .disabled(m.busy)
             }
             Picker("Version", selection: $m.version) {
                 ForEach(m.versions, id: \.self) { Text($0).tag($0) }
@@ -212,7 +214,7 @@ struct FirmwareView: View {
             Button("Check the image") {
                 run(Commands.checkImage(updater: m.updaterPath, version: m.version))
             }
-                .disabled(m.updaterPath.isEmpty)
+                .disabled(m.updaterPath.isEmpty || m.busy)
         }
     }
 
@@ -230,7 +232,8 @@ struct FirmwareView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Button("Preview the exact bytes") { preview() }
-                .disabled(m.updaterPath.isEmpty || runner.writePhaseInProgress)
+                .disabled(m.updaterPath.isEmpty || runner.writePhaseInProgress
+                          || m.busy)
 
             if !m.token.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
@@ -311,7 +314,7 @@ struct FirmwareView: View {
 
             Button("Preview the restore") { previewRestore() }
                 .disabled(m.restoreFrom.isEmpty || m.restoreCurrent.isEmpty
-                          || runner.writePhaseInProgress)
+                          || runner.writePhaseInProgress || m.busy)
 
             if !m.restoreToken.isEmpty {
                 Text("Confirmation code: \(m.restoreToken)")
@@ -340,6 +343,7 @@ struct FirmwareView: View {
     /// firmware version, so sharing the function would mean passing empty
     /// strings through checks that exist for a different command.
     private var restoreBlocked: String? {
+        if m.busy { return kSomethingRunning }
         if runner.writePhaseInProgress {
             return "A firmware write is already running. It cannot be "
                  + "interrupted, and starting a second one is not possible."
@@ -404,7 +408,8 @@ struct FirmwareView: View {
     /// Nil when a flash is allowed; otherwise the reason, shown to the user.
     /// One function decides this and Tests/test_app_commands.swift drives it.
     private var blocked: String? {
-        Commands.flashBlockedReason(
+        if m.busy { return kSomethingRunning }
+        return Commands.flashBlockedReason(
             updater: m.updaterPath,
             backup: effectiveBackup,
             backupExists: FileManager.default.fileExists(atPath: effectiveBackup),
@@ -415,6 +420,25 @@ struct FirmwareView: View {
     }
 
     private var canFlash: Bool { blocked == nil }
+
+    /// THE RE-ENTRANCY GATE THIS SCREEN DID NOT HAVE (added 2026-09-07).
+    ///
+    /// `FirmwareModel.busy` was set true/false around all five operations and
+    /// read by nothing -- no `.disabled`, no view, nothing. Every other screen
+    /// guards itself with it (AdvancedView:64, ConfigView:298 and 363,
+    /// UpdatesView:80); this one relied solely on `runner.writePhaseInProgress`,
+    /// which is FALSE during bootloader entry, during `read-firmware`'s 65-block
+    /// read, and during both previews. So a second press of "Back up firmware"
+    /// launched a second egg-flash against the same bootloader, writing the same
+    /// output path -- and `ToolRunner.run` clears `liveOutput` on every start,
+    /// so the first run's output vanished while it was still going.
+    ///
+    /// It is a REASON rather than only a greyed button, because a control that
+    /// goes dead without saying why is the same defect one step later.
+    private let kSomethingRunning =
+        "Something on this screen is already running. Wait for it to finish -- "
+        + "a second egg-flash against the same device is not safe, and the two "
+        + "would fight over the same output file."
 
     private var effectiveBackup: String {
         m.backupPath.isEmpty ? defaultBackup() : m.backupPath

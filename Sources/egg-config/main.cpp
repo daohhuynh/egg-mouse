@@ -1181,10 +1181,30 @@ void listButtons() {
         else
             std::printf("    %-14s %02x %02x\n", a.name, a.b0, a.b1);
     }
-    std::puts("\nKeys: a-z, 0-9, f1-f12, kp0-kp9, enter escape backspace tab space");
-    std::puts("      minus equal leftbracket rightbracket backslash semicolon quote");
-    std::puts("      grave comma period slash capslock insert home pageup delete end");
-    std::puts("      pagedown left right up down.  Modifiers: ctrl shift alt win.");
+    // PRINTED FROM THE TABLE, not from prose. The four hardcoded lines that
+    // used to be here listed 27 of the 51 names in kNamedKeys and had not been
+    // touched since §7.32 added 21 more -- so `esc`, `printscreen`, `numlock`,
+    // the keypad operators, and every one of the eight named modifier keys
+    // worked and were undiscoverable. `leftshift` among them, which is the key
+    // in the vendor's own KEYBOARD KEY screenshot and the reason §7.32 exists.
+    // `map --machine` always emitted all 51 from the table, so the two listings
+    // disagreed and nothing compared them (found 2026-09-07).
+    std::puts("\nKeys: a-z, 0-9, f1-f12 and kp0-kp9 are parsed as ranges. The rest are"
+              "\nnamed, and this is ALL of them, printed from the same table --machine"
+              "\nemits so the two listings cannot drift apart again:");
+    {
+        std::size_t col = 0;
+        std::printf("  ");
+        for (std::size_t i = 0; i < namedKeyCount(); ++i) {
+            const char* k = namedKeyName(i);
+            const std::size_t w = std::strlen(k) + 1;
+            if (col + w > 70) { std::printf("\n  "); col = 0; }
+            std::printf("%s ", k);
+            col += w;
+        }
+        std::printf("\n");
+    }
+    std::puts("Modifiers: ctrl shift alt win, e.g. key:ctrl+shift+a.");
     for (std::size_t i = 0; i < kButtonSlotCount; ++i)
         if (!kButtonSlots[i].vendorExposes)
             std::printf("\n%s is NOT offered: %s.\n",

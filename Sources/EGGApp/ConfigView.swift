@@ -82,6 +82,29 @@ final class ConfigModel: ObservableObject {
             currentFrom = path.map { URL(fileURLWithPath: $0).lastPathComponent }
                        ?? "the mouse"
             currentStale = false
+
+            // §7.25's gates, FROM THIS COMMAND TOO (added 2026-09-07).
+            //
+            // `model.gates` had exactly one producer: the `read` branch in
+            // `run(_:ok:)`. "Show settings" is this screen's LEADING button and
+            // it comes through here instead, so a user who pressed it saw "This
+            // device will not accept a write here" in the right-hand pane while
+            // Preview and Apply stayed enabled for that same field on the left,
+            // and the CLI then refused the write. That contradicts this file's
+            // own rule -- the GUI must not present a choice the tool will
+            // reject -- and the data was already in hand: `show --machine`
+            // carries the reason as the 6th column of every FIELD row and
+            // `parseShow` has always kept it in `FieldValue.gate`.
+            //
+            // Only when the reading came off the DEVICE. A gate derived from a
+            // saved file describes that file's record, and Preview and Apply
+            // write to the mouse, so adopting it would gate the wrong thing.
+            if path == nil {
+                gates = Dictionary(
+                    parsed.fields.filter { !$0.gate.isEmpty }
+                                 .map { ($0.name, $0.gate) },
+                    uniquingKeysWith: { first, _ in first })
+            }
         } catch {
             currentError = error.localizedDescription
         }
