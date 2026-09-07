@@ -337,8 +337,25 @@ way, and the only casualty is a parity claim about the vendor UI.
 
 ### §7 `17-restore.pcapng`
 
-Middle Button → MIDDLE CLICK predicts `00 04 00 00 00 00 <+6 kept>`, then the
-reset returns the whole record to §2's values.
+Two MOUSE menu picks, then the reset.
+
+| step | pick | predicted entry bytes |
+| --- | --- | --- |
+| 1 | MOUSE -> BACK | `00 08 00 00 00 00 <+6 kept>` (§7.17, `0x4079e6`) |
+| 2 | MOUSE -> MIDDLE CLICK | `00 04 00 00 00 00 <+6 kept>` (§7.17, `0x40789a`) |
+| 3 | Factory Reset | whole record returns to §2's values |
+
+**Step 1 was added 2026-09-06 because step 2 alone can silently do nothing.**
+The owner: *"i cant set middle button to middle click because its already middle click
+so apply stays greyed out."* `[O]` -- another instance of `gui-surface.md` §5's
+dirty gate. Arriving here from §6 the button holds a keyboard action so step 2
+would have fired, but the section must not depend on the order it is run in.
+
+This is the **only** section that picks a MOUSE item from the menu. §1's coverage
+table records why that matters: all seven MOUSE pairs are `[O]` in writes, but
+only as defaults carried by read-modify-write, so the menu-item -> byte link is
+`[D]` only (`0x40774e`-`0x407b33`). Two clicks close it for two of the seven, and
+`00 08` / `00 04` are far enough apart that a mis-parse cannot fake them.
 
 ## 4. What NO capture can ever reach — do not spend time
 
@@ -356,34 +373,54 @@ reset returns the whole record to §2's values.
 `test_config_replay.py`, `test_button_map.py`, `test_golden_vendor.py`,
 `test_defaults.py`. Re-taking them buys nothing.
 
-### 5c. Does an X≠Y record survive being re-loaded?  [G]
+### 5c. Does an X!=Y record survive being re-loaded?  — NOT TESTED BY THIS RUN
 
 Raised 2026-09-06, when the owner restated that `X/Y Settings` is a view mode: *"Apply
 only works on the condition that a setting changes. Clicking X/Y Settings
 maintains Apply greyed out because you are not actually changing a setting."*
+Nothing new in that -- it is the same `[O]` as `gui-surface.md` §6, which quotes
+him saying it on 2026-09-05.
 
-Nothing new in that — it is the same `[O]` as `gui-surface.md` §6, which quotes
-him saying it on 2026-09-05. It is recorded here only because restating it made
-me notice the consequence below, which nobody had written down.
+**The hazard.** `A0 11` writes all 115 bytes from the tool's in-memory model, so
+the model's state at APPLY time matters even for bytes the user never touched. If
+the tool mirrors Y onto X when it LOADS a record where they differ (rather than
+only when a control is edited), then any later APPLY silently rewrites the CPI
+block.
 
-The hazard it exposes: **`A0 11` writes all 115 bytes from the tool's in-memory
-model**, so the model's state at APPLY time matters even for bytes the user never
-touched. Sections 4-6 each open fresh on the record section 3 leaves behind,
-where CPI3 is 1200/2400 and `0x2d` should be `01`.
+**Why this run cannot answer it, and that is fine.** the owner, 2026-09-06: *"i factory
+reset between each run like i did the last captures."* `[O]` So sections 4-6 do
+not open on section 3's `1200/2400`; they open on factory defaults where every
+stage has X == Y, which is exactly the input that makes a load-time mirror
+invisible.
 
-- **Predicted: the mirror is an edit-time control behaviour, not a load-time
-  one**, so the record survives and `0x2d`-`0x36` are byte-identical across the
-  opening `A1 12` of sections 4, 5 and 6 and every `A0 11` in them.
-- **If instead** the first `A0 11` of section 4 carries `0x30`/`0x31` = `b0 04`
-  (Y snapped to X's 1200), the mirror runs at load and **sections 4-6 cannot be
-  read as starting from section 3's state.** They are still valid for the button
-  block, which is what they are for; the CPI block in them is then tool-authored
-  and must not be cited.
+**Consequences, both good:**
+- The hazard is **moot for this run**. Section 3's result cannot be corrupted by
+  sections 4-6, because the reset already discarded it before they start.
+- An instruction was withdrawn because of this. Section 4 used to open by asking
+  the owner to read the CPI 3 box and report `1200/2400` vs `1200/1200`. With a reset in
+  between it reads `1600/1600` regardless, so the answer would have been
+  **uninformative and easy to misread as evidence of mirroring.** Removed
+  2026-09-06 rather than left in to be misinterpreted later.
 
-Checked by: `diff <(recdump 13-cpi-stage34 last) <(recdump 14-fixed-cpi first)`
-restricted to `0x23`-`0x36`. the owner is also asked to read the CPI 3 box aloud at the
-top of section 4, which answers it without needing the capture parsed first.
+**If it ever needs answering**, it takes a deliberate run with NO reset between an
+X!=Y write and the next tool launch. Nothing currently depends on it: our own tool
+does read-modify-write on bytes it did not touch, so it is a question about the
+vendor's UI, not about the record.
 
+### 5d. What the between-run factory resets buy
+
+The owner's standing practice, `[O]`, and it is worth stating as a property rather than
+a habit: **every capture in this run starts from the same known record.** Combined
+with opening the tool inside each capture (which emits `A1 02` then `A1 12` and
+writes nothing), each file is self-anchoring -- its own opening read establishes
+the baseline its writes are deltas from.
+
+Two things follow for scoring:
+- **Do not chain state across files.** A prediction that says "and stage 3 still
+  holds 1200/2400 from the previous section" is wrong by construction.
+- **An `A1 13` may appear inside a capture** if a reset landed there rather than
+  between. It is unmistakable in the frame list; do not score it as an unexpected
+  command.
 
 ## 6. Scoring
 
