@@ -44,6 +44,19 @@ was copied from any third-party implementation.
 | `docs/` | [`engineering-rules.md`](docs/engineering-rules.md) — the rules the notes cite by section — and [`CAPTURE-STEPS.md`](docs/CAPTURE-STEPS.md) |
 | `windows-run/`, `windows-capture/` | the vendor's own USB traffic, two runs, two firmware versions |
 
+### If you clone this, run one command first
+
+```sh
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-commit` refuses any commit that stages a planted mutation-test
+marker. `Tests/mutants.sh` plants a `// MUTANT`, builds, tests and restores, and
+twice on 2026-09-06 one reached a commit — once into the flash write phase.
+Hook path is per-clone git config, so a clone does not inherit it and the guard
+is silently off until you run that line. `ctest`'s `tree_clean` catches the same
+thing, but only after the commit.
+
 `docs/engineering-rules.md` is the one to read first if you want to know why any
 of this is shaped the way it is. Every `[O]`/`[D]`/`[G]` tag in `notes/` means
 what §1.2 there says it means, and the safety argument for the flasher is §4.2.

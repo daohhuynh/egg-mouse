@@ -110,19 +110,23 @@ class TheTrackedSetIsSelfSufficient(unittest.TestCase):
         Looks for string literals naming a file that sits at the repo root and
         is ignored. A marker that is not published is not a marker.
         """
+        # The candidate set must NOT come from os.listdir alone: that is
+        # whatever happens to be lying in this developer's tree today, so the
+        # test would mean something different on every machine -- and in a
+        # PRISTINE CLONE it means nothing at all, because none of these files
+        # exist there. That is exactly where the check matters most, so
+        # UNTRACKED_NOW seeds the set by NAME, present or not: a committed file
+        # looking up "CLAUDE.md" is a defect whether or not CLAUDE.md is on this
+        # disk. (Found by cloning the repo and running this: the seeding used to
+        # happen AFTER the vacuity guard below, so a clone failed here rather
+        # than checking anything.)
         roots = {p for p in os.listdir(ROOT)
                  if os.path.isfile(os.path.join(ROOT, p)) and not p.startswith(".")}
         untracked_roots = {p for p in roots if p not in self.tracked}
-        self.assertTrue(untracked_roots,
-                        "this test is vacuous unless something at the root is "
-                        "ignored; if that is genuinely true, delete it")
-
-        # The candidate set must NOT come from os.listdir alone: that is
-        # whatever happens to be lying in this developer's tree today, so the
-        # test would mean something different on every machine. UNTRACKED_NOW
-        # names the files that actually left the tracked set, so the regression
-        # is caught even on a clone where they were never created.
         untracked_roots |= {n for n in UNTRACKED_NOW if n not in self.tracked}
+        self.assertTrue(untracked_roots,
+                        "this test is vacuous unless something is both named as "
+                        "untracked and absent from the index")
 
         # ABSENT BY DESIGN, and the distinction is the whole point of the test.
         # These are Endgame Gear's proprietary Windows binaries. .gitignore has
