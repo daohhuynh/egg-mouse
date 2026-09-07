@@ -2804,6 +2804,64 @@ because the vendor zeroes them.
 
 ---
 
+### 7.17.1 The action set is CLOSED at 19, proved by the dispatcher itself  [D]
+
+Added 2026-09-06. §7.17 above lists the actions and cites a handler address for
+each -- that is a list of things found. **This is the harder claim §1.2a asks
+for: that the list is complete**, with the search space stated.
+
+The search space is the vendor's own, and its bound is in the code. The Button
+Mapping `WM_COMMAND` arm at `0x00407724`:
+
+```
+407724  8d 87 bf e0 ff ff   leal   -0x1f41(%edi), %eax   ; menu id -> 0-based
+407731  83 f8 3b            cmpl   $0x3b, %eax           ; 60 ids, 0x1f41..0x1f7c
+407734  0f 87 0e 0c 00 00   ja     0x408348              ; anything else: default
+40773a  0f b6 88 f4 83 40   movzbl 0x4083f4(%eax), %ecx  ; index table, 60 bytes
+407741  ff 24 8d a4 83 40   jmpl   *0x4083a4(,%ecx,4)    ; jump table
+```
+
+Resolving all 60 index bytes through the jump table gives **20 distinct targets**:
+nineteen that each claim **exactly one** menu id, and `0x00408348` -- the `ja`
+target -- claiming the remaining **41**. So the menu can dispatch nineteen
+distinct button actions and no more, and every id outside those nineteen falls
+into the same do-nothing arm the out-of-range branch uses.
+
+| handler | id | action | | handler | id | action |
+| --- | --- | --- | --- | --- | --- | --- |
+| `0x407748` | `0x1f41` | LEFT CLICK | | `0x407d70` | `0x1f55` | PLAY/PAUSE |
+| `0x4077ee` | `0x1f42` | RIGHT CLICK | | `0x407e17` | `0x1f56` | NEXT |
+| `0x407894` | `0x1f43` | MIDDLE CLICK | | `0x407ebe` | `0x1f57` | PREVIOUS |
+| `0x40793a` | `0x1f44` | FORWARD | | `0x407f65` | `0x1f58` | MUTE |
+| `0x4079e0` | `0x1f45` | BACK | | `0x40800c` | `0x1f59` | VOLUME UP |
+| `0x407a86` | `0x1f46` | SCROLL UP | | `0x4080b3` | `0x1f5a` | VOLUME DOWN |
+| `0x407b2d` | `0x1f47` | SCROLL DOWN | | `0x40815a` | `0x1f5b` | BROWSER |
+| `0x407bd4` | `0x1f68` | KEYBOARD KEY | | `0x408204` | `0x1f5c` | EXPLORER |
+| `0x407c2f` | `0x1f74` | FIXED CPI | | `0x4082ae` | `0x1f7c` | DISABLE |
+| `0x407cc9` | `0x1f73` | CPI LOOP | | `0x408348` | 41 ids | **default arm** |
+
+*(The handler addresses here are the jump-table entry points and sit a few bytes
+before the `movb` immediates §7.17 cites -- e.g. entry `0x407748`, immediate at
+`0x40774e` -- because the table targets the top of the arm.)*
+
+**`egg-config map` offers exactly nineteen**, and they correspond one to one.
+`Tests/test_actionset.py` gates it: it reads the bound and both table addresses
+**out of the instruction bytes** rather than hardcoding them, so a build that
+moves the tables fails loudly instead of silently testing nothing. Falsified two
+ways before being trusted -- dropping one action from the tool's list fails it,
+and pointing it 0x24 bytes early makes the parser refuse rather than accept
+garbage.
+
+**`CPI` is a group heading, not an action, and this upgrades that from `[G]`.**
+`gui-surface.md` §2 read `MOUSE`, `CPI` and `MEDIA` as headings from string order
+and marked it `[G]`. Menu id `0x1f72` (`CPI`) resolves to the **default arm**, so
+selecting it does nothing -- which is what a heading does. Asserted in the test.
+
+**What this does NOT close, stated per §1.2a.** It bounds the actions reachable
+from THIS dispatcher. A button action installed by another path -- a second menu,
+a dialog, a message map -- would not appear here, and neither the test nor this
+section can see one. It bounds the Button Mapping menu, not the universe.
+
 ## 7.18 The two writable fields that cited nothing, and what auditing them found  [D]
 
 Written 2026-09-06, from `Tools/ghidra-export/auditclaims.py`, which was built
