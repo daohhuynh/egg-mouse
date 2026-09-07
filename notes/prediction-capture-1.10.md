@@ -69,12 +69,26 @@ Sources: `windows-run/screenshots/*.png`, `dlgdump.py`, `gui-surface.md`.
 | --- | --- | --- | --- |
 | Left-handed Mode | `handedness` | yes | a MOVE plus a reset (§7.20) |
 | six rows (R/M/Fwd/Back/WhUp/WhDn) | `map` | yes | LEFT and the CPI button have no row |
-| MOUSE ×7 | `map` | **7 of 7** | complete |
+| MOUSE ×7 | `map` | 7 of 7 **as bytes**, 0 of 7 **as menu picks** | see below |
 | CPI → CPI LOOP | `map ... cpi-loop` | yes | |
 | CPI → FIXED CPI | `map ... fixed-cpi:N` | **only 1600/1600** | **capture B** |
-| MEDIA ×8 | `map` | **1 of 8** (VOLUME UP) | **capture C** |
+| MEDIA ×8 | `map` | **1 of 8** (VOLUME UP, `20 e9`) | **capture C** |
 | DISABLE | `map ... disable` | yes | |
 | KEYBOARD KEY + 4 modifiers | `map ... key:` | **1 key of ~106** (`a`) | **capture D** — and see §7.32 |
+
+**The MOUSE row is a distinction worth keeping, found 2026-09-06 by decoding
+every `A0 11` write in all eleven captures.** All seven MOUSE pairs (`00 01`,
+`00 02`, `00 04`, `00 08`, `00 10`, `01 01`, `01 ff`) do appear in writes, so the
+*encodings* are `[O]`. But they appear only as the eight default assignments
+carried along by read-modify-write, first at `02-basic.pcapng` seq 4 buttons 0-7,
+in a capture about the Basic tab. **No MOUSE menu item has ever been selected in
+any capture**: `05-buttonmapping.pcapng` only ever rewrote button 3, through
+`ff 00`, `20 e9`, `0c 00`, `02 00`, `02 01`, `02 03`.
+
+So the menu-item -> byte link for MOUSE is `[D]` only (§7.17, `0x40774e` through
+`0x407b33`). It is low risk and needs no capture of its own -- **§7's restore step
+covers it for free**, since Middle Button -> MOUSE -> MIDDLE CLICK is a genuine
+menu pick and must produce `00 04`.
 
 ---
 
@@ -209,41 +223,87 @@ additionally fixes the **order**, which independence alone does not.
 Also asked: does the tick persist between popup openings? Unknown, and it decides
 whether a user of our tool can be told the vendor tool keeps the mode.
 
-### §5 `15-media.pcapng` — the seven MEDIA actions never captured
+### §5 `15-media.pcapng` — seven never-captured MEDIA actions, plus a control
+
+Measured 2026-09-06, not assumed: decoding the eight 7-byte button entries out of
+every `A0 11` write in all eleven `windows-run/*.pcapng` gives exactly **one**
+MEDIA pair ever written, `20 e9` (VOLUME UP), first at `05-buttonmapping.pcapng`
+seq 12 button 3. So 7 of 8 are unobserved. `[O]`
+
+**All eight are now in the steps, VOLUME UP first as an in-file control.** It is
+the only step whose answer is known, so if it does not return `20 e9` the parse of
+that capture is wrong and nothing else in the file can be trusted. One click,
+spent before the seven unknowns rather than after.
 
 `[D]` at §7.17 (cfg107 `0x407d76` through `0x40820a`), one `movb` immediate each.
-**Low risk** — all eight handlers are the identical instruction shape and VOLUME
-UP is already confirmed on the wire as `20 e9`. Corroboration, not a live
-question. Predicted `+0 +1`, with `+2`–`+5` zero:
+Predicted `+0 +1`, with `+2`-`+5` zero:
 
-| order in the steps file | action | predicted |
+| step | action | predicted |
 | --- | --- | --- |
-| 1 | **BROWSER** | **`18 96`** |
-| 2 | **EXPLORER** | **`18 94`** |
-| 3 | PLAY/PAUSE | `20 cd` |
-| 4 | NEXT | `20 b5` |
-| 5 | PREVIOUS | `20 b6` |
-| 6 | MUTE | `20 e2` |
-| 7 | VOLUME DOWN | `20 ea` |
+| 1 | VOLUME UP (**control**) | `20 e9` -- already `[O]`, must reproduce |
+| 2 | **BROWSER** | **`18 96`** |
+| 3 | **EXPLORER** | **`18 94`** |
+| 4 | PLAY/PAUSE | `20 cd` |
+| 5 | NEXT | `20 b5` |
+| 6 | PREVIOUS | `20 b6` |
+| 7 | MUTE | `20 e2` |
+| 8 | VOLUME DOWN | `20 ea` |
 
-BROWSER and EXPLORER are first because they are the only two whose `+0` is `18`
-rather than `20` — where a misreading would most likely hide.
+**Steps 2 and 3 are the live question, and the rest is corroboration.** §7.15
+records the standing bar: *"No MEDIA value other than `0xe9` may be written until
+this is settled."* BROWSER and EXPLORER are the only two whose `+0` is `18` rather
+than `20`, and their HID Consumer usages (`0x0196`, `0x0194`) do not fit the
+single byte `+1` that VOLUME UP occupies. Either they spill into `+2`-`+3`, or
+`+1` is an index into a vendor table rather than a raw usage -- in which case
+VOLUME UP matching HID exactly was a coincidence. `18 96`/`18 94` is what the
+`movb` immediates say; the capture is what makes it `[O]` and lifts the bar on all
+seven.
 
 ### §6 `16-keys.pcapng` — KEYBOARD KEY beyond `a`
 
-Only `a` has ever been captured. §7.32 rebuilt cfg107's whole VK→HID table from
+Only `a` has ever been captured. §7.32 rebuilt cfg107's whole VK->HID table from
 the .exe and `Tests/test_keymap.py` gates it, so this corroborates 105 untested
 values.
 
 | step | key pressed | predicted `+1 +2` |
 | --- | --- | --- |
 | 1 | Left Shift | `00 e1` — the screenshot's own key, and the one that proved our table was short (§7.32) |
-| 2 | Keypad + | `00 57` |
+| 2 | Keypad + (SHIFT auto-ticked) | **see below — two live outcomes** |
 | 3 | F5 with WIN ticked | `08 3e` |
 | 4 | Print Screen | `00 46` |
+| 5 | Scroll Lock | `00 47` |
 
 Step 1 doubles as the check that a modifier pressed AS a key is distinct from a
 modifier ticked as a checkbox: `+1` must be `00` here, not `02`.
+
+**Step 2 is no longer a simple corroboration.** the owner, 2026-09-06: *"I used the +
+on the keypad and it entered + accurately, but it automatically ticked SHIFT
+alongside it."* `[O]`, and it was not predicted. The dialog sets the modifier
+boxes from the keypress, so they are not purely manual input.
+
+Two outcomes, and they are distinguishable:
+
+- **`02 57`** -- VK_ADD went through the jump table to HID keypad-plus `0x57` as
+  §7.32 says, and SHIFT was added by some separate path. Our `kp-plus` entry
+  stands and the auto-tick is a UI quirk to document.
+- **`02 2e`** -- the dialog resolved the keypress to the *character* `+` and
+  re-expressed it as Shift + `=` (HID `0x2e`). Then the dialog is character-driven
+  rather than VK-driven for at least some keys, and **the whole keypad half of
+  §7.32's 21 new names may be unreachable through the vendor UI** -- `kp-slash`,
+  `kp-star`, `kp-minus`, `kp-plus`, `kp-dot` all produce characters that the main
+  row can also produce. It would not make our table wrong -- it is `[D]` from the
+  jump table itself (cfg107 index table `0x0040a370`, jump table `0x0040a2b0`,
+  §7.32) and the device may well accept `0x57` -- but it would mean the vendor
+  tool cannot emit those five, which is worth knowing before we claim parity.
+
+A third possibility to watch for: the owner is on a laptop, and if its numpad is an
+`Fn` overlay the hardware itself may have sent Shift+`=`. That is indistinguishable
+from the second outcome in the bytes alone, so **`02 2e` is not by itself proof
+the dialog is character-driven.** Step 5 is what separates them.
+
+**Step 5 exists to break that tie.** Scroll Lock emits no character in any layout,
+so no character path and no overlay can produce it. `00 47` confirms the jump
+table is live for a non-character key regardless of what step 2 did.
 
 ### §7 `17-restore.pcapng`
 
