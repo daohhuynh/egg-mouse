@@ -17,11 +17,19 @@ keyboard action type. A byte-pattern search has no such failure mode, and anyone
 can reproduce it with `xxd` and `grep`.
 
 WHAT THIS PROVES, and it is a strong claim: for each action our tool offers, the
-vendor's own handler stores THE SAME TWO BYTES into the settings object. Not a
+vendor's own handler stores THE SAME BYTES into the settings object. Not a
 similar value, not a value consistent with a capture -- the identical immediate,
 at the address the table cites. If someone edits a byte in our table, or edits an
 address, or transcribes a new version's table wrongly, this fails and names the
 row.
+
+IT USED TO SAY "THE SAME TWO BYTES", AND IT MEANT IT. Until 2026-09-07 this file
+checked +0 and +1 and stopped, while defining OBJ_PAYLOAD = 0x57F240 and never
+using it. A button entry is seven bytes. BROWSER and EXPLORER store 0x01 into the
++2..+3 word -- their HID usage is u16 LE across +1..+2 -- and our encoder wrote
+zero there, unnoticed, because nothing looked. The +2..+5 checks below exist so
+that the question "does our table reproduce the vendor's whole entry?" is decided
+by the bytes rather than by which columns someone remembered to compare.
 
 WHAT IT DOES NOT PROVE. That the address is the handler for the MENU ITEM we
 named it after. Nothing in the bytes says "this is volume up" -- that came from
@@ -92,6 +100,49 @@ def store_to(va, window, target):
     return None
 
 
+def word_store_to(va, window, target):
+    """The source register of the first `movw %r16, target(,%reg,8)` in range.
+
+    Encoding, fixed throughout the vendor's handlers:
+
+        66 89 <modrm> <sib> <disp32>     movw %r16, disp(,%index,8)
+
+    modrm has mod=00 and rm=100 (SIB follows); the source register is the reg
+    field. Returns the register number, or None.
+    """
+    blob = at(va, window)
+    disp = struct.pack("<I", target)
+    for m in re.finditer(re.escape(disp), blob):
+        i = m.start()
+        if i >= 4 and blob[i - 4] == 0x66 and blob[i - 3] == 0x89:
+            modrm = blob[i - 2]
+            if (modrm & 0xC0) == 0 and (modrm & 7) == 4:
+                return (modrm >> 3) & 7
+    return None
+
+
+def reg_holds(va, window_before, reg, want):
+    """Was `reg` loaded with `want` in the `window_before` bytes before `va`?
+
+    Zero is reached by `xor r,r` (33 /r or 31 /r with mod=11 and reg==rm); any
+    other value by `movl $imm32, r32` (b8+r). Both forms are what the vendor's
+    compiler emits here, and both are checked from raw bytes rather than from a
+    disassembler that desynchronises in this region (CLAUDE.md 1.2b).
+    """
+    blob = at(va - window_before, window_before + 24)
+    if want == 0:
+        for op in (0x33, 0x31):
+            for m in re.finditer(re.escape(bytes([op])), blob):
+                j = m.start() + 1
+                if j < len(blob):
+                    modrm = blob[j]
+                    if modrm >= 0xC0 and ((modrm >> 3) & 7) == (modrm & 7) \
+                            and (modrm & 7) == reg:
+                        return True
+        return False
+    return bytes([0xB8 + reg]) + struct.pack("<I", want) in blob
+
+
 def parse_button_table():
     """The shipping table, straight out of the C++ source."""
     with open(SRC, encoding="utf-8") as f:
@@ -99,13 +150,14 @@ def parse_button_table():
     rows = []
     for m in re.finditer(
             r'\{"([a-z0-9-]+)",\s*"([a-z]+)",\s*'
-            r'(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+),\s*'
+            r'(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+),\s*'
             r'ButtonPayload::(\w+),\s*"cfg107 ((?:0x[0-9a-f]+/?)+)"\s*\}', src):
         rows.append({
             "name": m.group(1), "group": m.group(2),
             "b0": int(m.group(3), 16), "b1": int(m.group(4), 16),
-            "payload": m.group(5),
-            "addrs": [int(a, 16) for a in m.group(6).split("/")],
+            "b2": int(m.group(5), 16),
+            "payload": m.group(6),
+            "addrs": [int(a, 16) for a in m.group(7).split("/")],
         })
     return rows
 
@@ -207,15 +259,75 @@ class TheButtonTableMatchesTheBinary(unittest.TestCase):
         HID_CONSUMER = {
             "play-pause": 0xCD, "next": 0xB5, "previous": 0xB6, "mute": 0xE2,
             "volume-up": 0xE9, "volume-down": 0xEA,
-            # Browser/Explorer are 0x0196 and 0x0194 -- two-byte usages whose
-            # LOW byte is what +1 carries, which is why their action type is
-            # 0x18 rather than the 0x20 the six single-byte ones use.
+            # Browser/Explorer are 0x0196 and 0x0194 -- u16 LE across +1..+2,
+            # so +1 carries the low byte and +2 carries 0x01. Their action type
+            # is 0x18 rather than the 0x20 the six single-byte ones use. The
+            # high byte was assumed to vanish until 2026-09-07; it does not.
             "browser": 0x96, "explorer": 0x94,
         }
         for r in self.rows:
             if r["group"] == "media":
                 self.assertIn(r["name"], HID_CONSUMER, "unlisted media action")
                 self.assertEqual(HID_CONSUMER[r["name"]], r["b1"], r["name"])
+
+    def test_the_plus_2_byte_is_the_word_the_vendor_stores(self):
+        """+2..+3 -- the check that did not exist until 2026-09-07.
+
+        Every handler with a fixed payload writes a 16-bit word to OBJ_PAYLOAD
+        from a register it has just loaded. Seventeen load zero with `xor`;
+        BROWSER and EXPLORER load 1 with `movl $0x1`. The table's b2 column must
+        be the low byte of whichever word the vendor stores.
+        """
+        for r in self.rows:
+            if r["payload"] != "None":
+                continue          # FixedCpi computes it; Key does not use it.
+            found = None
+            for a in r["addrs"]:
+                reg = word_store_to(a, 96, OBJ_PAYLOAD)
+                if reg is not None:
+                    found = (a, reg)
+                    break
+            self.assertIsNotNone(
+                found, "%s: no movw to the +2..+3 word within 96 bytes of %s"
+                % (r["name"], ["0x%06x" % a for a in r["addrs"]]))
+            a, reg = found
+            self.assertTrue(
+                reg_holds(a + 96, 96, reg, r["b2"]),
+                "%s: table says +2 = 0x%02x, but the register the vendor "
+                "stores into +2..+3 near 0x%06x was not loaded with it"
+                % (r["name"], r["b2"], a))
+
+    def test_no_action_declares_a_plus_2_the_vendor_zeroes(self):
+        """The same claim from the other side, so a table edit cannot pass by
+        also editing the address it cites. Exactly two rows may be non-zero,
+        and they are the two whose HID usage does not fit in one byte."""
+        nonzero = sorted(r["name"] for r in self.rows if r["b2"] != 0)
+        self.assertEqual(["browser", "explorer"], nonzero,
+                         "rows with a non-zero +2: %s" % nonzero)
+        by = {r["name"]: r for r in self.rows}
+        self.assertEqual(0x01, by["browser"]["b2"])
+        self.assertEqual(0x01, by["explorer"]["b2"])
+
+    def test_the_plus_4_word_is_zero_for_every_fixed_payload_action(self):
+        """+4..+5 belongs to FIXED CPI's Y value and to nothing else. If a
+        handler ever stopped zeroing it, our encoder -- which always writes
+        zeros there for a None action -- would be wrong again in the same way.
+        """
+        for r in self.rows:
+            if r["payload"] != "None":
+                continue
+            found = None
+            for a in r["addrs"]:
+                reg = word_store_to(a, 120, OBJ_PAYLOAD + 2)
+                if reg is not None:
+                    found = (a, reg)
+                    break
+            self.assertIsNotNone(found, "%s: no store to +4..+5" % r["name"])
+            a, reg = found
+            self.assertTrue(
+                reg_holds(a + 120, 120, reg, 0),
+                "%s: the +4..+5 word near 0x%06x is not stored from a zeroed "
+                "register" % (r["name"], a))
 
     def test_the_two_browser_actions_use_a_different_action_type(self):
         # If this ever equalises, someone has "tidied" the table and broken the

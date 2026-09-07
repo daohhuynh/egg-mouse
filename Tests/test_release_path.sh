@@ -26,8 +26,23 @@ EXE107="old-firmware-executables/Endgame Gear OP1 8k v2 Firmware Updater 1.07.ex
 EXE104="old-firmware-executables/Endgame Gear OP1 8k v2 Firmware Updater v1.04.exe"
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
 for f in "$EXE110" "$EXE107" "$EXE104"; do
-  [ -f "$f" ] || { echo "SKIP: $f not present"; exit 0; }
+# 77, not 0. CLAUDE.md 6.2: a harness that cannot produce a bad result is not
+# evidence. This used to `exit 0`, so on any machine without Endgame's binaries
+# -- a fresh clone, CI, anyone but the owner -- ctest printed a green pass for a test
+# that had asserted nothing. CMakeLists sets SKIP_RETURN_CODE 77 so the run says
+# "Skipped" instead, which is the true statement.
+  [ -f "$f" ] || { echo "SKIP: $f not present"; exit 77; }
 done
+
+# frames/ is NOT in the repository: .gitignore line 16 ignores *.bin. Every byte
+# of it IS committed, inside windows-run/01-baseline.pcapng, so rebuild rather
+# than skip. Without this the `cat` below produced an empty file and the test
+# carried on comparing nothing -- `set -uo pipefail` has no -e (found 2026-09-07).
+FRAME=frames/01-baseline-003-in-01.bin
+[ -f "$FRAME" ] || python3 Tools/capture/mkframes.py >/dev/null 2>&1
+[ -f "$FRAME" ] || { echo "FAIL: $FRAME missing and not rebuildable from"; \
+                     echo "      windows-run/01-baseline.pcapng (Tools/capture/mkframes.py)"; \
+                     exit 2; }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

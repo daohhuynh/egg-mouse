@@ -174,7 +174,7 @@ must be commented at the site with a pointer to §5.6, or a later reader will
 ### 2.4 `A1 13` after a successful flash — a decision for the owner
 
 The vendor sends `A1 13` after a successful flash (§5.4a), and `A1 13` is
-**factory reset** (`config-protocol.md` §5, §7.4). So a normally-completing
+**factory reset** (`config-protocol.md` §5, §7.1c). So a normally-completing
 vendor flash resets the user's settings.
 
 Two facts make this a real decision rather than a detail:

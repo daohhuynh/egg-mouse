@@ -136,10 +136,13 @@ static int usage() {
         "                                  §4.4 stage 2: send ONE report (A1 3A),\n"
         "                                  confirm the mouse came back as the\n"
         "                                  bootloader, send it nothing. No erase,\n"
-        "                                  no write. Exit by unplugging it.\n"
+        "                                  no write -- but it LATCHES: only a\n"
+        "                                  completed flash gets back out [O].\n"
         "  egg-flash leave-bootloader --yes\n"
-        "                                  the way back: ONE report (A1 09), the\n"
-        "                                  vendor's own exit. No erase, no write.\n"
+        "                                  ONE report (A1 09), the vendor's own\n"
+        "                                  post-flash exit. No erase, no write.\n"
+        "                                  It did NOT clear a latched entry on\n"
+        "                                  this mouse ([O], twice, \u00a75b.2).\n"
         "  egg-flash help\n"
         "\n"
         "The release comes from --version (default %s), and the .exe you name\n"
@@ -269,8 +272,25 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
           "\n"
           "It does not erase, does not write, and sends the bootloader nothing\n"
           "at all. The mouse will disappear and come back as PID 0x1977.\n"
-          "To get out again: UNPLUG IT AND PLUG IT BACK IN. A power cycle is\n"
-          "the observed exit and it has been done on this mouse before.\n"
+          "\n"
+          "IT DOES NOT COME BACK ON ITS OWN. A1 3A sets a flag that survives\n"
+          "loss of power, so from here the mouse is not a mouse:\n"
+          "  - two physical power cycles both returned 0x1977 [O]\n"
+          "  - it sat in the bootloader four hours without reverting [O]\n"
+          "  - `leave-bootloader` (A1 09) does not clear it either: the device\n"
+          "    resets and comes back into the bootloader [O], twice\n"
+          "(notes/bootloader-observed.md \u00a75a, \u00a75b, \u00a75b.2. The BUTTON entry\n"
+          "is the one a power cycle exits -- this is the other one.)\n"
+          "\n"
+          "THE ONLY OBSERVED WAY OUT IS A COMPLETED FLASH: Endgame's Windows\n"
+          "updater, or `egg-flash flash`, which needs a backup file. Take the\n"
+          "backup in the NEXT step, not this one -- `read-firmware` needs the\n"
+          "bootloader you are about to enter, so it cannot be done first:\n"
+          "  ./build/egg-flash enter-bootloader --yes\n"
+          "  ./build/egg-flash read-firmware backup.bin\n"
+          "  ./build/egg-flash flash <updater.exe> --backup backup.bin ...\n"
+          "\n"
+          "That is recoverable, not a brick, and it is the cost of this command.\n"
           "\n"
           "Re-run with --yes.\n");
 
@@ -358,8 +378,14 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
     std::printf("\nCONFIRMED: in the bootloader, all three identity fields matched.\n"
                 "Nothing was sent to it and nothing will be.\n"
                 "\n"
-                "TO GET OUT: unplug the mouse, wait a moment, plug it back in.\n"
-                "Then `egg-config devices` should show PID 0x1978 (application).\n");
+                "TO GET OUT: FINISH A FLASH. Unplugging will not do it and neither\n"
+                "will `leave-bootloader` -- both were tried on this mouse and both\n"
+                "came back as PID 0x1977 (notes/bootloader-observed.md \u00a75b).\n"
+                "  ./build/egg-flash read-firmware backup.bin\n"
+                "  ./build/egg-flash flash <updater.exe> --backup backup.bin \\\n"
+                "        --confirm <token from dryrun> --yes\n"
+                "Endgame's Windows updater is the other way in, and needs nothing\n"
+                "from this machine.\n");
 
     // THE RECEIPT. the owner's call, 2026-09-06: "enforce it, with an escape hatch."
     //
@@ -382,8 +408,10 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
         if (writeEntryReceipt(o.seen.releaseNumber, o.seen.product, werr))
             std::printf("\nreceipt    %s\n"
                         "           `flash` and `restore-firmware` require this when they find\n"
-                        "           the mouse already in the bootloader (\u00a74.2b). Run them from\n"
-                        "           THIS directory, or pass --i-know-this-is-button-entered.\n",
+                        "           the mouse already in the bootloader (\u00a74.2b). It is keyed to\n"
+                        "           $HOME, not the working directory, so run them from wherever\n"
+                        "           you like -- as the same user. Or pass\n"
+                        "           --i-know-this-is-button-entered.\n",
                         entryReceiptPath().c_str());
         else
             std::printf("\nNOTE: could not write the entry receipt (%s).\n"
@@ -415,16 +443,19 @@ static int cmdLeaveBootloader(bool yes, bool verbose) {
           "mouse came back as 0x1978 about 880 ms later. Updater 1.04, a separate\n"
           "code base, builds the identical frame.\n"
           "\n"
-          "WHAT IS A GUESS: Endgame only ever sends A1 09 to a bootloader it has\n"
-          "just finished flashing. Nothing has been flashed or erased here, so\n"
-          "there is an intact application to hand back to -- but the device's\n"
-          "behaviour in this exact state is not derivable from their binaries.\n"
+          "EXPECT IT NOT TO WORK HERE, because that has already been observed.\n"
+          "Endgame only ever send A1 09 to a bootloader they have just finished\n"
+          "FLASHING. This one has not been. A1 09 has been sent to an unflashed\n"
+          "bootloader on this mouse twice, and both times the device acked, reset\n"
+          "in ~292 ms, and came back as PID 0x1977 -- the bootloader again ([O],\n"
+          "notes/bootloader-observed.md \u00a75b.2). The flag that sends it there\n"
+          "lives in NVM and is cleared by a COMPLETED FLASH, not by this command.\n"
           "\n"
-          "It does not erase and does not write. The frame carries no parameters.\n"
-          "\n"
-          "IF IT DOES NOTHING, nothing is lost: the mouse stays in the bootloader\n"
-          "and Endgame's Windows updater still recovers it (it treats a 0x1977\n"
-          "device as a supported starting state and flashes it directly).\n");
+          "It is kept anyway, and running it costs nothing: it does not erase, it\n"
+          "does not write, and the frame carries no parameters. If it does\n"
+          "nothing the mouse simply stays in the bootloader, from which both\n"
+          "`egg-flash flash` and Endgame's Windows updater still recover it --\n"
+          "each treats a 0x1977 device as a supported starting state.\n");
         std::printf("\npreflight, right now:\n"
                     "  %zu application vendor collection(s)  (PID 0x%04x)\n"
                     "  %zu bootloader  vendor collection(s)  (PID 0x%04x)\n",
@@ -1001,8 +1032,11 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
               "\n"
               "     Looked for it at:\n"
               "       %s\n"
-              "     If you did run `enter-bootloader`, you are most likely in a\n"
-              "     different directory than you were then. cd there and re-run.\n"
+              "     That path is $HOME-relative, so cd-ing about cannot cause\n"
+              "     this. If you did run `enter-bootloader`, then either it ran\n"
+              "     as a different user or a different $HOME (sudo does this),\n"
+              "     or it printed a NOTE that the receipt could not be written,\n"
+              "     or the file has since been deleted.\n"
               "\n"
               "     If you entered with the buttons and mean to flash anyway:\n"
               "       ./build/egg-flash %s ... --i-know-this-is-button-entered\n"
@@ -1202,6 +1236,7 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     }
 
     std::printf("\n      sending A1 13 (factory reset), the vendor's last step\n");
+    bool resetSent = false, resetAcked = false;
     {
         auto appDev = egg::Device::open(egg::kProductIdApplication, log);
         if (!appDev) {
@@ -1217,20 +1252,48 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
             // directly would only manufacture false failures.
             const egg::Reply r = t.exchange(postSuccess(), egg::kReportSmall,
                                             "A1 13 factory reset", 1100);
+            resetSent  = true;
+            resetAcked = r.ok();
             std::printf("      resp[1]=0x%02x (%s)\n", r.status,
                         r.ok() ? "acknowledged" : egg::describe(r.outcome));
         }
     }
 
+    // THREE OUTCOMES, THREE DIFFERENT STATES OF THE USER'S SETTINGS. This block
+    // used to print the first one's text unconditionally -- including on the
+    // branch four lines above that had just said "A1 13 NOT sent; settings are
+    // untouched". A tail that contradicts itself within one screen is worse
+    // than one that says nothing, and this is the screen someone reads to find
+    // out what a flash just did to their mouse.
+    if (resetAcked) {
+        std::printf("\nSETTINGS ARE NOW AT FACTORY DEFAULTS. To put yours back:\n"
+                    "  ./build/egg-config restore %s\n", vaultPath.c_str());
+    } else if (resetSent) {
+        std::printf("\nA1 13 WENT OUT AND WAS NOT ACKNOWLEDGED, so whether the\n"
+                    "settings were reset is UNKNOWN. Read them and see -- the\n"
+                    "diff below answers it either way. Yours are saved:\n"
+                    "  ./build/egg-config restore %s\n", vaultPath.c_str());
+    } else {
+        std::printf("\nSETTINGS WERE NOT RESET: A1 13 never went out. They are\n"
+                    "whatever they were before the flash, now under new firmware\n"
+                    "-- a record the firmware did not write, which is the state\n"
+                    "the vendor's tool never leaves behind (FlashPlan.cpp says\n"
+                    "why that matters). Finish it one of two ways:\n"
+                    "  ./build/egg-config factory-reset --yes\n"
+                    "  ./build/egg-config restore %s\n", vaultPath.c_str());
+    }
+
     std::printf(
-      "\nSETTINGS ARE NOW AT FACTORY DEFAULTS. To put yours back:\n"
-      "  ./build/egg-config restore %s\n"
-      "\nAnd to confirm the reset landed where the vendor's does:\n"
+      "\nTo see where the settings actually stand:\n"
       "  ./build/egg-config read --save after-flash.bin\n"
       "  ./build/egg-config diff %s after-flash.bin\n"
-      "Expect exactly the 21 bytes of notes/prediction-factory-reset.md.\n"
+      "%s"
       "\nThe pre-flash image is in %s if anything needs putting back.\n",
-      vaultPath.c_str(), vaultPath.c_str(), backupPath.c_str());
+      vaultPath.c_str(),
+      resetAcked
+        ? "Expect exactly the 21 bytes of notes/prediction-factory-reset.md.\n"
+        : "",
+      backupPath.c_str());
     return 0;
 }
 

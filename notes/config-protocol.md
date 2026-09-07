@@ -338,12 +338,32 @@ deleted, for the same reason those are.
   dialog's separate one (`0x00401e70`, a different step above 10000), the
   multiclick slider range (`0x405f84`), the LOD bound and its eleven-arm jump
   table (`0x40ec62`), and the `lod` capability gate on record `0x6f`.
-- **STILL OPEN.** What `A1 02`'s returned dwords mean (§7.3). `egg-config info`
+- **STILL OPEN.** What `A1 02`'s returned dwords mean (§7.1b). `egg-config info`
   prints them and deliberately does not name them.
 - **STILL OPEN.** The three top-level handlers `0x412fb0`, `0x413600`,
   `0x414010`.
 
 ## 7. The complete command set, and what each command is  [D]
+
+> **RENUMBERED 2026-09-07: the command findings that were §7.3, §7.4 and §7.5
+> are now §7.1b, §7.1c and §7.1d.** This document had TWO sections numbered 7.3,
+> two numbered 7.4 and two numbered 7.5 -- the `###` command findings here, and
+> the `##` record-map series further down -- and both meanings were in live use:
+> `Sources/egg-config/main.cpp` cited "§7.4" for the `A1 13` frame builder while
+> `Sources/EGGCore/include/egg/Protocol.h` cited "§7.4" for the `0x01`-`0x04`
+> zeroing. A citation that lands on the wrong section is worse than none
+> (CLAUDE.md §1.2), so the three with the fewest references moved.
+>
+> **Old number -> new:** §7.3 (`A1 02` is a small query) -> **§7.1b**;
+> §7.4 (`A1 13` IS the factory reset) -> **§7.1c**; §7.5 (the retracted
+> recommendation) -> **§7.1d**. The `##` sections keep §7.3, §7.4 and §7.5.
+>
+> `Tests/test_crossrefs.py` now fails on any file-qualified `§x.y` reference in
+> the repo that resolves to no heading or to more than one. That is what would
+> have caught this, and it is also what caught two references in
+> `updater-protocol.md` to a section 2.4 of this file -- a number this document
+> has not had since §2 was reorganised (see §7.1d, which mentions "an earlier
+> §2.3" for the same reason). Both meant §7.1c.
 
 Work-plan item 7. `CLAUDE.md` §4.1 requires factory reset to be implemented and
 confirmed **before any other write path**, on the grounds that it is the undo for
@@ -425,7 +445,7 @@ found none in cfg107; that is corroboration, not proof, and is recorded as such.
 > shipped build". **That was wrong.** It rested on the exported `callers` field,
 > which is unreliable: `0x00413faf` is a direct `calll 0x404720`
 > (`e8 6c 07 ff ff`, rel `-0xf894`, next instruction `0x413fb4`). The function is
-> live, and it is the **Factory Reset** command — see §2.4. The updater's
+> live, and it is the **Factory Reset** command — see §7.1c. The updater's
 > post-success `A1 13` (`notes/updater-protocol.md` §5.4 step 7) is the same
 > command, which is why it is sent after a flash.
 
@@ -564,7 +584,7 @@ The Windows capture still corroborates this, and `records.py` prints every write
 header and shouts if it varies between frames. But the write path is no longer
 gated on it.
 
-### 7.3 `A1 02` is a small query, not a blob read  [D]
+### 7.1b `A1 02` is a small query, not a blob read  [D]
 
 `FUN_004045e0`:
 ```
@@ -585,7 +605,7 @@ on `0xA1` is answered on `0xA0` when the payload is large and on `0xA1` when it
 is small — i.e. the report id tracks the transfer size, not the direction. Worth
 knowing before assuming a request/response pair shares a report id.
 
-### 7.4 `A1 13` IS the factory reset, and it is a device command  [D]
+### 7.1c `A1 13` IS the factory reset, and it is a device command  [D]
 
 The main dialog (DIALOGEX resource **102**) has 8 controls, two of which matter:
 
@@ -624,7 +644,7 @@ sends it. It carries no payload beyond the report id and command byte.
 defaults; the host sends 64 bytes and then re-syncs its local copies. No
 host-composed defaults blob is involved anywhere.
 
-### 7.5 The retracted recommendation
+### 7.1d The retracted recommendation
 
 **RETRACTED.** An earlier §2.3 argued that no factory-reset command existed, that
 any vendor reset must therefore be an `A0 11` write of a host-composed blob, and
@@ -2800,13 +2820,25 @@ difference is that this is now `[D]` from an immediate, not a guess from a
 coincidence — and it identifies entry 5 as a control whose default action is
 CPI LOOP, i.e. the underside CPI button.
 
-**2. BROWSER and EXPLORER use a DIFFERENT action type, and that dissolves the
->8-bit problem.** §7.14 and §7.15 flagged that their HID Consumer usages
-(`0x0196`, `0x0194`) cannot fit the single byte `+1` that VOLUME UP occupies,
-and warned that `+1` might therefore be a vendor index rather than a raw usage.
-Neither. They use type **`0x18`** where the other six use `0x20`, and their `+1`
-bytes are the LOW bytes of those usages. `+1` is a raw usage low byte
-throughout; the action type carries the rest.
+**2. BROWSER and EXPLORER use a DIFFERENT action type AND a second usage byte
+at `+2`.** §7.14 and §7.15 flagged that their HID Consumer usages (`0x0196`,
+`0x0194`) cannot fit the single byte `+1` that VOLUME UP occupies, and warned
+that `+1` might therefore be a vendor index rather than a raw usage. It is not
+an index: `+1` is the usage LOW byte throughout, and the HIGH byte `0x01` goes
+to **`+2`**. They also use type `0x18` where the other six use `0x20`.
+
+> **CORRECTED 2026-09-07.** This paragraph used to end "the action type carries
+> the rest", which is wrong -- an action type cannot carry `0x01`, and nothing
+> made it do so. `+2` carries it. `[D]` cfg107 `0x40817c` `movl $0x1,%edx` and
+> `0x408226`, each feeding the `movw` into the `+2`-`+3` word of the settings
+> object at `0x57f240`; every other button handler reaches that same store from
+> a zeroed register. `[O]` `windows-capture/15-media.pcapng` seq 4 and 6,
+> `18 96 01` and `18 94 01` (`config-wire-observed.md` §8.2, itself corrected on
+> the same day for asserting the opposite).
+>
+> `Tests/test_citations.py` now checks the `+2`-`+3` and `+4`-`+5` word stores
+> for every action, so this claim is re-derived from cfg107's bytes on every
+> test run rather than resting on this paragraph.
 
 **3. All eight MEDIA values are standard HID Consumer Page usages.** Like
 §7.12's modifier byte, this is corroboration from an external published
@@ -2822,10 +2854,13 @@ type that differs. `0xe9` is the single value the capture also observed, and it
 agrees.
 
 **Consequence:** every item on the Button Mapping menu now has a `[D]` byte
-pair. Nothing in the button-mapping path is `[G]` any more, so §1.3 no longer
-blocks exposing the whole menu — subject to the usual read-modify-write and
-diff-verify, and noting `+2`/`+4` must be zeroed for the non-payload actions
-because the vendor zeroes them.
+pair, and BROWSER and EXPLORER a `[D]` third byte. Nothing in the button-mapping
+path is `[G]` any more, so §1.3 no longer blocks exposing the whole menu —
+subject to the usual read-modify-write and diff-verify, and noting that `+2` is
+zero for seventeen of the nineteen actions and `0x01` for those two, while `+4`
+is zero for all of them except FIXED CPI. "Zero the payload" was the earlier
+wording here and it was the shape of the bug: `+2` is part of the action, not
+spare space.
 
 ---
 

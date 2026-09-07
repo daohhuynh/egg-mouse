@@ -14,6 +14,16 @@ cd "$(dirname "$0")/.."
 BIN=./build/egg-config
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
 
+# frames/ is NOT in the repository: .gitignore line 16 ignores *.bin. Every byte
+# of it IS committed, inside windows-run/01-baseline.pcapng, so rebuild rather
+# than skip. Without this the `cat` below produced an empty file and the test
+# carried on comparing nothing -- `set -uo pipefail` has no -e (found 2026-09-07).
+FRAME=frames/01-baseline-003-in-01.bin
+[ -f "$FRAME" ] || python3 Tools/capture/mkframes.py >/dev/null 2>&1
+[ -f "$FRAME" ] || { echo "FAIL: $FRAME missing and not rebuildable from"; \
+                     echo "      windows-run/01-baseline.pcapng (Tools/capture/mkframes.py)"; \
+                     exit 2; }
+
 PASS=0; FAIL=0
 # want_rc <expected-rc> <substring> <args...>
 want_rc() {

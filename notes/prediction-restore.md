@@ -77,7 +77,7 @@ Then unplug, wait, replug, and read again.
 
 `config-wire-observed.md` §5: the vendor's own writes had reverted by the next
 session in **five gaps out of six**. Nobody knew whether that meant `A0 11`
-does not persist, or that nothing survives re-enumeration. §2.4 settled the
+does not persist, or that nothing survives re-enumeration. `wire-observed.md` §2.4 settled the
 second half today -- with no write, the record is stable across a replug -- so
 **this test is now interpretable and was not before.**
 

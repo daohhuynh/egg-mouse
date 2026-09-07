@@ -98,6 +98,6 @@ result written down first. The config write path is unlocked.
 ## What it does not close
 
 The reset was verified by a read-back, which proves what the device holds NOW.
-Whether it survives a power cycle is untested, and §2.4's baseline says the
+Whether it survives a power cycle is untested, and `wire-observed.md` §2.4's baseline says the
 record is stable across a replug when nobody writes — so that test is now
 meaningful and was not before.

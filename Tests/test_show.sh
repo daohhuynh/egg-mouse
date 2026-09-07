@@ -24,7 +24,9 @@ cd "$(dirname "$0")/.."
 BIN=./build/egg-config
 SRC=frames/01-baseline-003-in-01.bin
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
-[ -f "$SRC" ]  || { echo "missing $SRC"; exit 2; }
+[ -f "$SRC" ]  || python3 Tools/capture/mkframes.py >/dev/null 2>&1
+[ -f "$SRC" ]  || { echo "missing $SRC, and it could not be rebuilt from"; \
+                    echo "windows-run/01-baseline.pcapng"; exit 2; }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -60,13 +62,21 @@ check "show --from exits 0 on the vendor's own record" $?
 # --- the sixteen, from notes/config-wire-observed.md §7 --------------------
 says "Polling Rate 8000Hz            (basic.png)"            "8000 Hz"
 says "LOD 1.0mm                      (basic.png)"            "(1.0mm)"
-says "CPI Levels 4                   (CPI-levels.png)"       "cpi-levels"
+# THE NEEDLE MUST CARRY THE VALUE, not just the field name. Five of these
+# grepped for "cpi-levels", "angle-snapping", "motion-sync", "force-max-fps"
+# and "slamclick-filter" -- strings `show` prints for EVERY record whatever the
+# byte says -- while their labels claimed "4", "unticked" and "ticked". Four of
+# the five were saved by the value loop below; `cpi-levels` was checked nowhere
+# at all, so the 4 in its own label was never asserted (found 2026-09-07). A
+# check whose needle cannot fail is the same defect as a needle that never
+# matches, and this file has now had one of each.
+says "CPI Levels 4                   (CPI-levels.png)"       "cpi-levels             0x0e = 04"
 says "CPI 2 is the selected radio    (basic.png)"            "stage 2 is the active one"
-says "Angle Snapping unticked        (advanced-sensor.png)"  "angle-snapping"
+says "Angle Snapping unticked        (advanced-sensor.png)"  "angle-snapping         0x0a = 00"
 says "Motion Sync unticked           (advanced-sensor.png)"  "motion-sync"
 says "Force max Sensor fps ticked    (advanced-sensor.png)"  "force-max-fps"
 says "Sensor Angle 0                 (advanced-sensor.png)"  "0 degrees"
-says "Slamclick Filter ticked        (advanced-sensor.png)"  "slamclick-filter"
+says "Slamclick Filter ticked        (advanced-sensor.png)"  "slamclick-filter       0x06[0] = 1"
 says "Downshift 'Default'            (CPI-downshift-tuning)" '"Default", item 4 of 4'
 says "Smoothing 'Ripple Control Off' (smoothing-tuning.png)" '"Ripple Control Off", item 2 of 3'
 says "CPI stages 400/800/1600/3200   (CPI-levels.png)"       "400 CPI"

@@ -541,37 +541,43 @@ namespace egg::cfg {
 
 const ButtonAction kButtonActions[] = {
     // MOUSE -- +1 is the button mask.
-    {"left-click",   "mouse", 0x00, 0x01, ButtonPayload::None, "cfg107 0x40774e"},
-    {"right-click",  "mouse", 0x00, 0x02, ButtonPayload::None, "cfg107 0x4077f4"},
-    {"middle-click", "mouse", 0x00, 0x04, ButtonPayload::None, "cfg107 0x40789a"},
-    {"forward",      "mouse", 0x00, 0x10, ButtonPayload::None, "cfg107 0x407940"},
-    {"back",         "mouse", 0x00, 0x08, ButtonPayload::None, "cfg107 0x4079e6"},
+    {"left-click",   "mouse", 0x00, 0x01, 0x00, ButtonPayload::None, "cfg107 0x40774e"},
+    {"right-click",  "mouse", 0x00, 0x02, 0x00, ButtonPayload::None, "cfg107 0x4077f4"},
+    {"middle-click", "mouse", 0x00, 0x04, 0x00, ButtonPayload::None, "cfg107 0x40789a"},
+    {"forward",      "mouse", 0x00, 0x10, 0x00, ButtonPayload::None, "cfg107 0x407940"},
+    {"back",         "mouse", 0x00, 0x08, 0x00, ButtonPayload::None, "cfg107 0x4079e6"},
     // MOUSE -- scroll is a separate action type, +1 a signed step.
-    {"scroll-up",    "mouse", 0x01, 0x01, ButtonPayload::None, "cfg107 0x407a8c"},
-    {"scroll-down",  "mouse", 0x01, 0xFF, ButtonPayload::None, "cfg107 0x407b33"},
+    {"scroll-up",    "mouse", 0x01, 0x01, 0x00, ButtonPayload::None, "cfg107 0x407a8c"},
+    {"scroll-down",  "mouse", 0x01, 0xFF, 0x00, ButtonPayload::None, "cfg107 0x407b33"},
     // CPI.
-    {"fixed-cpi",    "cpi",   0x0C, 0x00, ButtonPayload::FixedCpi, "cfg107 0x407c6f"},
-    {"cpi-loop",     "cpi",   0x09, 0xF1, ButtonPayload::None, "cfg107 0x407ccf"},
-    // MEDIA -- +1 is the low byte of a HID Consumer Page usage. The two AL
-    // usages are 0x01xx and carry a different action type; that is the whole
-    // reason they fit in one byte (§7.17).
-    {"play-pause",   "media", 0x20, 0xCD, ButtonPayload::None, "cfg107 0x407d76"},
-    {"next",         "media", 0x20, 0xB5, ButtonPayload::None, "cfg107 0x407e1d"},
-    {"previous",     "media", 0x20, 0xB6, ButtonPayload::None, "cfg107 0x407ec4"},
-    {"mute",         "media", 0x20, 0xE2, ButtonPayload::None, "cfg107 0x407f6b"},
-    {"volume-up",    "media", 0x20, 0xE9, ButtonPayload::None, "cfg107 0x408012"},
-    {"volume-down",  "media", 0x20, 0xEA, ButtonPayload::None, "cfg107 0x4080b9"},
-    {"browser",      "media", 0x18, 0x96, ButtonPayload::None, "cfg107 0x408160"},
-    {"explorer",     "media", 0x18, 0x94, ButtonPayload::None, "cfg107 0x40820a"},
+    {"fixed-cpi",    "cpi",   0x0C, 0x00, 0x00, ButtonPayload::FixedCpi, "cfg107 0x407c6f"},
+    {"cpi-loop",     "cpi",   0x09, 0xF1, 0x00, ButtonPayload::None, "cfg107 0x407ccf"},
+    // MEDIA -- the HID Consumer Page usage is u16 LE at +1..+2. The six below
+    // are single-byte usages under action type 0x20, so +2 is zero. The two AL
+    // usages are 0x01xx: they take action type 0x18 AND put their high byte
+    // 0x01 in +2. They do NOT "fit in one byte", which is what this comment
+    // used to claim and what made `map <btn> browser` write a byte the vendor
+    // never writes. [D] cfg107 0x40817c/0x408226 (movl $0x1 into the +2..+3
+    // word store) and [O] windows-capture/15-media.pcapng seq 4 and 6.
+    {"play-pause",   "media", 0x20, 0xCD, 0x00, ButtonPayload::None, "cfg107 0x407d76"},
+    {"next",         "media", 0x20, 0xB5, 0x00, ButtonPayload::None, "cfg107 0x407e1d"},
+    {"previous",     "media", 0x20, 0xB6, 0x00, ButtonPayload::None, "cfg107 0x407ec4"},
+    {"mute",         "media", 0x20, 0xE2, 0x00, ButtonPayload::None, "cfg107 0x407f6b"},
+    {"volume-up",    "media", 0x20, 0xE9, 0x00, ButtonPayload::None, "cfg107 0x408012"},
+    {"volume-down",  "media", 0x20, 0xEA, 0x00, ButtonPayload::None, "cfg107 0x4080b9"},
+    {"browser",      "media", 0x18, 0x96, 0x01, ButtonPayload::None,
+                              "cfg107 0x408160/0x40817c"},
+    {"explorer",     "media", 0x18, 0x94, 0x01, ButtonPayload::None,
+                              "cfg107 0x40820a/0x408226"},
     // KEYBOARD and DISABLE.
     // 0x40865a sets the action type (`movb $0x2, %cl`) and 0x408690 stores it
     // plus the modifier byte assembled by the orb chain at 0x40866f-0x408689.
     // The type immediate is invisible to a linear disassembly here -- objdump
     // desynchronises and renders 0x40865a inside a bogus instruction -- which
     // is why Tests/test_citations.py works from raw bytes (§1.2b).
-    {"key",          "keyboard", 0x02, 0x00, ButtonPayload::Key,
+    {"key",          "keyboard", 0x02, 0x00, 0x00, ButtonPayload::Key,
                                  "cfg107 0x40865a/0x408690"},
-    {"disable",      "disable",  0xFF, 0x00, ButtonPayload::None, "cfg107 0x4082b4"},
+    {"disable",      "disable",  0xFF, 0x00, 0x00, ButtonPayload::None, "cfg107 0x4082b4"},
 };
 const std::size_t kButtonActionCount =
     sizeof(kButtonActions) / sizeof(kButtonActions[0]);
@@ -983,6 +989,11 @@ bool encodeButtonEntry(const ButtonAction& a, long arg, long argY, std::uint8_t 
     switch (a.payload) {
     case ButtonPayload::None:
         if (mods) { *err = "this action takes no modifiers"; return false; }
+        // +2 is part of the action, not spare space. BROWSER and EXPLORER put
+        // the high byte of a u16 usage here; everything else leaves it zero.
+        // Writing the whole entry as "b0, b1, then zeros" is what shipped
+        // until 2026-09-07 and it was wrong for two of nineteen actions.
+        out[2] = a.b2;
         return true;
     case ButtonPayload::FixedCpi: {
         if (mods) { *err = "fixed-cpi takes no modifiers"; return false; }

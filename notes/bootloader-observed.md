@@ -399,7 +399,19 @@ timestamp, never from recollection of what happened when.
 
 ---
 
-## 4. The kernel log settles the button question as far as it can be settled  [O]
+> **RENUMBERED 2026-09-07.** Everything below this line was appended as a second
+> document with its own numbering, so this file had two §4s, two §5s and two §6s.
+> Four references in `notes/wire-predictions.md` say "bootloader-observed.md
+> section 4" and "sections 3-5" and every one of them means the FIRST block, so
+> the appended block moved to §7-§9 rather than the other way round. Nothing in
+> it changed but its numbers.
+>
+> **Old -> new:** the kernel-log section §4 -> **§7**; the report-descriptor
+> section §5 -> **§8**; the exclusive-open section §6 -> **§9**.
+> `Tests/test_crossrefs.py` fails on a cross-file `§x.y` that resolves to more
+> than one heading, which is what makes this stay fixed.
+
+## 7. The kernel log settles the button question as far as it can be settled  [O]
 
 2026-09-05. Three button-plug cycles run with `Tools/device/bootwatch.py` at
 100 Hz, then cross-checked against macOS's unified log, which records every USB
@@ -449,7 +461,7 @@ without a verified image or a loud unrecoverable state) is load-bearing rather
 than decorative. Our flasher retries forever; the vendor's gives up after five
 attempts per block.
 
-## 5. Both report descriptors, recovered from the kernel log  [O]
+## 8. Both report descriptors, recovered from the kernel log  [O]
 
 The same log carries the full `ReportDescriptor` for every collection, base64 in
 the `IOHIDFamily` dictionaries. This closes two open items at zero cost and with
@@ -506,7 +518,7 @@ interface; and on the other, Generic Desktop keyboard (`0x06`), Vendor
 Vendor `0xFF02`/`0x02`. The two `0xFF02` collections are input-only and no
 Endgame binary opens either.
 
-## 6. Something else already holds the device open, exclusively  [O]
+## 9. Something else already holds the device open, exclusively  [O]
 
 ```
 AppleUSBHostUserClient::openGated: failed to open Bootloader@00100000:

@@ -66,10 +66,12 @@ public:
     }
 
     Reply factoryReset() override {
-        // config-protocol.md §7.4: FUN_00404720 builds a 64-byte frame carrying
+        // config-protocol.md §7.1c: FUN_00404720 builds a 64-byte frame carrying
         // nothing but the report id and 0x13, and sends it. The device composes
         // its own defaults; no host-side defaults blob exists anywhere.
-        // AND THE 1100 ms. §7.4 gave us the frame; 0x4047af gives us the
+        // (§7.1c was §7.4 until 2026-09-07; that file had two §7.4s and the
+        // other one is the 0x01-0x04 zeroing this file also cites, below.)
+        // AND THE 1100 ms. §7.1c gave us the frame; 0x4047af gives us the
         // wait, and until 2026-09-05 we implemented only the first half. The
         // vendor sleeps 1100 ms before its ONE status read. We were reading at
         // 100 ms and had abandoned the device by 1100 -- our entire poll window

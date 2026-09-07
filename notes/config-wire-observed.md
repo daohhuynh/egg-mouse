@@ -578,7 +578,8 @@ Both ends of the bug are visible:
   It is not cleared, because stage 3 is 1200/2400 and still unequal.
 
 So the flag byte at `0x32` tracks stage 3, exactly as `0x40edde` says. `[D]`
-became `[O]`, and the prediction (`prediction-capture-1.10.md` §3) was a HIT.
+became `[O]`, and the prediction (`prediction-capture-1.10.md`, the `13-cpi-stage34` block) was
+a HIT.
 
 **Consequence for us: `0x32` is not a field we can compute from stage 4.** A
 read-modify-write preserves whatever the vendor left, which is correct behaviour
@@ -587,35 +588,86 @@ record the vendor tool never produces.
 
 ### 8.2 All eight MEDIA actions confirmed; §7.15's bar is lifted  [O]
 
+> **CORRECTED 2026-09-07, and the error was mine, not the capture's.** This
+> section read the seven writes as moving "only button 2's `+0`/`+1`, `+2`-`+5`
+> staying zero", and concluded that "the wide usages do not spill into
+> `+2`-`+3`" and that "neither hypothesis in §7.15 was right". **The capture it
+> cites says the opposite of all three.** BROWSER and EXPLORER write `01` at
+> `+2`. I compared the two bytes I was looking for and called the rest zero
+> without reading it.
+>
+> It reached the code: `egg-config map <btn> browser` wrote `18 96 00` for a
+> week, a byte pattern the vendor's tool never produces. Fixed in the same
+> commit as this correction, with `Tests/test_button_map.py` now scoring against
+> this capture and `Tests/test_citations.py` checking the `+2..+3` and `+4..+5`
+> word stores against cfg107's bytes.
+>
+> The original text is kept below the corrected version, because a wrong `[O]`
+> claim is the most expensive kind this project produces and deleting it would
+> hide how it was made.
+
 §7.15 barred writing any MEDIA value but `0xe9`, because BROWSER and EXPLORER have
 HID Consumer usages (`0x0196`, `0x0194`) too wide for the single byte `+1` that
 VOLUME UP occupies -- so either they spilled into `+2`-`+3`, or `+1` was never a
 raw usage and VOLUME UP matching one was a coincidence.
 
-`15-media.pcapng` settles it. Seven writes, each moving only button 2's `+0`/`+1`,
-`+2`-`+5` staying zero:
+`15-media.pcapng` settles it. Seven writes, each moving button 2's `+0`, `+1` and
+`+2`; `+3`-`+5` stay zero throughout, and `+6` stays `08`:
 
-| action | predicted (§7.17) | observed | seq |
+| action | predicted (§7.17) | observed `+0 +1 +2` | seq |
 | --- | --- | --- | --- |
-| BROWSER | `18 96` | **`18 96`** | 4 |
-| EXPLORER | `18 94` | **`18 94`** | 6 |
-| PLAY/PAUSE | `20 cd` | `20 cd` | 8 |
-| NEXT | `20 b5` | `20 b5` | 10 |
-| PREVIOUS | `20 b6` | `20 b6` | 12 |
-| MUTE | `20 e2` | `20 e2` | 14 |
-| VOLUME DOWN | `20 ea` | `20 ea` | 16 |
+| BROWSER | `18 96` | **`18 96 01`** | 4 |
+| EXPLORER | `18 94` | **`18 94 01`** | 6 |
+| PLAY/PAUSE | `20 cd` | `20 cd 00` | 8 |
+| NEXT | `20 b5` | `20 b5 00` | 10 |
+| PREVIOUS | `20 b6` | `20 b6 00` | 12 |
+| MUTE | `20 e2` | `20 e2 00` | 14 |
+| VOLUME DOWN | `20 ea` | `20 ea 00` | 16 |
+
+Reproduce with:
+
+    python3 - <<'PY'
+    import sys; sys.path.insert(0, "Tools/capture")
+    import records
+    for f in records.frames("windows-capture/15-media.pcapng"):
+        if f.payload and len(f.payload) >= 0x60:
+            e = f.payload[0x37 + 14 : 0x37 + 21]
+            print(f.seq, f.cmd, " ".join("%02x" % b for b in e))
+    PY
 
 Eight of eight are now `[O]` (VOLUME UP `20 e9` from `05-buttonmapping.pcapng`
-seq 12 on 1.07). **Neither hypothesis in §7.15 was right in the form it was
-posed:** the wide usages do not spill into `+2`-`+3`, which stay zero. `+0`
-changes instead, `18` for those two against `20` for the other six. So `+0` is not
-a constant "media" tag -- it varies within the group -- and `+1` is a byte-sized
-selector whose relationship to HID usage is not established by this capture. Our
-table is correct either way, being `[D]` from the eight `movb` immediates at
-cfg107 `0x407d76`, `0x407e1d`, `0x407ec4`, `0x407f6b`, `0x408012`, `0x4080b9`,
-`0x408160` and `0x40820a`, and now `[O]` on the wire for all eight. The *meaning*
-of `18` versus `20` stays `[G]`, and §1.3 keeps us from inventing values that are
-not in §7.17's table.
+seq 12 on 1.07). **§7.15's FIRST hypothesis was right: the wide usages DO spill
+into `+2`.** The usage is a u16 little-endian field spanning `+1`-`+2` --
+`0x0196` and `0x0194` -- and `+0` changes as well, `18` for those two against
+`20` for the other six. So `+0` is not a constant "media" tag; it varies within
+the group, and `+1` is the usage low byte throughout rather than a vendor index.
+
+The wire and the binary agree byte for byte. cfg107 reaches the `+2`-`+3` word
+store through `xorl %edx,%edx` for the six `0x20` actions and through
+`movl $0x1,%edx` for the two `0x18` ones -- `0x40817c` and `0x408226`, stored at
+`0x408181` and `0x40822b`. All eighteen button handlers were checked for this,
+not just the two: `Tools/ghidra-export/dis.sh cfg107 <addr> <addr+0x50>`.
+
+The *meaning* of `18` versus `20` stays `[G]` (most likely a page or an
+"application launch" flag, but nothing says so), and §1.3 keeps us from inventing
+values that are not in §7.17's table.
+
+<details><summary>The original 8.2, as written on 2026-09-06 and wrong</summary>
+
+> `15-media.pcapng` settles it. Seven writes, each moving only button 2's
+> `+0`/`+1`, `+2`-`+5` staying zero. [...] **Neither hypothesis in §7.15 was
+> right in the form it was posed:** the wide usages do not spill into
+> `+2`-`+3`, which stay zero. `+0` changes instead, `18` for those two against
+> `20` for the other six. [...] `+1` is a byte-sized selector whose relationship
+> to HID usage is not established by this capture. Our table is correct either
+> way, being `[D]` from the eight `movb` immediates [...]
+
+The last sentence is the tell. "Our table is correct either way" was true of the
+two columns the table had and said nothing about the column it did not have. A
+claim that survives both branches of a question is usually answering a different
+question.
+
+</details>
 
 ### 8.3 FIXED CPI: X and Y are independent, and the order is ours  [O]
 

@@ -90,9 +90,20 @@ BackupCheck checkBackupFile(const std::string& path);
 //
 // It BEGINS with A1 3A, as the vendor's does. §4.2b, revised 2026-09-05: a
 // flash takes the vendor's entry because their proven sequence begins with it
-// and nothing has ever flashed a button-entered bootloader. It still differs
-// from `egg-flash stream` -- which emits the vendor's sequence verbatim for the
-// golden diff -- by omitting the trailing A1 13 factory reset.
+// and nothing has ever flashed a button-entered bootloader.
+//
+// It ENDS with A1 13, the vendor's factory reset (§5.4 step 7), which is why
+// `flash` refuses without a settings vault. That frame IS in the plan and
+// therefore in the approval token, even though the CLI's post-phase sends it to
+// the re-enumerated APPLICATION rather than driveToVerifiedImage sending it to
+// the bootloader.
+//
+// `egg-flash stream` streams THIS list rather than a second copy of the
+// sequence, so the golden vendor diff covers the bytes that actually go out.
+// (This comment used to say the two differed "by omitting the trailing A1 13".
+// They stopped differing when A1 13 went back into the plan on 2026-09-05 and
+// the comment did not follow: a false claim about the one destructive frame,
+// sitting in the header a caller reads instead of the .cpp.)
 //
 // Retries are not represented. The plan is the happy path, which is what makes
 // it deterministic and therefore usable as an approval token.

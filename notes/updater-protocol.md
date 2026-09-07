@@ -819,7 +819,7 @@ resource-held constants** — not "does not exist".
 
 ### 5.4a The post-flash `A1 13`, in full  [D]
 
-`A1 13` is **factory reset** (§6, `notes/config-protocol.md` §2.4), so this step
+`A1 13` is **factory reset** (§6, `notes/config-protocol.md` §7.1c), so this step
 is what makes a firmware update destroy the user's settings. Its gating therefore
 matters, and "sent after a verified success" understated it.
 
@@ -1085,7 +1085,7 @@ Still open:
   Derived from the config tool, not this one: cfg107's main dialog control
   `1039` is captioned `Factory Reset`, its handler `0x00413f90` opens the device
   and calls `0x00404720`, which builds a 64-byte frame `movl $0x13a1` at
-  `0x40479f` and sends it (`notes/config-protocol.md` §2.4). The frame carries
+  `0x40479f` and sends it (`notes/config-protocol.md` §7.1c). The frame carries
   no payload, so the two tools' `A1 13` are byte-identical.
 
   **Consequence for the flasher, and it is user-facing:** the updater sends

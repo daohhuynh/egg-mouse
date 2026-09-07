@@ -26,6 +26,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "Tools", "capture"))
 
 CAPTURE = os.path.join(ROOT, "windows-run", "05-buttonmapping.pcapng")
+# The 1.10 run. ADDED 2026-09-07, and it is the whole reason this file changed:
+# 05-buttonmapping never mapped BROWSER or EXPLORER, so the only two actions
+# whose entry uses +2 were outside every capture this test could see. The
+# encoder wrote 0x00 there for a year of sessions and nothing could tell.
+CAPTURE_MEDIA = os.path.join(ROOT, "windows-capture", "15-media.pcapng")
 EGGCONFIG = os.path.join(ROOT, "build", "egg-config")
 
 PAYLOAD = 16
@@ -59,10 +64,10 @@ def tool_bytes(action):
     return None
 
 
-def captured_entry_states():
-    """Every distinct 6-byte button-entry state in the capture, +6 excluded."""
+def captured_entry_states(path):
+    """Every distinct 6-byte button-entry state in one capture, +6 excluded."""
     import usbpcap
-    tr = usbpcap.control_transfers(usbpcap.read(CAPTURE))
+    tr = usbpcap.control_transfers(usbpcap.read(path))
     writes = [bytes(t.data) for t in tr
               if t.is_set_report and (t.data or b"")[:2] == b"\xa0\x11"]
     reads = [bytes(t.data) for t in tr
@@ -76,6 +81,7 @@ def captured_entry_states():
 
 
 @unittest.skipUnless(os.path.exists(CAPTURE), "capture not present")
+@unittest.skipUnless(os.path.exists(CAPTURE_MEDIA), "1.10 media capture not present")
 @unittest.skipUnless(os.path.exists(EGGCONFIG), "egg-config not built")
 class TheEncoderMatchesTheVendorsOwnBytes(unittest.TestCase):
     @classmethod
@@ -85,7 +91,9 @@ class TheEncoderMatchesTheVendorsOwnBytes(unittest.TestCase):
             b = tool_bytes(a)
             assert b is not None, "egg-config map produced no preview for " + a
             cls.produced[a] = b
-        cls.captured = captured_entry_states()
+        cls.captured_107 = captured_entry_states(CAPTURE)
+        cls.captured_110 = captured_entry_states(CAPTURE_MEDIA)
+        cls.captured = cls.captured_107 | cls.captured_110
 
     def test_every_action_encodes_to_six_bytes(self):
         for a, b in sorted(self.produced.items()):
@@ -133,6 +141,39 @@ class TheEncoderMatchesTheVendorsOwnBytes(unittest.TestCase):
         }
         for a, want in sorted(expect.items()):
             self.assertEqual(want, self.produced[a], a)
+
+    def test_the_media_capture_actually_contributed_states(self):
+        """A capture that parsed to nothing would make the two tests below
+        vacuous, which is how the +2 bug survived: the check existed, its input
+        did not reach. 15-media.pcapng holds seven A0 11 writes plus a baseline
+        read, so it must yield strictly more than the one all-zero state."""
+        self.assertGreaterEqual(len(self.captured_110), 8,
+                                "15-media.pcapng parsed to %d entry states"
+                                % len(self.captured_110))
+        self.assertTrue(self.captured_110 - self.captured_107,
+                        "the 1.10 media capture added no state the 1.07 "
+                        "capture did not already have -- it is not covering "
+                        "anything")
+
+    def test_browser_and_explorer_carry_their_usage_high_byte_at_plus_2(self):
+        """THE REGRESSION THIS FILE EXISTS TO HOLD, from 2026-09-07.
+
+        BROWSER and EXPLORER are HID Consumer usages 0x0196 and 0x0194 -- u16
+        little-endian across +1..+2. Every other action leaves +2 zero, and the
+        encoder used to zero it for these two as well, so `map <btn> browser`
+        put `18 96 00` on the wire where the vendor puts `18 96 01`.
+
+        Both halves are pinned here: cfg107 stores the 0x01 ([D], 0x40817c and
+        0x408226, checked byte-wise by Tests/test_citations.py) and the vendor
+        wrote it ([O], 15-media.pcapng seq 4 and seq 6).
+        """
+        self.assertEqual((0x18, 0x96, 0x01, 0, 0, 0), self.produced["browser"])
+        self.assertEqual((0x18, 0x94, 0x01, 0, 0, 0), self.produced["explorer"])
+        for want in ((0x18, 0x96, 0x01, 0, 0, 0), (0x18, 0x94, 0x01, 0, 0, 0)):
+            self.assertIn(want, self.captured_110,
+                          "%s is not in 15-media.pcapng; this test is checking "
+                          "our own output against our own expectation"
+                          % " ".join("%02x" % b for b in want))
 
     def test_scroll_and_cpi_loop_match_the_captured_defaults(self):
         # These three were never WRITTEN in the capture, but they are the

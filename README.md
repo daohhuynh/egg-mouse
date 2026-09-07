@@ -70,7 +70,11 @@ cmake --build build
 
 Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
 `build/test-config`. `ctest --test-dir build -E mutants` runs the fast suites --
-thirty of them as of 2026-09-06, none needing the mouse, about two minutes.
+none of them needs the mouse, and the lot takes about two minutes. For the
+count, ask rather than trust this sentence: `ctest --test-dir build -N | tail
+-1`. It said "thirty" here for a day after the number was thirty-nine, which is
+CLAUDE.md §6's rule about quoting numbers instead of regenerating them, in the
+one file a newcomer reads first.
 Dropping `-E mutants` adds the mutation run, which takes ~15 minutes because it
 rebuilds the tree once per planted bug.
 

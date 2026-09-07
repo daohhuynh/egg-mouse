@@ -97,7 +97,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t actionset adoption button_map citations config_replay coverage cpi defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
+  foreach(t actionset adoption button_map citations config_replay coverage cpi crossrefs defaults handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -187,19 +187,28 @@ set_tests_properties(tree_clean PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 add_test(NAME config_set COMMAND Tests/test_config_set.sh)
 set_tests_properties(config_set PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# SKIP_RETURN_CODE 77 on every test that needs a vendor .exe. Those files are
+# gitignored and are on exactly one machine, so on a fresh clone these four used
+# to `exit 0` and ctest printed four green passes for four tests that asserted
+# nothing -- CLAUDE.md 6.2's "a harness that cannot produce a bad result is not
+# evidence", in the four gates that stand between a mistake and a flash. They
+# now report Skipped, which is the true statement (2026-09-07).
 add_test(NAME flash_undo COMMAND Tests/test_flash_undo.sh)
-set_tests_properties(flash_undo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(flash_undo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                     SKIP_RETURN_CODE 77)
 
 # The backup gate. Runs with no mouse attached, which is why cmdFlash does its
 # host-side refusals before it enumerates -- see the comment there.
 add_test(NAME flash_backup COMMAND Tests/test_flash_backup.sh)
-set_tests_properties(flash_backup PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(flash_backup PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                     SKIP_RETURN_CODE 77)
 
 # restore-firmware's provenance gate. Same shape as flash_backup and for the
 # same reason: the unit tests prove the loader refuses, and only a CLI test can
 # prove the verb reaches the loader before it reaches the device.
 add_test(NAME flash_restore COMMAND Tests/test_flash_restore.sh)
-set_tests_properties(flash_restore PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(flash_restore PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                     SKIP_RETURN_CODE 77)
 
 # The GUI's button-mapping picker gets its list from `egg-config map --machine`.
 # This runs every name that listing emits through the real CLI, so an action the
@@ -217,7 +226,8 @@ set_tests_properties(show PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 # gate, and the approval token derived from the chosen image. Off-wire: no
 # --confirm is ever passed, so nothing can reach a device.
 add_test(NAME release_path COMMAND Tests/test_release_path.sh)
-set_tests_properties(release_path PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(release_path PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                     SKIP_RETURN_CODE 77)
 
 # Mutation testing: §6.2's check that the flash suite can produce a bad result.
 # RUN_SERIAL because it edits the source tree, rebuilds, and restores -- nothing

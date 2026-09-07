@@ -270,6 +270,12 @@ struct ButtonAction {
     const char*   group;
     std::uint8_t  b0;
     std::uint8_t  b1;
+    // +2, for actions whose payload kind is None. It is 0x00 for seventeen of
+    // the nineteen and 0x01 for BROWSER and EXPLORER, whose HID Consumer usages
+    // (0x0196, 0x0194) are u16 LE spanning +1..+2. There is no default: adding
+    // a row makes you state it, because the two that are not zero were missed
+    // for exactly as long as this field did not exist (2026-09-07).
+    std::uint8_t  b2;
     ButtonPayload payload;
     const char*   cite;
 };
