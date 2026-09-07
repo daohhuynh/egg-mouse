@@ -44,7 +44,8 @@ sys.path.insert(0, os.path.join(ROOT, "Tools", "capture"))
 
 PAYLOAD = 16
 RECORD_LEN = 0x73
-CAPTURES = os.path.join(ROOT, "windows-run")
+CAPTURE_DIRS = [os.path.join(ROOT, d) for d in ("windows-run", "windows-capture")]
+CAPTURES = CAPTURE_DIRS[0]   # kept: test_handedness.records resolves against it
 
 # Bytes no control in ANY of the four config tools writes. Each carries the
 # section that established it; auditclaims.py checks those citations exist.
@@ -64,32 +65,55 @@ CLOSED = {
 }
 
 
-def observed():
-    """(record byte -> set of values, number of records) over windows-run/."""
-    from test_handedness import records as recs
+def _records(path):
+    """Every settings record in one capture, by the same structural rule as
+    Tests/test_handedness.records: a large GET is a settings record only when the
+    SET before it was `A1 12`; writes are `A0 11`.  Inlined here only so this can
+    walk more than one directory."""
+    import usbpcap
+    out, asked = [], False
+    for t in usbpcap.control_transfers(usbpcap.read(path)):
+        d = bytes(t.data or b"")
+        if t.is_set_report:
+            asked = d[:2] == b"\xa1\x12"
+            if len(d) >= 1024 and d[:2] == b"\xa0\x11":
+                out.append(d)
+        elif asked and len(d) >= 1024:
+            out.append(d)
+            asked = False
+    return out
+
+
+def observed(dirs=None):
+    """(record byte -> set of values, number of records) over every capture dir."""
     vals = collections.defaultdict(set)
     n = 0
-    for name in sorted(os.listdir(CAPTURES)):
-        if not name.endswith(".pcapng"):
+    for d in (dirs if dirs is not None else CAPTURE_DIRS):
+        if not os.path.isdir(d):
             continue
-        for f in recs(name):
-            n += 1
-            for r in range(RECORD_LEN):
-                vals[r].add(f[PAYLOAD + r])
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".pcapng"):
+                continue
+            for f in _records(os.path.join(d, name)):
+                n += 1
+                for r in range(RECORD_LEN):
+                    vals[r].add(f[PAYLOAD + r])
     return vals, n
 
 
 def main():
-    if not os.path.isdir(CAPTURES):
-        print("windows-run/ not present", file=sys.stderr)
+    dirs = [d for d in CAPTURE_DIRS if os.path.isdir(d)]
+    if not dirs:
+        print("no capture directory present", file=sys.stderr)
         return 2
-    vals, n = observed()
+    vals, n = observed(dirs)
 
     moved = {r for r in range(RECORD_LEN) if len(vals[r]) > 1}
     closed = {r for r in range(RECORD_LEN) if r not in moved and r in CLOSED}
     reachable = {r for r in range(RECORD_LEN) if r not in moved and r not in closed}
 
-    print("%d settings records across %s\n" % (n, os.path.basename(CAPTURES)))
+    print("%d settings records across %s\n"
+          % (n, ", ".join(os.path.basename(d) for d in dirs)))
     print("MOVED     %3d  the captures demonstrate these" % len(moved))
     print("REACHABLE %3d  a control writes them; the owner did not exercise it."
           % len(reachable))
