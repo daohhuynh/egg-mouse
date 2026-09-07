@@ -269,7 +269,7 @@ values.
 | --- | --- | --- |
 | 1 | Left Shift | `00 e1` — the screenshot's own key, and the one that proved our table was short (§7.32) |
 | 2 | Keypad + (SHIFT auto-ticked) | **see below — two live outcomes** |
-| 3 | F5 with WIN ticked | `08 3e` |
+| 3 | F5 with WIN ticked (pressed as **`Fn`+F5**) | `08 3e` |
 | 4 | Print Screen | `00 46` |
 | 5 | Num Lock (**optional**, skip if absent) | `00 53` |
 
@@ -296,10 +296,21 @@ Two outcomes, and they are distinguishable:
   §7.32) and the device may well accept `0x57` -- but it would mean the vendor
   tool cannot emit those five, which is worth knowing before we claim parity.
 
-A third possibility to watch for: the owner is on a laptop, and if its numpad is an
-`Fn` overlay the hardware itself may have sent Shift+`=`. That is indistinguishable
-from the second outcome in the bytes alone, so **`02 2e` is not by itself proof
-the dialog is character-driven.**
+A third possibility, now **weakened but not closed**: the owner is on a laptop, and if
+its numpad is an `Fn` overlay the hardware itself may have sent Shift+`=`. That is
+indistinguishable from the second outcome in the bytes alone, so **`02 2e` is not
+by itself proof the dialog is character-driven.**
+
+What weakened it: the owner, 2026-09-06, on step 3 -- *"I DID HAVE TO USE FN F5 AND IT
+REGISTERED CORRECTLY AS F5."* `[O]`. So on **this** laptop `Fn` is resolved inside
+the keyboard and the tool receives the intended key, not a substitute. An `Fn`
+layer that hands F5 through cleanly is less likely to hand `+` through as
+Shift+`=`.
+
+Why it is not closed: `Fn`+F5 and an `Fn` numpad overlay are different mechanisms
+on most laptops -- the first restores a key's primary function, the second
+*replaces* one. Evidence about the first does not settle the second. Step 4
+remains the tie-breaker, and it needs no `Fn` reasoning at all.
 
 **Step 4 breaks that tie and was already in the list.** Print Screen emits no
 character in any layout, so `00 46` shows the dialog can read a key that types
@@ -308,7 +319,8 @@ nothing -- which means a `+` re-expressed as Shift+`=` was re-expressed *because
 I added a Scroll Lock step for this and withdrew it: step 4 already covers it and
 The owner's laptop has no Scroll Lock key.
 
-**Step 5 (Num Lock) is optional and nothing rests on it.** It is the one key on
+**Step 5 (Num Lock) was optional and the owner skipped it** (2026-09-06, no Num Lock
+key on the laptop). Nothing rests on it. It is the one key on
 the numeric keypad that types no character, so it would separate "the keypad is
 unreadable" from "character-producing keys get re-expressed". Worth a click if
 the key exists, but even a `02 2e` plus a missing step 5 leaves nothing we would
