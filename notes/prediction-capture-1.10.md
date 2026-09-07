@@ -22,7 +22,7 @@ Sources: `windows-run/screenshots/*.png`, `dlgdump.py`, `gui-surface.md`.
 | --- | --- | --- | --- |
 | Firmware Version (display) | `info` | yes | `A1 02` |
 | Software Version (display) | n/a | n/a | host-side only |
-| **Factory Reset** button | `factory-reset` | yes | proven on device 21/21 |
+| **Factory Reset** button | `factory-reset` | yes | proven on device 21/21. **Reachable from every tab** (the owner, 2026-09-06, `[O]`) — it is in this bar, not on the Basic page |
 
 ### Basic tab
 
@@ -343,7 +343,7 @@ Two MOUSE menu picks, then the reset.
 | --- | --- | --- |
 | 1 | MOUSE -> BACK | `00 08 00 00 00 00 <+6 kept>` (§7.17, `0x4079e6`) |
 | 2 | MOUSE -> MIDDLE CLICK | `00 04 00 00 00 00 <+6 kept>` (§7.17, `0x40789a`) |
-| 3 | Factory Reset | whole record returns to §2's values |
+| 3 | Factory Reset, **from Button Mapping, no tab switch** | whole record returns to §2's values |
 
 **Step 1 was added 2026-09-06 because step 2 alone can silently do nothing.**
 The owner: *"i cant set middle button to middle click because its already middle click
