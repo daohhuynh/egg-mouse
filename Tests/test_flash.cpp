@@ -1256,22 +1256,49 @@ static void testProvenanceGate() {
     // WritePhase.cpp, the gate in Provenance.cpp, and nothing but this
     // assertion connects them.
     {
-        // BOTH of them. There are two constants with this name -- the long one
-        // egg-flash prints and the short one egg-config prints -- and on
-        // 2026-09-06 the gate made both wrong while only one was noticed. The
-        // compiler caught the second by reporting the name as ambiguous here,
-        // which is luck, not a check. This is the check.
+        // THERE USED TO BE TWO CONSTANTS WITH THIS NAME -- the long one
+        // egg-flash prints and a short one egg-config printed -- saying the
+        // same things in different words. On 2026-09-06 the gate made both
+        // wrong and only one was noticed; the COMPILER found the second, by
+        // reporting the name as ambiguous right here. That is luck, not a
+        // check, and a comment saying "amend both or neither" is not one
+        // either.
+        //
+        // They are collapsed now: egg::kButtonEntrySteps and
+        // egg::kButtonEntryReflashNote (Protocol.h) are the only definitions,
+        // egg-config prints them directly, and egg::fw::kRecoveryProcedure is
+        // BUILT from them. So the property to test is no longer "do the two
+        // agree" -- it is that the flasher's text really is composed from the
+        // shared pieces rather than having quietly grown its own copy again.
         const std::string rec = egg::fw::kRecoveryProcedure;
-        const std::string rec2 = egg::kRecoveryProcedure;
-        ok("egg-config's shorter recovery text names the flag too",
-           rec2.find("--i-know-this-is-button-entered") != std::string::npos,
-           rec2.substr(0, 60));
-        ok("recovery text mentions the button entry it describes",
-           rec.find("LEFT and RIGHT") != std::string::npos);
-        ok("...AND names the flag that gets a button-entered bootloader past\n"
-           "        the receipt gate -- without it, following this text to the\n"
-           "        letter ends in a refusal",
+        const std::string steps = egg::kButtonEntrySteps;
+        const std::string note = egg::kButtonEntryReflashNote;
+
+        ok("the flasher's recovery text CONTAINS the shared button-entry steps,\n"
+           "        so amending them cannot reach one printout and miss the other",
+           rec.find(steps.substr(0, steps.find('\n'))) != std::string::npos,
+           rec.substr(0, 60));
+        ok("...and contains the shared re-flash note",
+           rec.find(note.substr(0, note.find('\n'))) != std::string::npos);
+        ok("the shared steps describe the button entry they are named for",
+           steps.find("LEFT and RIGHT") != std::string::npos);
+        ok("the shared note names the flag that gets a button-entered\n"
+           "        bootloader past the receipt gate -- without it, following\n"
+           "        the text to the letter ends in a refusal",
+           note.find("--i-know-this-is-button-entered") != std::string::npos);
+        ok("...and the flasher's text therefore names it too",
            rec.find("--i-know-this-is-button-entered") != std::string::npos);
+        // The composition must actually indent, or the flasher's block would
+        // read as unrelated paragraphs glued together.
+        ok("...and adds the flasher-only 'run this command again', which the\n"
+           "        shared text must NOT carry (egg-config prints that text in a\n"
+           "        paragraph where it would mean re-run egg-config)",
+           rec.find("run this command again") != std::string::npos &&
+           steps.find("run this command again") == std::string::npos &&
+           note.find("run this command again") == std::string::npos);
+        ok("the flasher indents the shared text into its own block",
+           rec.find("\n  Hold LEFT and RIGHT") != std::string::npos ||
+           rec.find("  Hold LEFT and RIGHT") != std::string::npos);
     }
 
     // --- the entry receipt ---------------------------------------------------

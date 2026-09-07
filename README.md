@@ -327,7 +327,7 @@ app parses shows up as a failing test rather than as a greyed-out button.
 ctest --test-dir build -E mutants   # 40 suites, no hardware needed, ~3 min
 ctest --test-dir build              # adds the mutation run (~20 min: it
                                     # rebuilds the tree once per planted bug,
-                                    # 118 real defects and 8 equivalents)
+                                    # 120 real defects and 8 equivalents)
 ```
 
 `-E` is an unanchored regex, which is worth knowing here: `-E mutants` would

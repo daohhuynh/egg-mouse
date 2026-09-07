@@ -38,13 +38,23 @@ scopes, and **nothing is ever added across the rows**:
 
 | scope | CONFIRMED | REFUTED | PARTIAL | denominator |
 | --- | --- | --- | --- | --- |
-| `wire-predictions.md` register | 4 | 0 | 2 | 271 |
+| `wire-predictions.md` register | 6 | 0 | 2 | 271 |
 | pre-registered elsewhere (bare slugs, declared below) | 2 | 1 | 1 | not enumerated |
 | device runs, own pre-registration files | 2 | 0 | 1 | 3 |
 
-Zero REFUTED **in the register** at n=5 is not yet informative either way. It
-becomes a red flag if it survives the GUI area, which is ~15 predictions and the
-cheapest to test. The one REFUTED so far came from outside the register.
+Zero REFUTED **in the register** at n=8 is still not informative, and the two
+added on 2026-09-06 (#13, #14) make it *less* informative rather than more.
+Both were scored by me reading files with a parser — the cheapest and most
+mechanical kind of check there is, on predictions that were essentially
+transcriptions of what those files contain. A register that only ever gets
+scored where scoring is easy will read as vindicated no matter what is in it.
+
+What would actually be informative, in order of cost: the **GUI area**, ~15
+predictions, answerable by looking at the screenshots already in the repo and
+by an observer who is not me; and the **updater areas**, now unblocked because
+`08-flash.pcapng` exists, where a refutation would mean the derived command set
+is incomplete. #19 is still the single highest-value one for that reason.
+The one REFUTED so far came from outside the register.
 
 **Three numbers that were in this file and are now gone**, recorded because the
 pattern matters more than the arithmetic: `266` (a denominator nobody could
@@ -228,18 +238,93 @@ keeping.
   separately.
 
 - **#19 `cfg-basic-page-invisible-buttons`** (`Apply CPI settings` id 1059,
-  `Surface Calibration` id 1061). Two questions already sit in `log.txt`'s
-  ANSWERS block. This one has real weight: `Surface Calibration` would be a
+  `Surface Calibration` id 1061). **THE ROUTE IS VOID.** It was "two questions
+  in `log.txt`'s ANSWERS block", and `./log.txt` is quarantined as evidence
+  (CLAUDE.md §1.1a). The replacement route needs no new capture and no new
+  question: `windows-run/screenshots/*.png` are verified factory defaults
+  (`config-wire-observed.md` §7) and show the basic page. Score it by looking,
+  or ask the owner once, cleanly. This one has real weight: `Surface Calibration` would be a
   device command **outside the four-command set we have derived**, so a refutation
   here means our command set is incomplete.
-- **#21 `cfg-advanced-sensor-hidden-controls`** (`Motion Jitter Filter`,
-  `Sensor Glass Mode` hidden; slider symmetric −127..+127). Testable on sight.
+- ~~**#21 `cfg-advanced-sensor-hidden-controls`**~~ — **ALREADY SCORED
+  CONFIRMED** earlier in this file. It was left in this "not yet scored" list
+  after being scored, which is the drift this file's own tally script exists to
+  catch and which the script cannot see: it counts verdicts, not stale prose.
+  Kept struck through rather than deleted, as the record of that.
 - **#22 `cfg-combo-cpi-downshift`**, and the Smoothing Tuning three-item
-  prediction at `wire-predictions.md:3070`. Both are answered by dropping the
-  combo open and reading it, and `log.txt` asks for exactly that.
-- Everything in the four **updater** areas (bootloader entry, start command,
-  block write loop, read-back) needs `08-flash.pcapng`, which does not exist
-  yet. The *launch* area is now partly scored — see below.
+  prediction at `wire-predictions.md:3070`. **THE ROUTE WAS VOID** for the same
+  reason — it said "`log.txt` asks for exactly that". It is now partly answered
+  from material that survives the quarantine: the screenshots give the CPI
+  Downshift list as Force Off / Light Timer Only / Medium Timer Only / Default
+  and Smoothing as Force Off / Ripple Control Off / Ripple Control On, which is
+  what the decoders were checked against on 2026-09-06 (`Tests/test_show.sh`).
+  Score the two predictions against those lists as written, rather than
+  treating the decoder work as having scored them.
+- The four **updater** areas (bootloader entry, start command, block write
+  loop, read-back) were blocked on `08-flash.pcapng`. **That file has existed
+  since 2026-09-05** and this bullet went on saying it did not. Two of them are
+  scored from it now — see "Updater areas" below — and the rest are reachable
+  the same way: the captures are in the repo, the parser is in
+  `Tools/capture/usbpcap.py`, and nothing about them needs the mouse.
+  The *launch* area is partly scored — see below.
+
+## Updater areas — scored from the flash captures, 2026-09-06
+
+The bullet below used to say these needed `08-flash.pcapng`, "which does not
+exist yet". **It exists** (`windows-run/08-flash.pcapng` and
+`09-flash-again.pcapng`, both of the vendor updater flashing this mouse), and
+has since 2026-09-05. Two register predictions are scored here off those
+captures and the checked-in binaries; both are mechanical, both are pinned in
+`ctest` so they cannot silently rot.
+
+### #13 `alternate-updater-payloads` — **CONFIRMED**
+
+Observer: me, reading capture files and .exe files with the committed parsers,
+2026-09-06. No reasoning about a binary is doing any work here — every number
+is a byte read out of a file.
+
+- **Predicted:** all four updaters' `FWFILE`/140 are 66,560 bytes / 65 blocks,
+  each with its own sha256, whole-image sum32 and first 16 bytes; and the
+  `A0 03` checksum in a capture identifies which .exe was run **with no
+  filesystem access**. REFUTED IF the `A0 03` checksum bytes in the capture
+  match none of the four.
+- **Observed, .exe side:** all four reproduce exactly with `Tools/pe/fwfile.py`
+  — 1.10 `0x0081D57D`, 1.07 `0x0081D408`, 1.06 `0x0081F40B`, 1.04 `0x0081F627`,
+  sizes and first-16 as predicted, including the stated quirk that 1.06 and
+  1.04 share a first block and differ only in the whole-image value.
+- **Observed, capture side:** both flash captures carry exactly one `A0 03`
+  SET_REPORT, and both read
+  `a0030000000000000000000000000000 41 7d d5 81` — LE32 `0x0081D57D`, which is
+  **1.10 and only 1.10**. The prediction's whole point, that the capture alone
+  names the running executable, holds.
+- **Pinned:** `Tests/test_fwfile_set.py::PredictionThirteenAlternateUpdaterPayloads`.
+
+### #14 `config-tool-sends-no-firmware` — **CONFIRMED**
+
+Observer: me, 2026-09-06, same standard.
+
+- **Predicted:** the four config tools expose 74 resource leaves each and ZERO
+  of type `FWFILE`; no leaf is 66,560 bytes; the UTF-16 string `FWFILE` occurs
+  0 times. REFUTED IF any config-tool capture contains an `A0 06` frame or any
+  run of 1024 high-entropy payload bytes.
+- **Observed, .exe side:** 74 leaves in every one of the four, zero `FWFILE`,
+  no 66,560-byte leaf, zero UTF-16 `FWFILE`. The same check run against two
+  updaters objects on all four counts, so it is not vacuous.
+- **Observed, capture side:** **sixteen** config-tool captures
+  (`windows-run/00-07`, `10`, `windows-capture/11-17`) — every capture in the
+  repo that is not one of the two flash runs. `A0 06` frames: **0**. Runs of
+  1024 payload bytes with Shannon entropy > 7 bits/byte: **0**. The vendor
+  command set observed across all sixteen is exactly
+  `A0 11`, `A1 01`, `A1 02`, `A1 12`, `A1 13` plus standard descriptor
+  requests — no flash command appears anywhere.
+- **Why it is load-bearing rather than trivia:** CLAUDE.md §3's two-executable
+  split rests on the config tool having no flash path. If it had one, the
+  contradictory-quit-semantics argument would need revisiting.
+- **Pinned:** `Tests/test_fwfile_set.py::PredictionFourteenConfigToolsCannotFlash`.
+
+**Neither of these was scored against a softened restatement** (rule 1): both
+`REFUTED IF` lines are about captures, and both were checked against captures,
+not against the .exe half that was easier to reach.
 
 ## Scored 2026-09-05
 

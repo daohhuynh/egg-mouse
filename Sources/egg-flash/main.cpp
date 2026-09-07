@@ -242,7 +242,7 @@ static int usage() {
         "              command is A1 13, the same byte as Factory Reset, so it\n"
         "              reports whether that undo exists before doing anything.\n"
         "\n%s\n", primaryRelease().label, primaryRelease().label,
-        primaryRelease().label, kRecoveryProcedure);
+        primaryRelease().label, kRecoveryProcedure.c_str());
     return 2;
 }
 
@@ -351,7 +351,7 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
         if (o.result == EntryResult::NoReenumeration)
             std::printf("Nothing was erased and nothing was written. If the mouse still\n"
                         "works normally, the command simply did not take; run it again.\n");
-        std::printf("\n%s\n", kRecoveryProcedure);
+        std::printf("\n%s\n", kRecoveryProcedure.c_str());
         return 1;
     }
 

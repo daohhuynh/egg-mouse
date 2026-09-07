@@ -4,6 +4,8 @@
 #include "egg/BootloaderLink.h"
 #include "egg/Firmware.h"
 
+#include <string>
+
 namespace egg::fw {
 
 struct Progress {
@@ -51,7 +53,12 @@ Progress driveToVerifiedImage(BootloaderLink& link, const Image& img);
 // The recovery procedure, [O], notes/bootloader-observed.md §1. Printed
 // whenever the phase is struggling, because a recovery procedure nobody can
 // find is not a recovery procedure (LIST 4 item 24).
-extern const char* const kRecoveryProcedure;
+//
+// A std::string, not a string literal, because it is COMPOSED from
+// egg::kButtonEntrySteps and egg::kButtonEntryReflashNote (Protocol.h) rather
+// than restating them. There used to be a second constant with this name that
+// said the same things in its own words, and a guard made both wrong at once.
+extern const std::string kRecoveryProcedure;
 
 // How many times A1 09 is sent before returning without an ack. The vendor uses
 // 10 (updater-protocol.md §5.4 step 5); we allow more because we have no reason

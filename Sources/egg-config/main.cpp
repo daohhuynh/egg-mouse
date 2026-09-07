@@ -157,7 +157,11 @@ void usage() {
       "never reach the hardware. `egg-config set` with no arguments lists them.\n"
       "\n"
       "If anything ever goes wrong with the FIRMWARE (not settings):\n");
-    std::puts(kRecoveryProcedure);
+    // The SAME two constants egg-flash's kRecoveryProcedure is built from
+    // (Protocol.h). There used to be a second, shorter copy of this text living
+    // here, and a guard added elsewhere made both of them wrong at once.
+    std::puts(kButtonEntrySteps);
+    std::puts(kButtonEntryReflashNote);
 }
 
 int cmdDevices() {

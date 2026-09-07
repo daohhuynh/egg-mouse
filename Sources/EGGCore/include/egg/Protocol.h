@@ -287,17 +287,32 @@ static_assert(kBlockCount * kPayloadLen == 66560, "and 65 * 1024 = 66560 bytes")
 // ---------------------------------------------------------------------------
 // Printed by egg-flash before it sends anything, per that file: a recovery
 // procedure nobody can find is not a recovery procedure.
-// THERE ARE TWO OF THESE, and that is a trap worth naming rather than leaving
-// for the next reader: egg::fw::kRecoveryProcedure in WritePhase.h is the
-// longer one egg-flash prints, and this shorter one is what egg-config prints.
-// On 2026-09-06 the entry receipt made BOTH of them wrong and only the first
-// was noticed -- the compiler found the second, by reporting the name as
-// ambiguous in a test. Amend both or neither.
-inline constexpr const char* kRecoveryProcedure =
-    "Hold LEFT and RIGHT mouse buttons together, plug the cable in while still\n"
-    "holding, and keep holding for a few more seconds. The mouse re-enumerates\n"
-    "as PID 0x1977, Product \"Bootloader\", and can be re-flashed from there --\n"
-    "with --i-know-this-is-button-entered, because the buttons are not an\n"
-    "A1 3A entry and egg-flash refuses a bootloader it did not enter itself.";
+// THERE USED TO BE TWO OF THESE, and the duplication is what this shape
+// exists to remove. `egg::kRecoveryProcedure` here was the short text
+// egg-config printed and `egg::fw::kRecoveryProcedure` was the long one
+// egg-flash printed, and they said the same thing twice. On 2026-09-06 the
+// entry receipt made BOTH wrong and only one was noticed; the second was found
+// by the COMPILER, reporting the name as ambiguous inside a test that used it
+// unqualified. That is luck, not a check, and the fix for luck is not a better
+// comment saying "amend both or neither".
+//
+// So there is now ONE definition of each fact, here, and
+// egg::fw::kRecoveryProcedure is BUILT FROM THEM (WritePhase.cpp). Amending
+// the procedure amends both printouts by construction, and Tests/test_flash.cpp
+// asserts the composition rather than trusting it.
+//
+// Split in two because the two executables need different amounts of it:
+// egg-config prints both parts as its "if the firmware goes wrong" note, and
+// the flasher wraps them in its own heading.
+inline constexpr const char* kButtonEntrySteps =
+    "Hold LEFT and RIGHT mouse buttons together. Keep holding.\n"
+    "Plug the cable in. Keep holding a few more seconds, then release.\n"
+    "The mouse re-enumerates as PID 0x1977, Product \"Bootloader\".";
+
+inline constexpr const char* kButtonEntryReflashNote =
+    "It can be re-flashed from there -- with --i-know-this-is-button-entered,\n"
+    "because the buttons are not an A1 3A entry and egg-flash refuses a\n"
+    "bootloader it did not enter itself (CLAUDE.md 4.2b). The bootloader is\n"
+    "forced by hardware and does not depend on any firmware being valid.";
 
 }  // namespace egg

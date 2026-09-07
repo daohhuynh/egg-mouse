@@ -319,6 +319,28 @@ else
   echo "        so the -v check above proved nothing"; FAIL=$((FAIL+1))
 fi
 
+# ---------------------------------------------------------------------------
+# The recovery text reaches the user, and it is the SHARED one.
+# ---------------------------------------------------------------------------
+# There used to be two constants called kRecoveryProcedure -- the long one
+# egg-flash prints and a short one this tool printed -- saying the same things
+# in different words. A guard added elsewhere made both wrong at once, and the
+# second was found by the compiler, not by a check. They are collapsed now
+# (egg::kButtonEntrySteps / kButtonEntryReflashNote in Protocol.h), and
+# test_flash.cpp asserts the composition. This is the other half: that the
+# text actually reaches stdout, which no unit test can see.
+say() {
+  if [ "$2" = 0 ]; then echo "  PASS  $1"; PASS=$((PASS+1))
+  else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi
+}
+h=$("$BIN" help 2>&1)
+printf '%s' "$h" | grep -q "Hold LEFT and RIGHT mouse buttons together"
+say "egg-config help prints the button-entry steps" $?
+printf '%s' "$h" | grep -q -- "--i-know-this-is-button-entered"
+say "...and names the flag a button-entered bootloader needs" $?
+! printf '%s' "$h" | grep -q "run this command again"
+say "...and NOT the flasher-only 'run this command again'" $?
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

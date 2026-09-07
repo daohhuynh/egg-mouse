@@ -165,7 +165,7 @@ objdir_for() {
 # it -- including every equivalent -- never ran. The script printed nothing
 # about it because the summary lives below the error too. A count fixed at the
 # TOP is the only version of this check that a truncated script cannot skip.
-DECLARED_KILL=118
+DECLARED_KILL=120
 DECLARED_EQUIV=8
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
@@ -1181,6 +1181,17 @@ mutate kill "progress stops mentioning rewrites" "$WP" \
 '                  (p.rewrites ? "  (" + std::to_string(p.rewrites) +
                                 " rewrite(s) so far)"
                               : std::string()));|||                  std::string());  // MUTANT'
+
+# The recovery text is COMPOSED from Protocol.h's shared constants now, instead
+# of being a second copy of them. These grade that composition -- the previous
+# arrangement was two literals that a single amendment could make disagree, and
+# the disagreement was found by the compiler rather than by a test.
+
+mutate kill "the recovery text loses the button-entry steps" "$WP" \
+'    + indentLines(egg::kButtonEntrySteps, "  ") + "\n"|||    + indentLines(egg::kButtonEntryReflashNote, "  ") + "\n"  // MUTANT'
+
+mutate kill "the recovery text stops telling the reader to re-run it" "$WP" \
+'    "  Then run this command again, with that flag.";|||    "";  // MUTANT'
 
 mutate kill "SIGPIPE goes back to its default, which kills the process" "$NQ" \
 'const int kSignals[] = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};|||const int kSignals[] = {SIGINT, SIGTERM, SIGHUP};  // MUTANT'

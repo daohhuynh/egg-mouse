@@ -88,10 +88,45 @@ class TheTableIsStructurallySound(unittest.TestCase):
         self.rows = rows()
 
     def test_the_rows_were_actually_parsed(self):
-        # A regex that matches nothing makes every test below vacuous.
-        self.assertEqual(4, len(self.rows),
-                         "parsed %d rows: %s"
-                         % (len(self.rows), [r["label"] for r in self.rows]))
+        # A regex that matches nothing makes every test below vacuous, so the
+        # count has to be checked against something.
+        #
+        # IT USED TO BE THE LITERAL 4, AND THAT WAS A SILENT HAND-EDIT. Adding
+        # a release meant remembering to bump a number in this file, and
+        # forgetting did not announce itself: the suite failed with "parsed 5
+        # rows" and read as though the manifest were wrong rather than the
+        # test. Tools/pe/ingest.py had to carry a checklist item about it.
+        #
+        # Counted a SECOND, INDEPENDENT WAY instead: every row ends with a
+        # `0x........u,` whole-image checksum on its own line, which the row
+        # regex does not rely on. If the two disagree, either the regex is
+        # matching nothing or the table has a malformed row -- both of which
+        # are what the literal was there to catch, and neither of which
+        # requires anyone to remember anything.
+        with open(SRC, encoding="utf-8") as f:
+            src = f.read()
+        checksums = re.findall(r"^\s*0x[0-9a-f]{8}u,\s*$", src, re.M)
+        self.assertEqual(len(checksums), len(self.rows),
+                         "the row regex found %d rows but there are %d "
+                         "whole-image checksum lines: %s"
+                         % (len(self.rows), len(checksums),
+                            [r["label"] for r in self.rows]))
+        self.assertGreaterEqual(len(self.rows), 4,
+                                "the four updaters this project holds must all "
+                                "be in the manifest; parsed %s"
+                                % [r["label"] for r in self.rows])
+
+    def test_every_row_has_an_exe_mapping_in_this_file(self):
+        # The OTHER hand-edit ingest.py cannot make. This one does announce
+        # itself -- but as a setUp failure in an unrelated class, which reads
+        # like an infrastructure problem rather than an instruction. Named here
+        # so the message says what to do.
+        missing = [r["label"] for r in self.rows if r["label"] not in EXE]
+        self.assertEqual([], missing,
+                         "manifest rows %s have no .exe path in this file's EXE "
+                         "map. Add one line per release; the filenames are "
+                         "inconsistent, so it cannot be derived from the label."
+                         % missing)
 
     def test_exactly_one_release_claims_to_be_proven_on_the_device(self):
         """The claim that can only be true once, and cannot be checked by a

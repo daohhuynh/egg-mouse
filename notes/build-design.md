@@ -302,16 +302,24 @@ genuinely still open and is marked as such.
   would have done with a wrong one, and finding out costs the mouse. Every guard
   is therefore ours and runs before the first byte.
 
-## Sanitizer build — clean as of 2026-09-05
+## Sanitizer build — clean as of 2026-09-06
 
-`test-flash` runs clean under AddressSanitizer + UndefinedBehaviorSanitizer:
-zero `runtime error` and zero ASan reports across the whole suite, including the
-eleven adversarial mock scenarios at eight seeds each.
+**`test-flash` AND `test-config`** run clean under AddressSanitizer +
+UndefinedBehaviorSanitizer: zero `runtime error`, zero ASan reports, both exit
+0, across the whole of both suites — including the eleven adversarial mock
+scenarios at eight seeds each.
+
+Re-run 2026-09-06 after the entry receipt, the restore provenance sidecar, the
+signal guard and the per-block progress line. **`Provenance.cpp` and
+`NoQuitDuringWrite.cpp` had never been compiled under a sanitizer before this
+run**; `test-config` had never been run under one at all, which is why it is on
+the command line below now.
 
 ```
 cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
-cmake --build build-san --target test-flash && ./build-san/test-flash
+cmake --build build-san --target test-flash test-config
+./build-san/test-flash && ./build-san/test-config
 ```
 
 `build-san/` is gitignored. Worth re-running after any change to

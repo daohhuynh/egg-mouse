@@ -54,17 +54,34 @@ namespace egg::fw {
 // and the comment there is the rule: a recovery instruction that is wrong is
 // worse than none. A guard added anywhere has to be checked against every text
 // that tells someone what to do next.
-const char* const kRecoveryProcedure =
+// COMPOSED, not restated. Until 2026-09-06 this was a second string literal
+// saying the same things as egg::kRecoveryProcedure in its own words, and when
+// the entry receipt made the instruction wrong it made BOTH wrong -- only one
+// was noticed. Building it from the shared pieces means the next amendment
+// cannot reach one printout and miss the other, and Tests/test_flash.cpp
+// asserts the containment rather than trusting this comment.
+//
+// The indent is applied here rather than stored in the shared text, because
+// egg-config prints the same facts unindented in a help paragraph.
+namespace {
+std::string indentLines(const char* text, const char* prefix) {
+    std::string out(prefix);
+    for (const char* p = text; *p; ++p) {
+        out += *p;
+        if (*p == '\n') out += prefix;
+    }
+    return out;
+}
+}  // namespace
+
+const std::string kRecoveryProcedure =
     "RECOVERY (observed on the device, notes/bootloader-observed.md):\n"
-    "  Hold LEFT and RIGHT mouse buttons together. Keep holding.\n"
-    "  Plug the cable in. Keep holding a few more seconds, then release.\n"
-    "  The mouse re-enumerates as PID 0x1977, Product \"Bootloader\".\n"
-    "  Then run this command again -- and if it is `flash` or\n"
-    "  `restore-firmware`, ADD --i-know-this-is-button-entered. The buttons\n"
-    "  are not an A1 3A entry and those two refuse a bootloader they did not\n"
-    "  enter themselves (CLAUDE.md 4.2b); the flag is how you say you meant it.\n"
-    "  The bootloader is forced by hardware and does not depend on any\n"
-    "  firmware being valid.";
+    + indentLines(egg::kButtonEntrySteps, "  ") + "\n"
+    + indentLines(egg::kButtonEntryReflashNote, "  ") + "\n"
+    // Flasher-only, and deliberately NOT in the shared text: egg-config's help
+    // prints the same facts in a paragraph about firmware going wrong, where
+    // "run this command again" would be an instruction to re-run egg-config.
+    "  Then run this command again, with that flag.";
 
 namespace {
 
