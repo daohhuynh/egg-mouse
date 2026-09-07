@@ -69,26 +69,44 @@ Sources: `windows-run/screenshots/*.png`, `dlgdump.py`, `gui-surface.md`.
 | --- | --- | --- | --- |
 | Left-handed Mode | `handedness` | yes | a MOVE plus a reset (§7.20) |
 | six rows (R/M/Fwd/Back/WhUp/WhDn) | `map` | yes | LEFT and the CPI button have no row |
-| MOUSE ×7 | `map` | 7 of 7 **as bytes**, 0 of 7 **as menu picks** | see below |
+| MOUSE ×7 | `map` | 7 of 7 **as bytes**; **3 of 7** as menu picks | see below |
 | CPI → CPI LOOP | `map ... cpi-loop` | yes | |
 | CPI → FIXED CPI | `map ... fixed-cpi:N` | **only 1600/1600** | **capture B** |
 | MEDIA ×8 | `map` | **1 of 8** (VOLUME UP, `20 e9`) | **capture C** |
 | DISABLE | `map ... disable` | yes | |
 | KEYBOARD KEY + 4 modifiers | `map ... key:` | **1 key of ~106** (`a`) | **capture D** — and see §7.32 |
 
-**The MOUSE row is a distinction worth keeping, found 2026-09-06 by decoding
-every `A0 11` write in all eleven captures.** All seven MOUSE pairs (`00 01`,
-`00 02`, `00 04`, `00 08`, `00 10`, `01 01`, `01 ff`) do appear in writes, so the
-*encodings* are `[O]`. But they appear only as the eight default assignments
-carried along by read-modify-write, first at `02-basic.pcapng` seq 4 buttons 0-7,
-in a capture about the Basic tab. **No MOUSE menu item has ever been selected in
-any capture**: `05-buttonmapping.pcapng` only ever rewrote button 3, through
-`ff 00`, `20 e9`, `0c 00`, `02 00`, `02 01`, `02 03`.
+**CORRECTED 2026-09-06, and the first version of this note was wrong.** I wrote
+that "no MOUSE menu item has ever been picked in any capture". False. Three have:
+MIDDLE CLICK `00 04` (`05-buttonmapping.pcapng` seq 8 btn 3), BACK `00 08`
+(seq 6 btn 3) and FORWARD `00 10` (seq 16 btn 4).
 
-So the menu-item -> byte link for MOUSE is `[D]` only (§7.17, `0x40774e` through
-`0x407b33`). It is low risk and needs no capture of its own -- **§7's restore step
-covers it for free**, since Middle Button -> MOUSE -> MIDDLE CLICK is a genuine
-menu pick and must produce `00 04`.
+What is actually open is narrower:
+- **LEFT CLICK `00 01` and RIGHT CLICK `00 02`** changed only in the write at
+  `05-buttonmapping.pcapng` seq 4, which also moves record `0x01` -- that is the
+  Left-handed Mode MOVE (§7.20), which rewrites entries programmatically. Never a
+  menu pick.
+- **SCROLL UP `01 01` and SCROLL DOWN `01 ff`** were never changed by any write at
+  all. Default only.
+
+So 3 of 7 are `[O]` as menu picks and 4 of 7 are `[D]`-only
+(§7.17 `0x40774e`, `0x4077f4`, `0x407a8c`, `0x407b33`). Low risk -- all seven
+handlers are the same instruction shape -- and no capture is planned for it.
+
+**How the error happened, because it is a §1.2a violation of exactly the kind
+that rule names.** My method collected distinct `(+0,+1)` pairs seen anywhere in
+a write and reported the first file alphabetically, which was `02-basic.pcapng`.
+That method **cannot distinguish a default being carried along by
+read-modify-write from a value the user actually selected**, and I stated an
+absence claim from it anyway. The fix is `Tools/capture/score110.py`, which diffs
+consecutive records inside one capture and reports only `(+0,+1)` transitions --
+and flags any write that also moves record `0x01`, so a handedness MOVE is never
+counted as a pick.
+
+A second bug in the first version of that scorer made the same class of mistake
+in reverse: it compared whole 7-byte entries, so `04-buttons.pcapng` -- which only
+ever moves `+6`, the multiclick filter -- looked like five menu picks. Both bugs
+were found by reading the per-frame diff rather than the summary.
 
 ---
 
