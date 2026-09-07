@@ -120,7 +120,22 @@ NQ=Sources/EGGFlashCore/src/NoQuitDuringWrite.cpp
 # a binary that never contained the mutation.
 DV=Sources/EGGCore/src/Device.cpp
 
-MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB" "$HL" "$PV" "$DV" "$NQ")
+# The bootloader-entry state machine. Every [O] fact about A1 3A came off this
+# path, and CLAUDE.md §4.2b puts the LATCHED window's opening here rather than
+# at the erase -- so a bug in it costs the mouse before a single firmware byte
+# has been sent. It had no mutants until 2026-09-07 despite test_flash.cpp
+# driving `enterBootloaderAndConfirm` thirteen times.
+BE=Sources/EGGFlashCore/src/BootloaderEntry.cpp
+
+# The release table and its two lookups. Nothing could mutate this before
+# 2026-09-07 in any meaningful sense: mutants.sh grades everything outside
+# EGGConfigCore with `test-flash`, and `test-flash` never named the manifest,
+# so a mutation of `releaseForUpdaterSha` -- the function that decides WHICH
+# image is written to the one mouse -- would have SURVIVED by construction.
+# test_flash.cpp's testManifest() is what makes these gradeable.
+FM=Sources/EGGFlashCore/src/FirmwareManifest.cpp
+
+MUTABLE=("$WP" "$FC" "$FW" "$FWH" "$CS" "$CR" "$CV" "$FP" "$MB" "$HL" "$PV" "$DV" "$NQ" "$BE" "$FM")
 
 BACKUP=$(mktemp -d)
 cp "${MUTABLE[@]}" "$BACKUP/"
@@ -165,8 +180,8 @@ objdir_for() {
 # it -- including every equivalent -- never ran. The script printed nothing
 # about it because the summary lives below the error too. A count fixed at the
 # TOP is the only version of this check that a truncated script cannot skip.
-DECLARED_KILL=120
-DECLARED_EQUIV=8
+DECLARED_KILL=134
+DECLARED_EQUIV=9
 KILLED=0; HOLES=0; EQUIV_OK=0; EQUIV_BAD=0; BROKEN=0
 
 # The clean binary's hash. Any mutant build equal to this did not take effect.
@@ -1201,6 +1216,92 @@ mutate kill "the guard restores SIG_DFL instead of what it saved" "$NQ" \
 
 mutate kill "the guard leaves the signals at their default" "$NQ" \
 '        prev_[i] = std::signal(kSignals[i], SIG_IGN);|||        prev_[i] = std::signal(kSignals[i], SIG_DFL);  // MUTANT'
+
+# ---------------------------------------------------------------------------
+# BootloaderEntry.cpp -- the LATCHED window opens here (CLAUDE.md 4.2b)
+# ---------------------------------------------------------------------------
+# Two of these are bugs this file ACTUALLY HAD against hardware, which is why
+# they are the first two.
+
+mutate kill "identity accepts on PID and bcdDevice, dropping the product string" "$BE" \
+'        && d.product       == kBootloaderProduct;|||        ;  // MUTANT'
+
+mutate kill "identity stops checking bcdDevice" "$BE" \
+'    return d.productId     == kProductIdBootloader
+        && d.releaseNumber == kBootloaderRelease|||    return d.productId     == kProductIdBootloader
+        && true  // MUTANT'
+
+mutate kill "vendor collections are counted as interfaces -- the bug that refused a good mouse" "$BE" \
+'    return d.productId == pid
+        && d.usagePage == kUsagePageVendor
+        && d.usage     == kUsageVendor;|||    return d.productId == pid;  // MUTANT'
+
+mutate kill "two mice are accepted, so A1 3A goes to whichever enumerated first" "$BE" \
+'        if (apps != 1) {|||        if (apps < 1) {  // MUTANT'
+
+mutate kill "zero mice are accepted too" "$BE" \
+'        if (apps != 1) {|||        if (false) {  // MUTANT'
+
+mutate kill "the re-enumeration poll gives up before the first sleep" "$BE" \
+'    for (unsigned waited = 0; waited <= kEntryPollCeilMs; waited += kEntryPollStepMs) {|||    for (unsigned waited = 0; waited < 0; waited += kEntryPollStepMs) {  // MUTANT'
+
+mutate kill "an unrecognised identity is reported as a confirmed entry" "$BE" \
+'            o.result = isKnownBootloader(d) ? EntryResult::EnteredAndConfirmed
+                                            : EntryResult::UnrecognisedIdentity;
+            return o;
+        }
+        env.sleepMs(kEntryPollStepMs);|||            o.result = EntryResult::EnteredAndConfirmed;  // MUTANT
+            return o;
+        }
+        env.sleepMs(kEntryPollStepMs);'
+
+mutate kill "a failed send is reported as a successful one" "$BE" \
+'    if (!env.exchange(o.sent, reply, readOk)) {
+        o.result = EntryResult::SendFailed;|||    if (false) {  // MUTANT
+        o.result = EntryResult::SendFailed;'
+
+# EQUIVALENT. `o.status` is recorded for the log and is deliberately NOT
+# consulted -- capture 09 answered 0x00 where 08 answered 0xa1 for the identical
+# command, and prediction #3 came back 0x03 on the device (a value in neither
+# capture). Nothing branches on it, so widening the guard that fills it in
+# cannot change any outcome. If this one is KILLED, something started gating on
+# the status byte and CLAUDE.md 4.2b's argument needs rewriting, not this line.
+mutate equiv "the status byte is recorded from a longer reply" "$BE" \
+'    if (readOk && reply.size() >= 2) o.status = reply[1];|||    if (readOk && reply.size() >= 3) o.status = reply[1];  // MUTANT'
+
+# ---------------------------------------------------------------------------
+# FirmwareManifest.cpp -- which image reaches the mouse
+# ---------------------------------------------------------------------------
+
+# NOT a prefix mutation, and the difference matters. Loosening the guard to
+# `> 64` looks like it would let a 63-character prefix through, and it does not:
+# the compare loop reads sha256[63], which for a 63-char std::string is the
+# defined '\0' and mismatches, so the lookup still returns nullptr and the
+# mutant would SURVIVE while looking like a real defect. `< 64` is the one that
+# bites -- it lets a hash with trailing junk match on its first 64 characters.
+mutate kill "an updater hash with trailing junk matches on its first 64 chars" "$FM" \
+'    if (sha256.size() != 64) return nullptr;|||    if (sha256.size() < 64) return nullptr;  // MUTANT'
+
+mutate kill "any hash selects the first release" "$FM" \
+'        if (j == 64) return &kReleases[i];|||        if (j >= 0) return &kReleases[i];  // MUTANT'
+
+mutate kill "findRelease falls back to the primary instead of refusing" "$FM" \
+'        if (std::strcmp(kReleases[i].label, label) == 0) return &kReleases[i];
+    return nullptr;|||        if (std::strcmp(kReleases[i].label, label) == 0) return &kReleases[i];
+    return &kReleases[0];  // MUTANT'
+
+mutate kill "findRelease prefix-matches a label" "$FM" \
+'        if (std::strcmp(kReleases[i].label, label) == 0) return &kReleases[i];|||        if (std::strncmp(kReleases[i].label, label, 3) == 0) return &kReleases[i];  // MUTANT'
+
+mutate kill "primaryRelease returns the LAST row instead of the proven first" "$FM" \
+'    return kReleases[0];
+}|||    return kReleases[kReleaseCount - 1];  // MUTANT
+}'
+
+mutate kill "1.07 claims to have been proven on the device" "$FM" \
+'     0x0081d408u,
+     false,|||     0x0081d408u,
+     true,  // MUTANT'
 
 echo
 echo "killed $KILLED of $((KILLED+HOLES)) real defects; $EQUIV_OK of $((EQUIV_OK+EQUIV_BAD)) equivalent mutants behaved as predicted"

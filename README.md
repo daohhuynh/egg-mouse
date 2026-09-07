@@ -1,5 +1,12 @@
 # egg-mouse
 
+> **Unofficial.** Not affiliated with, authorised by, endorsed by, or supported
+> by Endgame Gear GmbH. "Endgame Gear" and "OP1 8k" are their trademarks, used
+> here only to say which hardware this software talks to. `egg-flash` rewrites
+> firmware; it is provided **AS IS, without warranty of any kind**, and a failed
+> flash may leave a mouse that does not work. See [`NOTICE`](NOTICE) and
+> [`LICENSE`](LICENSE) before running it.
+
 Native macOS software for the **Endgame Gear OP1 8k v2** — a configuration tool
 and a firmware flasher. Endgame ships Windows-only tools; the USB protocol here
 was derived independently from their `.exe` files by static analysis, and is
@@ -116,10 +123,15 @@ egg-config frames                  offline: the bytes of every fixed frame
 egg-config factory-reset --yes     device-side reset (A1 13)
 egg-config restore FILE --yes      write a saved record back, then verify
 
-egg-config map BUTTON ACTION --yes      rebind one button (21 actions)
+egg-config map BUTTON ACTION --yes      rebind one button (19 actions)
 egg-config cpi N X [Y] --yes            set CPI stage N (1-4)
 egg-config handedness left|right --yes  swap the primary click
 egg-config multiclick BUTTON MODE [N] --yes   per-button click filter
+
+<any of those four> --from REC          offline: print the whole 1041-byte
+                                        frame it would send, and the diff
+                                        against REC. Sends nothing, opens no
+                                        device; --from with --yes is refused
 ```
 
 `show` is the one to reach for first. `read` prints 1024 bytes of hex; `show`
@@ -328,10 +340,13 @@ app parses shows up as a failing test rather than as a greyed-out button.
 ## Tests
 
 ```sh
-ctest --test-dir build -E mutants   # 40 suites, no hardware needed, ~3 min
-ctest --test-dir build              # adds the mutation run (~20 min: it
-                                    # rebuilds the tree once per planted bug,
-                                    # 120 real defects and 8 equivalents)
+ctest --test-dir build -E mutants   # every fast suite, no hardware, a few min
+ctest --test-dir build              # adds the mutation run (~25 min: it
+                                    # rebuilds the tree once per planted bug)
+
+grep DECLARED_ Tests/mutants.sh     # how many bugs it plants, and how many of
+                                    # them are declared behaviour-preserving.
+                                    # Regenerate it; do not quote it from here
 ```
 
 `-E` is an unanchored regex, which is worth knowing here: `-E mutants` would
@@ -505,13 +520,22 @@ not good enough to write.
 
 **And the list has stopped growing, which is a result rather than a pause.**
 Every route from Endgame's own Windows software to a new writable field has now
-been walked: every byte that ever changed across the 82 captured settings
-records is named or inside the CPI or button blocks; the routine that writes the
-factory defaults introduces nothing new; every control the older config tools
-have and 1.07 dropped resolves to a field already named or already refused; and
-the LED page, the last candidate, turns out to be inert in all four tools — its
-controls have no message-map handler in any of them, so nothing Endgame ships
-can move those bytes either. What is left is the firmware image itself.
+been walked: every byte that ever changed across the captured settings records
+is named or inside the CPI or button blocks — 108 of them now, across both
+capture runs, and `Tests/test_defaults.py` fails if a future capture moves a
+byte nothing names; the routine that writes the factory defaults introduces
+nothing new; every control the older config tools have and 1.07 dropped
+resolves to a field already named or already refused; and the LED page, the last
+candidate, turns out to be inert in all four tools — **dialog 137 is never
+created**, so nothing Endgame ships can move those bytes either. What is left is
+the firmware image itself.
+
+That last clause used to read "its controls have no message-map handler in any
+of them". **That half was retracted on 2026-09-06** as a §1.2b failure: control
+1043, `Apply led settings`, does have a `BN_CLICKED` handler in all four tools
+(cfg107 `0x405940`). The conclusion stands on its other leg — a handler on a
+dialog that is never created runs never — and stating the retracted leg as the
+reason is the kind of thing `config-protocol.md` §12 exists to stop.
 
 Everything else is still reachable, through `egg-config restore`, which sends
 back bytes the device itself produced — so no byte in it is a guess even where
@@ -521,3 +545,33 @@ Each `set` reads first and refuses to write after a failed or implausible read,
 checks that its outgoing frame differs from what it read in exactly one byte at
 the cited offset, then reads back and verifies. If more bytes changed on the
 device than the one it sent, it says so.
+
+---
+
+## Licence
+
+**Apache License 2.0** — the full text is in [`LICENSE`](LICENSE), and
+[`NOTICE`](NOTICE) carries the copyright line and the disclaimers that
+redistributors have to keep with it.
+
+Apache-2.0 rather than something shorter, for three reasons that are about this
+project rather than general preference:
+
+- **Section 6 grants no rights in anyone's trademarks.** This repo is named
+  after somebody else's product and is not theirs, so having the licence itself
+  say so is worth the extra page. MIT is silent on trademarks entirely.
+- **Section 3 is an express patent grant** from contributors, with a
+  retaliation clause. This implements a protocol read out of a vendor binary;
+  that is cheap insurance and MIT has none.
+- **Sections 7 and 8 are a thorough "AS IS" and limitation of liability.** This
+  tool erases flash on hardware that may have no spare. That is the clause that
+  actually matters here, and MIT covers it in one sentence.
+
+It is permissive, so nothing about it binds anyone — including this project,
+which is deliberately kept free of copyleft obligations it has not accepted
+(see `CLAUDE.md` §1.1 for why the two existing community projects are
+quarantined rather than borrowed from).
+
+The licence governs **this code**. It says nothing about whether deriving the
+protocol was permissible, which is untouched either way, and it does not make
+the project official.

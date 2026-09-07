@@ -75,9 +75,73 @@ EXCLUDED = [
 ]
 
 
+# THE RUN VERBS, replayed the same way (2026-09-07).
+#
+# Everything above goes through `egg-config encode`, which handles the
+# `Settable` fields only -- one byte, sometimes under a mask. `map`, `cpi`,
+# `multiclick` and `handedness` write a contiguous RUN of record bytes through a
+# different composition (ConfigSession::buildRunFrame), and NOTHING replayed
+# them against a vendor before/after pair until this list existed. That gap
+# lined up exactly with the evidence the corpus could not see: every settings
+# write in `windows-capture/` -- all nineteen, the only 1.10 vendor writes there
+# are -- is a run-verb write.
+#
+# These are scored through `--from`, which prints the whole 1041-byte frame.
+# (capture, write index, argv after the verb).
+RUN_CASES = [
+    # 13-cpi-stage34: the vendor set stage 3, then stage 4, one box at a time.
+    ("13-cpi-stage34", 1, ["cpi", "3", "1200", "2400"]),
+    ("13-cpi-stage34", 2, ["cpi", "4", "3000", "3200"]),
+    # 14-fixed-cpi: FIXED CPI on the middle button, equal then X != Y.
+    ("14-fixed-cpi", 0, ["map", "middle", "fixed-cpi:2500"]),
+    ("14-fixed-cpi", 1, ["map", "middle", "fixed-cpi:2510x400"]),
+    # 15-media: all seven MEDIA actions the vendor exercised.
+    ("15-media", 0, ["map", "middle", "browser"]),
+    ("15-media", 1, ["map", "middle", "explorer"]),
+    ("15-media", 2, ["map", "middle", "play-pause"]),
+    ("15-media", 3, ["map", "middle", "next"]),
+    ("15-media", 4, ["map", "middle", "previous"]),
+    ("15-media", 5, ["map", "middle", "mute"]),
+    ("15-media", 6, ["map", "middle", "volume-down"]),
+    # 16-keys: the KEYBOARD KEY dialog, including the two modifier cases.
+    ("16-keys", 0, ["map", "middle", "key:shift+leftshift"]),
+    ("16-keys", 1, ["map", "middle", "key:shift+kp-plus"]),
+    ("16-keys", 2, ["map", "middle", "key:win+f5"]),
+    ("16-keys", 3, ["map", "middle", "key:printscreen"]),
+    # 17-restore: back to a plain mouse button.
+    ("17-restore", 0, ["map", "middle", "back"]),
+    ("17-restore", 1, ["map", "middle", "middle-click"]),
+]
+
+# Same discipline as EXCLUDED above: an exclusion is a claim, and it is tested.
+RUN_EXCLUDED = [
+    ("13-cpi-stage34", 0, ["cpi", "3", "1200", "1600"], 0x32,
+     "cfg107 computes STAGE 4's flag from stage 3's boxes (0x40edde, a vendor "
+     "bug), so setting stage 3 also set record 0x32. We compute each stage's "
+     "flag from its own values -- config-protocol.md §7.19.4"),
+    ("13-cpi-stage34", 3, ["cpi", "4", "3000", "3000"], 0x32,
+     "the other end of the same bug: stage 4 became EQUAL and the vendor left "
+     "its flag at 01, because stage 3 is still unequal. We clear it"),
+]
+
+
+def capture_path(capture):
+    """A capture name resolves in EITHER directory.
+
+    This module hardcoded `windows-run` until 2026-09-07, which is why the run
+    verbs went unreplayed: the only captures that exercise them are in
+    `windows-capture`, and no path in this file could name them.
+    """
+    for d in ("windows-run", "windows-capture"):
+        p = os.path.join(ROOT, d, "%s.pcapng" % capture)
+        if os.path.exists(p):
+            return p
+    raise AssertionError("no capture named %s in either directory" % capture)
+
+
 def records(capture):
     import ingest
-    p = os.path.join(ROOT, "windows-run", "%s.pcapng" % capture)
+    p = capture_path(capture)
     rd = [r for _, r in ingest.settings_reads(p)]
     wr = [r for _, r in ingest.settings_writes(p)]
     return rd, wr
@@ -87,6 +151,7 @@ def records(capture):
 # fifteen header bytes, then the 1024-byte record at kPayloadOffset = 0x10.
 # ingest's record already starts at that boundary, so it drops straight in.
 PAYLOAD_OFFSET = 0x10
+PAYLOAD_LEN = 0x400
 FRAME_LEN = 0x411
 
 
@@ -106,7 +171,7 @@ def vendor_frames(capture):
     header is where the report id and the command live.
     """
     import usbpcap
-    p = os.path.join(ROOT, "windows-run", "%s.pcapng" % capture)
+    p = capture_path(capture)
     xf = [t for t in usbpcap.control_transfers(usbpcap.read(p)) if t.is_feature]
     return [bytes(t.data) for t in xf
             if not (t.bmRequestType & 0x80)
@@ -391,6 +456,141 @@ class Replay(unittest.TestCase):
         moved = [k - PAYLOAD_OFFSET for k in range(min(len(before), len(only)))
                  if before[k] != only[k]]
         self.assertEqual(moved, [0x05])
+
+
+class ReplayRunVerbs(unittest.TestCase):
+    """map / cpi / multiclick / handedness, against the vendor's own writes.
+
+    The counterpart of `Replay` for the OTHER frame-composition path. `Replay`
+    drives `egg-config encode`, which reaches ConfigSession::buildFrame; this
+    drives `<verb> --from FILE`, which reaches ConfigSession::buildRunFrame.
+    Two paths, and until 2026-09-07 only one of them was ever replayed against
+    a vendor before/after pair.
+
+    A pass means the same two things as there: the run bytes are right, AND the
+    read-modify-write preserved all 1017 bytes we did not intend to touch.
+    """
+
+    def setUp(self):
+        if not os.path.exists(BIN):
+            self.skipTest("build/egg-config not built")
+        if not os.path.isdir(os.path.join(ROOT, "windows-capture")):
+            self.skipTest("no windows-capture")
+
+    def preview_frame(self, before, argv, policy="vendor"):
+        """The 1041 bytes `--from` says it would send, parsed out of the hex."""
+        with tempfile.TemporaryDirectory() as d:
+            a = os.path.join(d, "in.bin")
+            with open(a, "wb") as f:
+                f.write(before)
+            r = subprocess.run([BIN, "--unknown-bytes=%s" % policy]
+                               + argv + ["--from", a],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0,
+                             "%s failed: %s%s" % (argv, r.stdout, r.stderr))
+        out = bytearray()
+        started = False
+        for line in r.stdout.splitlines():
+            if "as they would go on the wire" in line:
+                started = True
+                continue
+            if not started:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                break
+            out += bytes.fromhex(parts[1])
+        self.assertEqual(len(out), FRAME_LEN,
+                         "%s: parsed %d bytes of hex, not %d -- has the dry-run "
+                         "output changed shape?" % (argv, len(out), FRAME_LEN))
+        return bytes(out)
+
+    def test_there_is_something_to_replay(self):
+        """A corpus that silently emptied would pass every test below."""
+        self.assertGreaterEqual(len(RUN_CASES), 15)
+        self.assertTrue(all(c.startswith(("13-", "14-", "15-", "16-", "17-"))
+                            for c, _, _ in RUN_CASES),
+                        "these cases exist to cover windows-capture/")
+
+    def test_every_run_verb_reproduces_the_vendor_write(self):
+        """Ours must equal the vendor's frame, byte for byte, at all 1041.
+
+        --unknown-bytes=vendor, so record 0x01..0x04 is included rather than
+        excused. There is no reason to accept less here: the vendor's frame IS
+        the reference and we have it in full.
+        """
+        for capture, i, argv in RUN_CASES:
+            with self.subTest(capture=capture, write=i, argv=" ".join(argv)):
+                before, after = before_after(capture, i)
+                got = self.preview_frame(before, argv)
+                # PAYLOAD only: `after` came through as_saved(), which zeroes
+                # the header, while `got` is a real frame carrying a0 11.
+                d = [k for k in range(PAYLOAD_LEN)
+                     if got[PAYLOAD_OFFSET + k] != after[PAYLOAD_OFFSET + k]]
+                self.assertEqual(
+                    [], d,
+                    "%s write %d (%s): differs from the vendor at record %s"
+                    % (capture, i, " ".join(argv), [hex(x) for x in d]))
+
+    def test_nothing_outside_the_run_ever_moves(self):
+        """The read-modify-write half, stated separately from the byte match.
+
+        Passing the test above already implies this, but only while the vendor
+        agrees with us. Stated on its own it stays meaningful for the excluded
+        cases too, and it is the §4.1 / §1.3 property rather than an equality.
+        """
+        runs = {"cpi": 5, "map": 7, "multiclick": 1}
+        for capture, i, argv in RUN_CASES:
+            with self.subTest(capture=capture, write=i, argv=" ".join(argv)):
+                before, _ = before_after(capture, i)
+                got = self.preview_frame(before, argv, policy="preserve")
+                moved = sorted(k for k in range(PAYLOAD_LEN)
+                               if before[PAYLOAD_OFFSET + k] != got[PAYLOAD_OFFSET + k])
+                self.assertTrue(moved, "nothing moved at all")
+                width = runs[argv[0]]
+                self.assertLessEqual(max(moved) - min(moved), width - 1,
+                                     "%s moved %s, which is wider than the %d-byte "
+                                     "run it is allowed to touch"
+                                     % (" ".join(argv), [hex(m) for m in moved], width))
+
+    def test_the_excluded_run_cases_really_are_the_vendors_stage_4_bug(self):
+        """RUN_EXCLUDED is a claim about cfg107, not a way to hide a failure.
+
+        Each excluded case must differ from the vendor at EXACTLY the byte the
+        exclusion names, and nowhere else. If we ever differ somewhere else, the
+        exclusion stops covering it and this fails.
+        """
+        for capture, i, argv, byte, _why in RUN_EXCLUDED:
+            with self.subTest(capture=capture, write=i, argv=" ".join(argv)):
+                before, after = before_after(capture, i)
+                got = self.preview_frame(before, argv)
+                d = sorted(k for k in range(PAYLOAD_LEN)
+                           if got[PAYLOAD_OFFSET + k] != after[PAYLOAD_OFFSET + k])
+                self.assertEqual([byte], d,
+                                 "%s: expected to differ only at 0x%02x, differed "
+                                 "at %s" % (" ".join(argv), byte,
+                                            [hex(x) for x in d]))
+
+    def test_the_vendor_really_did_set_stage_fours_flag_from_stage_three(self):
+        """And the bug is in the capture, not only in our reading of cfg107.
+
+        Without this, the two exclusions above would be self-serving: "we differ
+        here because the vendor is buggy" has to be checked against the bytes.
+        """
+        _, after0 = before_after("13-cpi-stage34", 0)
+        before0, _ = before_after("13-cpi-stage34", 0)
+        # write 0 touched stage 3 only, and stage 4's flag moved with it
+        self.assertEqual(before0[PAYLOAD_OFFSET + 0x32], 0x00)
+        self.assertEqual(after0[PAYLOAD_OFFSET + 0x32], 0x01)
+        s4 = after0[PAYLOAD_OFFSET + 0x33:PAYLOAD_OFFSET + 0x37]
+        self.assertEqual(s4[0] | (s4[1] << 8), s4[2] | (s4[3] << 8),
+                         "stage 4's own X and Y must still be EQUAL here, or the "
+                         "flag could be explained without the bug")
+        # write 3 made stage 4 equal again and the vendor did NOT clear it
+        _, after3 = before_after("13-cpi-stage34", 3)
+        self.assertEqual(after3[PAYLOAD_OFFSET + 0x32], 0x01)
+        s4 = after3[PAYLOAD_OFFSET + 0x33:PAYLOAD_OFFSET + 0x37]
+        self.assertEqual(s4[0] | (s4[1] << 8), s4[2] | (s4[3] << 8))
 
 
 if __name__ == "__main__":

@@ -327,8 +327,9 @@ nothing visible in section 07 because there was nothing to undo.
 ### Still open
 
 - Entries 5 and 7 of the button block: never exercised.
-- The stage-4 CPI flag at record `0x32`: lines 18d–18f were not performed, so
-  only stage 1's flag has been seen move.
+- ~~The stage-4 CPI flag at record `0x32`: lines 18d–18f were not performed, so
+  only stage 1's flag has been seen move.~~ **CLOSED 2026-09-06 by
+  `windows-capture/13-cpi-stage34.pcapng`; §8.1 scores it.**
 - Records `0x02`–`0x04`, and `0x01`'s meaning.
 - Whether `a1 13` differs at all from what the flasher sends.
 
@@ -364,6 +365,19 @@ power-cycle tests (8.6 s and 1706.8 s, both 0/1024 bytes changed) and this
 answer, and still offers the unplug-replug check for anyone who wants it.
 
 ## 6. The captures reconcile line-by-line WITHOUT `windows-run/log.txt`  [O]
+
+> **THE LABELLING IN THIS SECTION IS VOID. Read §7 instead.**
+>
+> Everything below anchors on the repo-root `./log.txt`, which the owner quarantined
+> on 2026-09-06 (CLAUDE.md §1.1a: *"you cannot trust anything in the root
+> log.txt. much of it is wrong."*). §7 says so and replaces the anchor
+> with the factory-default screenshots; this banner was missing from §6's own
+> heading until 2026-09-07, so a reader arriving from the table of contents met
+> the void method with no warning and the correction 100 lines further on.
+>
+> **The byte-level observations here stand** — they never depended on the log.
+> What is void is every sentence that says which INSTRUCTION LINE produced a
+> given write. Do not cite a `log.txt` line number from this section.
 
 The owner asked on 2026-09-06 whether `windows-run/` is still usable given that his
 filled-in `log.txt` was lost to a non-autosaving editor before upload. **It is.**
@@ -445,8 +459,14 @@ with the screenshots it reads as an answered question.
 writes. They were not performed. That sequence exists to test a specific
 committed prediction: that cfg107 computes stage 4's `X≠Y` flag from stage 3's
 edit boxes (`0x40edde`, a suspected vendor copy-paste bug), so a stage-4 X/Y
-split should move **stage 3's** flag and not its own. **That prediction is still
-untested**, and no amount of re-reading the captures will test it.
+split should move **stage 3's** flag and not its own.
+
+> **SCORED A HIT, 2026-09-06 — see §8.1 of this file.** This paragraph said
+> "that prediction is still untested" until 2026-09-07, which stopped being
+> true the moment `windows-capture/13-cpi-stage34.pcapng` was committed. The
+> rest of this subsection is kept because its reasoning is still correct and
+> was load-bearing: it is why the test HAD to be a vendor capture on Windows,
+> and it is the argument that got that capture taken.
 
 **Correction, 2026-09-06: our own tool CANNOT settle it, and three files said
 it could.** The claim is about what *cfg107's serializer computes*, not about

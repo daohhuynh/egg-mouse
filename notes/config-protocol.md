@@ -3198,17 +3198,41 @@ Deviating is the right call because the alternative is reproducing a bug whose
 effect on the device is `[G]`, but it is a deviation and the tool says so out
 loud rather than hiding it.
 
-> **UNTESTED, and recorded in `working-memory.md` under OPEN GAPS as the
-> `18d`-`18f` gap** (referred to by name, not number: the list is renumbered
-> whenever an item is closed). The capture that would
-> have exercised this (`02` lines `18d`–`18f`) was never performed. No
-> observation of stage 4 with `X != Y` exists, from the vendor or from us.
+> **TESTED 2026-09-06, and the bug is real.  [O]**
+>
+> This blockquote used to say the opposite — "UNTESTED", pointing at an OPEN
+> GAPS item that no longer existed, and asserting that "no observation of stage
+> 4 with `X != Y` exists, from the vendor or from us." That was a §1.2a absence
+> claim written when it was true and left standing after the evidence arrived,
+> in the paragraph a reader consults immediately before touching the CPI write
+> path. Corrected 2026-09-07.
+>
+> `windows-capture/13-cpi-stage34.pcapng` is the vendor writing stages 3 and 4
+> on firmware 1.10, and it exercises the bug from both sides:
+>
+> | stage 3 (flag, X, Y) | stage 4 (flag, X, Y) | what it shows |
+> | --- | --- | --- |
+> | `1, 1200, 2400` | `1, 3000, 3200` | stage 4 with `X != Y` — flag 1 is also what stage 4's own values imply, so this record alone cannot tell the two rules apart |
+> | `1, 1200, 2400` | `1, 3000, 3000` | **stage 4 with `X == Y` and the flag still `1`** — the vendor's own rule would give `0`. This is the record that decides it |
+>
+> The second row is the whole test, and it is why the prediction was scored a
+> HIT rather than "consistent with". `config-wire-observed.md` §8.1 has the
+> full scoring; `Tests/test_cpi.py` now sweeps BOTH capture directories, and
+> `test_the_bug_is_actually_exercised_by_the_corpus` fails if a future corpus
+> ever stops containing a record that distinguishes them — so the deviation
+> described just above is measured against the vendor rather than assumed.
+
+`egg-config cpi`'s deviation therefore stands, and now for a stronger reason
+than when it was written: the vendor's stage-4 flag is not merely `[G]`-risky,
+it has been **observed** to disagree with stage 4's own values.
 
 ### 7.19.5 Scored against every settings record the vendor ever put on the wire  [O]
 
 `Tests/test_cpi.py` decodes the CPI block out of every settings record in
-`windows-run/` and requires that our encoder accept and byte-for-byte reproduce
-all of them. Selection is structural — a 1041-byte GET is a settings record only
+**both capture directories** and requires that our encoder accept and
+byte-for-byte reproduce all of them. (It swept `windows-run/` alone until
+2026-09-07, which left the two captures that exist BECAUSE of CPI outside the
+one check that says the vendor never wrote a value our normaliser refuses.) Selection is structural — a 1041-byte GET is a settings record only
 when the SET before it was `A1 12` — because the first version took every large
 GET and swept in the two flash captures, whose 1041-byte reports are firmware
 block data read back by `A0 07`. Decoding firmware as CPI produced 248 apparent
@@ -3222,10 +3246,23 @@ What the eight config captures actually contain:
 | `01-baseline`, `03`–`07`, `10-postflash-baseline` | 400, 800, 1600, 3200 — all `X == Y`, flag `0` |
 | `02-basic` | stage 1 also at 600, 1250, 2000, and **1000×1500** and **1000×2000**, both flag `1` |
 
-Those last two are the only `X != Y` records in evidence anywhere, and they are
-what turns the flag rule from a reading of `0x40edde` into an observation. 1250
-is on the fine grid (125 × 10); every value present is a fixed point of
-§7.19.1's rule. The vendor never wrote a CPI our encoder refuses.
+Those last two are the `X != Y` records in `windows-run/`, and they are what
+turns the flag rule from a reading of `0x40edde` into an observation. 1250 is on
+the fine grid (125 × 10); every value present is a fixed point of §7.19.1's
+rule. The vendor never wrote a CPI our encoder refuses.
+
+*(This sentence said "the only `X != Y` records in evidence **anywhere**" until
+2026-09-07, which was false the moment `windows-capture/` was committed —
+`13-cpi-stage34` has four more, listed in §7.19.4. The scope sentence at the top
+of this section was right and the summary sentence overreached past it, which is
+the §1.2a shape: a claim about everywhere you did not look, sitting one
+paragraph below an accurate statement of where you did.)*
+
+**The corpus is both directories now.** `captured_cpi_blocks()` sweeps
+`windows-run/` and `windows-capture/` via `test_handedness.every_capture()`, and
+`test_both_capture_runs_are_in_the_corpus` fails if either stops contributing.
+The table above is `windows-run/` only because that is what it was built to
+describe; the 1.10 additions are in §7.19.4.
 
 **Reproduce:** `python3 -m unittest Tests.test_cpi` (18 tests; no device).
 

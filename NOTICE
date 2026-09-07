@@ -1,0 +1,37 @@
+egg-mouse
+Copyright 2026 Dao Huynh
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+--------------------------------------------------------------------------
+THIS IS NOT AN ENDGAME GEAR PRODUCT.
+--------------------------------------------------------------------------
+
+egg-mouse is an independent, unofficial tool. It is not affiliated with,
+authorised by, endorsed by, or supported by Endgame Gear GmbH in any way.
+
+"Endgame Gear", "OP1", "OP1 8k" and any other product or company names used
+here are the trademarks of their respective owners, and are used only to say
+which hardware this software talks to. Nominative use of a name to identify
+compatible hardware is not a claim to it. Section 6 of the Apache License
+grants no rights in anyone's trademarks, and nothing in this project should be
+read as granting any.
+
+Endgame Gear ships configuration and firmware-update software for Windows
+only. The USB protocol this tool implements was derived independently from
+their published Windows executables and from captures of those executables
+talking to hardware the author owns. No Endgame Gear source code, protocol
+documentation, or confidential material was used.
+
+--------------------------------------------------------------------------
+ABOUT THE FIRMWARE FLASHER SPECIFICALLY
+--------------------------------------------------------------------------
+
+`egg-flash` erases and rewrites the firmware of a physical device. A failed or
+interrupted flash can leave a mouse that does not work, and that may not be
+covered by any warranty. The Apache License's Sections 7 and 8 ("AS IS",
+without warranties or conditions of any kind, and no liability for damages)
+apply to this in full and are not decorative here. Read them before you run it.
+
+The author has tested this against exactly one mouse, of one model, on two
+firmware versions. It has never been run against any other hardware.

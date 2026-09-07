@@ -351,6 +351,40 @@ say "...and names the flag a button-entered bootloader needs" $?
 ! printf '%s' "$h" | grep -q "run this command again"
 say "...and NOT the flasher-only 'run this command again'" $?
 
+# ---------------------------------------------------------------------------
+# --from is offline for ALL FOUR run verbs, and --yes cannot override it
+# ---------------------------------------------------------------------------
+# The four verbs that write a RUN of record bytes gained `--from` on
+# 2026-09-07 so they could show a whole frame without a device (§4.3). The
+# property that matters is not that the preview is pretty: it is that
+# `--from` NEVER writes. A file is not a mouse, and a verb that quietly fell
+# back to the device when handed both flags would turn an offline experiment
+# into a write.
+#
+# Checked per verb rather than once, because each parses its own arguments and
+# they were edited separately -- a copy-paste that dropped the guard in one of
+# the four is exactly the mistake this shape of change makes.
+for verb in "map middle browser" "cpi 2 800" "multiclick left off 8" "handedness left"; do
+  out=$("$BIN" $verb --from "$TMP/plain.bin" --yes 2>&1); rc=$?
+  if [ "$rc" = 2 ] && printf '%s' "$out" | grep -q -- "--from is offline only"; then
+    echo "  PASS  \`$verb --from ... --yes\` refuses"; PASS=$((PASS+1))
+  else
+    echo "  FAIL  \`$verb --from ... --yes\` returned $rc: $out"; FAIL=$((FAIL+1))
+  fi
+  # ...and without --yes it produces a real frame rather than refusing
+  n=$("$BIN" $verb --from "$TMP/plain.bin" 2>/dev/null \
+        | grep -cE '^ +[0-9a-f]{4} +[0-9a-f]+$')
+  if [ "$n" -ge 32 ]; then
+    echo "  PASS  \`$verb --from ...\` prints a whole frame ($n lines)"; PASS=$((PASS+1))
+  else
+    echo "  FAIL  \`$verb --from ...\` printed $n hex lines, not a frame"; FAIL=$((FAIL+1))
+  fi
+  # and it opened no device: the offline banner is the only outcome allowed
+  "$BIN" $verb --from "$TMP/plain.bin" 2>/dev/null \
+    | grep -q "Nothing was sent. No device was opened."
+  say "...and says so out loud" $?
+done
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

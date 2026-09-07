@@ -9,8 +9,15 @@ before the first byte goes out. The consequence is that a new firmware release
 does not work automatically -- somebody has to look at the new .exe and decide.
 
 This is what they look at. It prints everything needed for that decision and
-then the exact line to paste into Firmware.h. It NEVER touches the device and
-NEVER writes to the repo.
+then points at `Tools/pe/ingest.py`, which emits the FirmwareManifest row. It
+NEVER touches the device and NEVER writes to the repo.
+
+It used to print a replacement `kExpectedSha256` instead. That was written
+before FirmwareManifest existed and was wrong afterwards in a way that costs
+something: `kExpectedSha256` pins the ONE release this build was derived
+against, the release whose 135 frames match the capture, and the --confirm
+token moves with it. Adding a release is a manifest row; it is not an edit to
+that constant.
 
 WHY LOOKING IS NOT PARANOIA. notes/updater-protocol.md §0.1.1: the binary
 Endgame ships as "OP1 8k v2 Firmware Updater 1.10" was linked from a project
@@ -183,13 +190,44 @@ def main():
         print("Already pinned. No change needed.")
         return 0
 
-    print("If the identity above is genuinely an OP1 8k v2 updater, add this to")
-    print("Sources/EGGFlashCore/include/egg/Firmware.h and rebuild:")
+    # WHAT THIS USED TO PRINT, and why it was dangerous.
+    #
+    # It printed a replacement `kExpectedSha256` for Firmware.h. That constant
+    # is not "the image we are about to add" -- it is THE IMAGE THIS BUILD WAS
+    # DERIVED AGAINST, the one 1.10 whose 135 frames are byte-identical to a
+    # capture of this mouse being flashed. Overwriting it would:
+    #
+    #   - silently repoint `loadFromExecutable`, the narrow single-release
+    #     loader every existing test drives, at a file nobody has verified;
+    #   - MOVE THE --confirm TOKEN (§4.2c), voiding an approval by editing a
+    #     header rather than by changing the plan a person reviewed;
+    #   - leave no row anywhere recording that a second release exists.
+    #
+    # FirmwareManifest (added after this text was written) is the supported
+    # way, and it is strictly stronger: a row is selected by the SHA-256 of the
+    # WHOLE .exe, the resource id is recovered mechanically from the vendor's
+    # own FindResourceW site, and `provenOnDevice` states in the source whether
+    # anyone has actually flashed it. Corrected 2026-09-07.
+    print("If the identity above is genuinely an OP1 8k v2 updater, ADD A")
+    print("MANIFEST ROW. Do NOT edit kExpectedSha256 in Firmware.h -- that")
+    print("constant names the one release this build was derived against, the")
+    print("release whose frames match the capture, and moving it would also")
+    print("move the --confirm token (CLAUDE.md §4.2c) without changing any plan")
+    print("a person reviewed.")
     print()
-    print(f'    // FWFILE/{FLASHED_ID} from "{os.path.basename(path)}"')
-    print(f'    //   file sha256 {sha(raw)}')
-    print(f'    inline constexpr const char* kExpectedSha256 =')
-    print(f'        "{img_sha}";')
+    print(f"    python3 Tools/pe/ingest.py {os.path.basename(path)!r} --label <version>")
+    print()
+    print("prints a Release row, or refuses and says why. Paste it into")
+    print("Sources/EGGFlashCore/src/FirmwareManifest.cpp, set the date, and")
+    print("LEAVE provenOnDevice false -- CLAUDE.md §5, a different version is a")
+    print("different device until shown otherwise.")
+    print()
+    print("For reference, the numbers a row needs, from this file:")
+    print(f"    updaterSha256   {sha(raw)}")
+    print(f"    resourceId      {FLASHED_ID}")
+    print(f"    imageSize       {len(img)}")
+    print(f"    imageSha256     {img_sha}")
+    print(f"    wholeImageChecksum  0x{sum(img) & 0xFFFFFFFF:08x}")
     print()
     print("Then re-run Tests/test_fwfile_set.py, which pins the whole resource")
     print("set and will fail loudly if any OTHER blob changed at the same time.")

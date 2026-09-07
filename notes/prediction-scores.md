@@ -1,10 +1,18 @@
 # Scoring the pre-registered predictions
 
-`notes/wire-predictions.md` holds **266 predictions committed before any capture
-existed** (commit history proves the order; that is the only thing that makes
-this a proof rather than a postdiction). This file is the scoreboard. One entry
-per prediction that reality has now touched, `CONFIRMED` / `REFUTED` / `PARTIAL`,
-with **what was actually observed** and by whom.
+`notes/wire-predictions.md` holds a register of predictions **committed before
+any capture existed** (commit history proves the order; that is the only thing
+that makes this a proof rather than a postdiction). This file is the scoreboard.
+One entry per prediction that reality has now touched, `CONFIRMED` / `REFUTED` /
+`PARTIAL`, with **what was actually observed** and by whom.
+
+**The register's size is not written here on purpose.** Run
+`python3 Tools/notes/reconcile_scores.py`; it counts four independent ways and
+fails the build if they disagree. This sentence said "266" until 2026-09-07 —
+the correction was already 28 lines below it and had been for a day, and `266`
+was even listed there among "three numbers that are now gone". It was not gone.
+It was the first factual claim a reader met, which is the only position in the
+file where a stale number does real damage.
 
 **Rules for this file, and they are the point of it.**
 
@@ -28,10 +36,13 @@ resolves to nothing, refuses a prediction scored twice, and checks the table
 below against the entries that are actually present. It exits non-zero on any
 of those. If you are about to type a number into this file, run it instead.
 
-**The register holds 271 predictions, not 266.** `#### N. slug` headings = 271,
-`**Cite:**` bullets = 271, `**REFUTED IF:**` bullets = 271, distinct slugs =
-271. Where 266 came from is unknown and it had been restated here as fact — the
-§7.1 failure mode, in the file whose whole job is to resist it.
+**The register does not hold 266 predictions**, which is what this file said
+for weeks. The four counts above agree with each other and with the denominator
+in the table below; `266` agreed with nothing and could not be sourced. It had
+been restated here as fact — the §7.1 failure mode, in the file whose whole job
+is to resist it. The count itself is deliberately not repeated in this
+paragraph: the tool prints it, the table below carries it, and the tool fails
+the build if the two disagree.
 
 A single tally would also be arithmetic across scopes, which §6 forbids. Three
 scopes, and **nothing is ever added across the rows**:
@@ -40,7 +51,7 @@ scopes, and **nothing is ever added across the rows**:
 | --- | --- | --- | --- | --- |
 | `wire-predictions.md` register | 6 | 0 | 2 | 271 |
 | pre-registered elsewhere (bare slugs, declared below) | 2 | 1 | 1 | not enumerated |
-| device runs, own pre-registration files | 2 | 0 | 1 | 3 |
+| device runs, own pre-registration files | 3 | 0 | 3 | 6 |
 
 Zero REFUTED **in the register** at n=8 is still not informative, and the two
 added on 2026-09-06 (#13, #14) make it *less* informative rather than more.
@@ -54,7 +65,25 @@ predictions, answerable by looking at the screenshots already in the repo and
 by an observer who is not me; and the **updater areas**, now unblocked because
 `08-flash.pcapng` exists, where a refutation would mean the derived command set
 is incomplete. #19 is still the single highest-value one for that reason.
-The one REFUTED so far came from outside the register.
+
+**Where the refutations actually are, corrected 2026-09-07.** This paragraph
+used to end "The one REFUTED so far came from outside the register", and that
+was the most damaging sentence in the file: it is the one Rule 2 exists to
+guard, and it was understating the project's real refutation rate by a factor
+of three. There are **four** refuted predictions on record, and three of them
+came off the device:
+
+| where | prediction | outcome |
+| --- | --- | --- |
+| out-of-register slug | (the one this sentence used to mean) | REFUTED |
+| `prediction-bootloader-entry.md` #3 | `resp[1] == 0x01` | **REFUTED — `0x03`** |
+| `prediction-bootloader-entry.md` #9 | returns to `0x1978` on a power cycle | **REFUTED — it latches**, and this is the single most consequential fact in the flash design (CLAUDE.md §4.2b) |
+| `prediction-capture-1.10.md`, the `16-keys` block | Left Shift records `+1 = 00` | **REFUTED — `02`**, the dialog sets modifiers from live keyboard state |
+
+They were invisible here because the scoreboard simply had no entry for the
+files that hold them. That is now checked rather than remembered:
+`reconcile_scores.py` fails if any `notes/prediction-*.md` is neither scored in
+this file nor declared unscored below.
 
 **Three numbers that were in this file and are now gone**, recorded because the
 pattern matters more than the arithmetic: `266` (a denominator nobody could
@@ -458,9 +487,76 @@ script regenerates them.)*
 
 ## Device runs, 2026-09-05 — scored from their own pre-registration files
 
-These are not in the 271-register. Each has its own file, committed to git
+These are not in the register at all. Each has its own file, committed to git
 **before** the command ran, which is the only thing that makes them proofs
 rather than postdictions; the commit is named in each.
+
+**Six files, not three, and the three added on 2026-09-07 are the ones that
+matter most.** This section carried `prediction-factory-reset.md`,
+`prediction-restore.md` and `prediction-read-firmware.md` and stopped there —
+so `prediction-bootloader-entry.md`, `prediction-postwindows.md` and
+`prediction-capture-1.10.md` were scored in their own files, by their own
+tables, and counted nowhere. Two of the three carry this project's only
+device-run REFUTATIONS. A scoreboard whose denominator silently omits the runs
+that refuted things is the exact failure Rule 2 names, and it had been sitting
+here for two days looking like a clean sheet.
+
+### PARTIAL — `notes/prediction-bootloader-entry.md`, **9 of 11, and the two misses are the finding**
+
+`egg-flash enter-bootloader` on the real device, committed at `2094d98` before
+the frame went out. Full table in that file; the two that missed:
+
+- **#3 `resp[1] == 0x01` — REFUTED, it came back `0x03`.** A value in neither
+  capture. The pre-registration said explicitly it was *not gated on*; had the
+  tool required `0x01`, it would have reported failure on a **successful**
+  entry and the natural next move would have been to send `A1 3A` again. The
+  general lesson is in that file and it is worth more than the prediction: a
+  status gate on an undocumented byte manufactures false failures.
+- **#9 `returns to 0x1978 on a power cycle` — REFUTED, it latches.** This is
+  the most consequential refutation in the project. CLAUDE.md §4.2b's accepted
+  cost, `egg-flash`'s help text, and the whole shape of the enter →
+  read-firmware → flash sequence exist because of it.
+
+Two more (#10, #11) were **UNTESTABLE** until the device was back, which is a
+fault in the predictions rather than a result — they were written to be scored
+in a state the run itself made unreachable.
+
+Observer: the owner at the machine, 2026-09-05 19:35:40.
+
+### CONFIRMED — `notes/prediction-postwindows.md`, **7 of 7**
+
+The post-Windows-flash read-back, committed at `b746d0f` before it ran. Scored
+mechanically rather than by eye: the 21 predicted rows were re-parsed out of
+`prediction-factory-reset.md` and set-compared against the actual byte deltas
+between the vault and `after-windows-flash.bin` — zero predicted-but-unmoved,
+zero moved-but-unpredicted, zero wrong values.
+
+**7 of 7 with zero refuted is exactly the shape Rule 2 says to distrust**, so
+the honest qualifier: #6 is a HIT *by transitivity*, not by direct measurement,
+and that file says so at the row rather than in a footnote. The other six are
+direct.
+
+### PARTIAL — `notes/prediction-capture-1.10.md`, the 2026-09-06 Windows session
+
+Committed at `8a25286` before any capture file was opened. Scored in
+`config-wire-observed.md` §8, which is where the detail lives; the summary:
+
+| block | outcome |
+| --- | --- |
+| `13-cpi-stage34` — stage 4's flag follows **stage 3's** boxes | **HIT**, and observed from both ends (§8.1). The project's only prediction that asserts the vendor's own tool computes something incorrectly |
+| `15-media` — all eight MEDIA actions | **HIT** on the action set (§8.2) |
+| `14-fixed-cpi` — X and Y independent, argument order | **HIT** (§8.3), and the normaliser confirmed on the wire at 2505 → 2510 |
+| `16-keys` — keypad `+` reaches the record as usage `0x57` | **HIT, and the good branch** (§8.4) |
+| `16-keys` — Left Shift records `+1 = 00` | **REFUTED — `02`** (§8.4). The dialog sets modifier bits from live keyboard state, independently of the key it records |
+
+**And one thing this run got wrong that was mine, not the capture's.** §8.2's
+first reading of `15-media` concluded that `+2`–`+5` stay zero. The capture says
+BROWSER and EXPLORER write `01` at `+2`, and that misreading reached the code —
+`egg-config map <btn> browser` emitted a byte pattern the vendor never produces
+for about a week. Recorded here and not only in §8.2, because a scoreboard that
+lists only the predictions and not the misreadings of the evidence is scoring
+half the process.
+
 
 ### CONFIRMED — `notes/prediction-factory-reset.md`, **21 / 21**
 

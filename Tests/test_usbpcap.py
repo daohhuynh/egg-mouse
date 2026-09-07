@@ -77,8 +77,28 @@ class ReusedIrp(unittest.TestCase):
         self.assertEqual(t.data, b"\x04\x05\x06\x07")
 
 
+def every_capture():
+    """(directory, filename) for every .pcapng in the repo, in a stable order.
+
+    BOTH directories. This class read `windows-run` only until 2026-09-07, so
+    the decoder-integrity check below -- the one guarding the bug where
+    usbpcap silently dropped most of a capture -- had never been run against
+    the seven firmware-1.10 files, which are the newest and least-exercised
+    capture shapes in the repo.
+    """
+    out = []
+    for d in ("windows-run", "windows-capture"):
+        full = os.path.join(ROOT, d)
+        if not os.path.isdir(full):
+            continue
+        for name in sorted(os.listdir(full)):
+            if name.endswith(".pcapng"):
+                out.append((full, name))
+    return out
+
+
 class RealCaptures(unittest.TestCase):
-    """Against the one capture run that exists. Skipped if it is not present."""
+    """Against the capture runs that exist. Skipped if they are not present."""
 
     def caps(self, name):
         p = os.path.join(ROOT, "windows-run", name)
@@ -95,18 +115,32 @@ class RealCaptures(unittest.TestCase):
     def test_no_transfer_loses_a_packet(self):
         """Every control packet is accounted for: attached to a transfer, or an
         orphan with no open request. Silence here is what the old bug looked
-        like, so count rather than trust."""
-        p = os.path.join(ROOT, "windows-run", "08-flash.pcapng")
-        if not os.path.exists(p):
-            self.skipTest("no capture")
-        pkts = usbpcap.read(p)
-        ctrl = [q for q in pkts if q.transfer == usbpcap.XFER_CONTROL]
-        xf = usbpcap.control_transfers(pkts)
-        attached = sum(len(t.packets) for t in xf)
-        orphans = len(ctrl) - attached
-        self.assertLess(orphans, len(ctrl) * 0.05,
-                        "%d of %d control packets attached to no transfer"
-                        % (orphans, len(ctrl)))
+        like, so count rather than trust.
+
+        EVERY capture, both directories. The old form checked `08-flash` alone,
+        which is the single file the decoder was originally debugged against --
+        the weakest possible choice for a regression gate.
+        """
+        caps = every_capture()
+        if not caps:
+            self.skipTest("no captures")
+        for directory, name in caps:
+            with self.subTest(capture=os.path.join(os.path.basename(directory), name)):
+                pkts = usbpcap.read(os.path.join(directory, name))
+                ctrl = [q for q in pkts if q.transfer == usbpcap.XFER_CONTROL]
+                self.assertTrue(ctrl, "no control packets decoded at all")
+                xf = usbpcap.control_transfers(pkts)
+                attached = sum(len(t.packets) for t in xf)
+                orphans = len(ctrl) - attached
+                self.assertLess(orphans, len(ctrl) * 0.05,
+                                "%d of %d control packets attached to no transfer"
+                                % (orphans, len(ctrl)))
+
+    def test_both_capture_runs_are_being_read(self):
+        """A directory that vanishes from the sweep must fail, not skip."""
+        dirs = {os.path.basename(d) for d, _ in every_capture()}
+        self.assertEqual({"windows-run", "windows-capture"}, dirs,
+                         "swept %r" % sorted(dirs))
 
 
 if __name__ == "__main__":

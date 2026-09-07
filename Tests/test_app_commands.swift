@@ -649,17 +649,60 @@ do {
     equal(Commands.firmwareVersion(fromDevices: ""), nil,
           "empty output means no version")
 
+    // AGAINST THE REAL TOOL, and this used to prove nothing when no mouse was
+    // attached (fixed 2026-09-07). The check was `st != .unclear`, which
+    // `.absent` satisfies -- so on a machine with no mouse, the assertion
+    // passed while its own failure message claimed to be watching for a change
+    // to `cmdDevices`' table printf, which `.absent` cannot see. A live anchor
+    // that degrades to a tautology in the common case is worse than no anchor:
+    // it reads as coverage.
+    //
+    // Both branches assert something now, and which branch runs is printed, so
+    // a reader can tell which printf was actually exercised.
     let (drc, dtext) = run("egg-config", Commands.listDevices())
     if drc == -1 {
         print("SKIP: build/egg-config not present; device state parsed offline only")
     } else {
-        let st = Commands.parseDeviceState(dtext)
-        check(st != .unclear,
-              "parseDeviceState could not make sense of the real `devices` "
-              + "output -- the printf in cmdDevices has probably changed",
-              dtext.prefix(300).description)
         check(!Commands.listDevices().contains("--yes"),
               "enumerating must never carry --yes")
+
+        let st = Commands.parseDeviceState(dtext)
+        let rows = dtext.split(separator: "\n").filter { $0.hasPrefix("0x") }
+        if rows.isEmpty {
+            // No mouse. The only printf reachable here is the empty-case one,
+            // and `.absent` is the ONLY honest answer -- not merely "not
+            // unclear". If cmdDevices ever changes that sentence, this fails.
+            print("  (no device attached: checking the empty-case printf)")
+            check(st == .absent,
+                  "with no rows printed, parseDeviceState must say .absent, not "
+                  + "\(st) -- cmdDevices' no-device sentence has probably changed",
+                  dtext.prefix(300).description)
+            check(dtext.contains("no VID 0x3367 device attached"),
+                  "and that sentence is the one parseDeviceState keys on",
+                  dtext.prefix(300).description)
+        } else {
+            // A mouse IS attached, so the table printf is exercised for real.
+            print("  (device attached: checking the table printf, \(rows.count) rows)")
+            check(st == .application || st == .bootloader,
+                  "rows were printed but parseDeviceState said \(st) -- the "
+                  + "printf in cmdDevices has probably changed",
+                  dtext.prefix(300).description)
+            // Every row must carry a mode tag, or the parser is reading a
+            // table shape it does not understand and got its answer by luck.
+            let tagged = rows.filter {
+                $0.contains("(application)") || $0.contains("(BOOTLOADER)")
+            }
+            check(tagged.count == rows.count,
+                  "\(rows.count - tagged.count) of \(rows.count) rows carry no "
+                  + "mode tag; parseDeviceState reads those tags and nothing else",
+                  dtext.prefix(300).description)
+            if st == .application {
+                check(Commands.firmwareVersion(fromDevices: dtext) != nil,
+                      "an application row is present but no firmware version "
+                      + "could be read out of it -- the version column moved",
+                      dtext.prefix(300).description)
+            }
+        }
     }
 }
 
@@ -686,12 +729,63 @@ do {
     equal(Commands.checkBootloader(), ["read-firmware", "--check"],
           "--check reports and stops")
     equal(Commands.verbose(["frames"]), ["-v", "frames"], "-v goes in front")
+    equal(Commands.mapMachine(), ["map", "--machine"],
+          "the machine listing is an argument list like any other")
+
+    // THE OTHER THREE OFFLINE RUN VERBS (2026-09-07).
+    equal(Commands.previewMap(button: "middle", action: "browser", from: "r.bin"),
+          ["map", "middle", "browser", "--from", "r.bin"],
+          "map --from decides offline")
+    equal(Commands.previewCpi(stage: 3, x: 1200, y: 2400, from: "r.bin"),
+          ["cpi", "3", "1200", "2400", "--from", "r.bin"],
+          "cpi --from carries Y when Y differs")
+    equal(Commands.previewCpi(stage: 1, x: 800, y: nil, from: "r.bin"),
+          ["cpi", "1", "800", "--from", "r.bin"],
+          "and omits it when it does not")
+    equal(Commands.previewMulticlick(button: "left", mode: "off", value: 12,
+                                     from: "r.bin"),
+          ["multiclick", "left", "off", "12", "--from", "r.bin"],
+          "multiclick --from carries its filter value")
+    equal(Commands.previewMulticlick(button: "left", mode: "gx-safe", value: 12,
+                                     from: "r.bin"),
+          ["multiclick", "left", "gx-safe", "--from", "r.bin"],
+          "a GX mode still drops the value the CLI would ignore")
+
+    // EACH OFFLINE FORM IS ITS DEVICE FORM PLUS EXACTLY `--from PATH`.
+    //
+    // This is the property that matters, and it is stronger than the four
+    // equalities above: those pin today's spelling, this pins the RELATIONSHIP.
+    // A preview whose argv had drifted from the command it claims to preview
+    // would be worse than no preview -- it would be a confident description of
+    // something else. Asserted rather than left to the composition in
+    // Commands.swift, so inlining that composition cannot silently break it.
+    let pairs: [(String, [String], [String])] = [
+        ("map", Commands.previewMap(button: "middle", action: "back"),
+                Commands.previewMap(button: "middle", action: "back", from: "R")),
+        ("cpi", Commands.previewCpi(stage: 2, x: 400, y: 800),
+                Commands.previewCpi(stage: 2, x: 400, y: 800, from: "R")),
+        ("multiclick",
+                Commands.previewMulticlick(button: "right", mode: "off", value: 3),
+                Commands.previewMulticlick(button: "right", mode: "off", value: 3,
+                                           from: "R")),
+        ("handedness", Commands.previewHandedness("right"),
+                       Commands.previewHandedness("right", from: "R")),
+    ]
+    for (name, device, offline) in pairs {
+        equal(offline, device + ["--from", "R"],
+              "\(name) --from is the device form plus --from, nothing else")
+    }
 
     let readOnly: [[String]] = [
         Commands.diffRecords("a", "b"), Commands.frames(),
         Commands.dryRunField(record: "r", field: "f", value: "v"),
         Commands.encodeField(field: "f", value: "v", from: "i", to: "o"),
         Commands.previewHandedness("left", from: "r"),
+        Commands.previewMap(button: "middle", action: "back", from: "r"),
+        Commands.previewCpi(stage: 1, x: 800, y: nil, from: "r"),
+        Commands.previewMulticlick(button: "left", mode: "off", value: 8,
+                                   from: "r"),
+        Commands.mapMachine(),
         Commands.checkBootloader(), Commands.listDevices(),
         Commands.deviceInfo(), Commands.showSettings(from: "r"),
     ]
@@ -845,6 +939,93 @@ do {
     check(Commands.parseShow("").isEmpty, "empty input parses to an empty result")
     check(Commands.parseShow("total nonsense\nwith no tabs").isEmpty,
           "prose parses to nothing rather than to a guess")
+}
+
+// --------------------------------------------------------------------------
+// `map --machine` -- the button and action tables, ONE parser
+// --------------------------------------------------------------------------
+// This loop lived inside ConfigModel.loadButtons until 2026-09-07, where no
+// test could reach it and where the Advanced screen could not reuse it. A
+// second copy would have been free to disagree with the first about which
+// buttons the CLI accepts, and a GUI offering a choice the tool refuses is the
+// exact defect an audit found on 2026-09-06 -- five of twenty-four menu entries
+// were guaranteed refusals because the app was scraping prose.
+do {
+    let good = [
+        "BUTTON\tleft\t0",
+        "BUTTON\tright\t1",
+        "BUTTON\tmiddle\t1",
+        "ACTION\tback\tmouse\tnone",
+        "ACTION\tfixed-cpi\tcpi\tcpi",
+        "ACTION\tkey\tkeyboard\tkey",
+        "KEY\ta",
+        "KEY\tkp-plus",
+    ].joined(separator: "\n")
+    let t = Commands.parseButtonTables(good)
+    equal(t.buttons, ["right", "middle"],
+          "a button the vendor's page does not offer (flag 0) is dropped -- "
+          + "the CLI refuses `left` and the picker must not present it")
+    equal(t.actions, ["back", "fixed-cpi", "key"], "every ACTION row is kept")
+    equal(t.actionArg["back"], "none", "an action that takes no argument says so")
+    equal(t.actionArg["fixed-cpi"], "cpi", "and one that takes a CPI says that")
+    equal(t.actionArg["key"], "key", "and one that takes a key says that")
+    equal(t.keyNames, ["a", "kp-plus"], "KEY rows are the parser's own table")
+
+    // FALSIFICATION (§6.2). Rows with the wrong column count must be DROPPED,
+    // not half-read: a BUTTON row with no flag column would otherwise decide
+    // whether to offer a button by reading a field that is not there.
+    let junk = [
+        "BUTTON\tright",
+        "BUTTON\tmiddle\t1\textra",
+        "ACTION\tback\tmouse",
+        "KEY",
+    ].joined(separator: "\n")
+    let j = Commands.parseButtonTables(junk)
+    equal(j.buttons.count, 0, "a BUTTON row without its flag column is dropped")
+    equal(j.actions.count, 0, "a short ACTION row is dropped")
+    equal(j.keyNames.count, 0, "a bare KEY row is dropped")
+    check(Commands.parseButtonTables("").buttons.isEmpty,
+          "empty input parses to empty tables")
+
+    // The strings the prose scraper actually offered as bindable actions.
+    // Pinned by name, because "it does not parse prose" is the claim and these
+    // are what proved it once did.
+    let prose = [
+        "Actions:",
+        "  mouse:",
+        "    left-click     00 01",
+        "    fixed-cpi      takes a CPI value 10-30000 in steps of 10,",
+        "                   e.g. fixed-cpi:1600, or fixed-cpi:1600x800",
+        "Keys: a-z, 0-9, f1-f12 and kp0-kp9 are parsed as ranges. The rest are",
+        "named, and this is ALL of them, printed from the same table --machine",
+    ].joined(separator: "\n")
+    let pt = Commands.parseButtonTables(prose)
+    check(pt.buttons.isEmpty && pt.actions.isEmpty && pt.keyNames.isEmpty,
+          "the HUMAN listing parses to nothing at all -- `e.g.`, `for` and "
+          + "`minus` can no longer reach a picker")
+
+    // Against the real tool, because a fixture agreeing with itself proves
+    // nothing about the format the CLI actually prints.
+    let (rc, text) = run("egg-config", Commands.mapMachine())
+    if rc == -1 {
+        print("SKIP: build/egg-config not present; --machine parsed offline only")
+    } else {
+        check(rc == 0, "egg-config map --machine exits 0 with no device", text)
+        let real = Commands.parseButtonTables(text)
+        check(real.buttons.count >= 4,
+              "the real listing yields rebindable buttons",
+              real.buttons.joined(separator: ","))
+        check(!real.buttons.contains("left") && !real.buttons.contains("cpi-button"),
+              "and never the two the CLI refuses",
+              real.buttons.joined(separator: ","))
+        equal(real.actions.count, 19,
+              "all nineteen actions parse -- the set 7.17.1 proved closed")
+        check(real.actionArg["fixed-cpi"] == "cpi" && real.actionArg["key"] == "key",
+              "the two actions that take an argument are both flagged as such")
+        check(real.keyNames.count > 20,
+              "and the key table is populated",
+              String(real.keyNames.count))
+    }
 }
 
 // --------------------------------------------------------------------------

@@ -134,6 +134,12 @@ void usage() {
       "                                    frame that `set F V` -- or `restore`,\n"
       "                                    with no field -- would put on the\n"
       "                                    wire, and the diff against REC.\n"
+      "  <verb> ... --from REC             the same dry run for map, cpi,\n"
+      "                                    multiclick and handedness. Prints\n"
+      "                                    the whole frame and the diff against\n"
+      "                                    REC, opens no device and sends\n"
+      "                                    nothing. --from and --yes together\n"
+      "                                    are refused: a file is not a mouse.\n"
       "\n"
       "  -v                        hex-dump every frame\n"
       "  --vault F                 where the known-good record is kept.\n"
@@ -1121,6 +1127,79 @@ int cmdDryRun(const std::string& recordPath, const std::string& field,
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// The same dry run, for the verbs that write a RUN of record bytes
+// ---------------------------------------------------------------------------
+//
+// §4.3 names dry-run mode as one of the four things that actually protect
+// against a bug in our own code, and `dryrun` delivered it for `set` and
+// `restore` -- the two OLDEST write paths. `map`, `cpi`, `multiclick` and
+// `handedness` are the four NEWEST, they are the ones a person is most likely
+// to get wrong, and until 2026-09-07 not one of them could show you a frame.
+// Their `--yes`-less previews printed the five-to-seven bytes of the run and
+// stopped there, which answers "what would you encode?" but not "what would
+// you SEND?" -- and the difference between those two questions is the whole
+// read-modify-write, i.e. the part §4.1 and §1.3 are about.
+//
+// `map`'s preview could not even show the run honestly: byte +6 is the
+// multiclick filter, it is copied through from the device, so with no record
+// in hand the preview printed `??` for it.
+//
+// So all four now take `--from FILE`, which `handedness` already had, and all
+// four print through here. The device path is untouched -- this function opens
+// nothing and sends nothing, and the verbs refuse `--from` together with
+// `--yes` rather than trying to write from a file.
+//
+// It is deliberately the same output shape as `cmdDryRun`: the gate section,
+// the diff, then the hex. Tests/test_config_replay.py parses that hex for BOTH,
+// so a divergence in wording is a test failure rather than a surprise.
+static int previewRun(const std::vector<std::uint8_t>& before,
+                      const char* recordPath, std::size_t at,
+                      const std::uint8_t* bytes, std::size_t n,
+                      const std::string& what, const char* cite,
+                      UnknownBytes policy) {
+    if (!plausible(before)) {
+        std::printf("%s is not a structurally plausible record. Refusing, for the\n"
+                    "same reason the device path would: a frame built from a bad\n"
+                    "read is exactly what §4.1 forbids.\n", recordPath);
+        return 1;
+    }
+    reportGates(before.data());
+
+    std::vector<std::uint8_t> frame =
+        ConfigSession::buildRunFrame(before, at, bytes, n, policy);
+    if (frame.size() != kLargeLen) {
+        // buildRunFrame returns empty when its own self-check fails -- a byte
+        // moved outside [at, at+n). That is a bug in US, and the right response
+        // offline is the same as on the wire: produce nothing.
+        std::puts("\nno frame was produced. Nothing would be sent.");
+        return 1;
+    }
+
+    std::printf("\n%s   (record 0x%02zx..0x%02zx)\n  derived: %s\n",
+                what.c_str(), at, at + n - 1, cite);
+    std::printf("policy   %s\n", describe(policy));
+    std::printf("frame    report 0x%02x, command 0x%02x, %zu bytes\n",
+                frame[0], frame[kCmdOffset], frame.size());
+
+    const std::vector<ByteChange> d = diff(before, frame);
+    printDiff(d, recordPath, "the frame we would send");
+    if (d.empty())
+        std::puts("  NOTE: nothing moved. The record already holds that.");
+
+    std::puts("\nthe exact bytes, as they would go on the wire:");
+    for (std::size_t i = 0; i < frame.size(); i += 32) {
+        std::printf("  %04zx  ", i);
+        for (std::size_t k = i; k < i + 32 && k < frame.size(); ++k)
+            std::printf("%02x", frame[k]);
+        std::printf("\n");
+    }
+    std::puts("\nNothing was sent. No device was opened.");
+    std::puts("This was decided offline; re-run without --from and with --yes"
+              " to apply it.");
+    return 0;
+}
+
 // A MACHINE-READABLE FORM OF THE SAME TABLES, for the GUI.
 //
 // ADDED 2026-09-06 after an audit found the app's button-mapping picker was
@@ -1277,8 +1356,8 @@ bool parseAction(const std::string& spec, const ButtonAction*& act,
 }
 
 int cmdMap(const std::string& button, const std::string& spec,
-           bool verbose, bool yes, UnknownBytes policy,
-           const std::string& vaultPath) {
+           const std::string& fromFile, bool verbose, bool yes,
+           UnknownBytes policy, const std::string& vaultPath) {
     const ButtonSlot* slot = findButtonSlot(button.c_str());
     if (!slot) {
         std::printf("`%s` is not a button.\n\n", button.c_str());
@@ -1304,6 +1383,27 @@ int cmdMap(const std::string& button, const std::string& spec,
 
     const std::size_t at = kButtonBlockFirst + kButtonEntryLen * slot->index;
 
+    if (!fromFile.empty()) {
+        if (yes) {
+            std::puts("--from is offline only. Re-run without it to write.");
+            return 2;
+        }
+        std::vector<std::uint8_t> before;
+        if (!loadRecord(fromFile, before)) return 2;
+        std::uint8_t entry[kButtonEntryLen];
+        const char* err = nullptr;
+        // The REAL +6 this time, out of the record. That is the whole reason
+        // --from exists here: without a record the preview had to print `??`.
+        if (!encodeButtonEntry(*act, arg, argY, mods,
+                               before[kPayloadOffset + at + 6], entry, &err)) {
+            std::printf("%s\n", err ? err : "cannot encode that");
+            return 2;
+        }
+        return previewRun(before, fromFile.c_str(), at, entry, kButtonEntryLen,
+                          "map " + std::string(slot->name) + " = " + spec,
+                          act->cite, policy);
+    }
+
     if (!yes) {
         std::uint8_t preview[kButtonEntryLen];
         const char* err = nullptr;
@@ -1318,6 +1418,8 @@ int cmdMap(const std::string& button, const std::string& spec,
                     preview[2], preview[3], preview[4], preview[5]);
         std::printf("  +6 is the multiclick filter and is preserved exactly as read.\n");
         std::printf("  derived: %s\n", act->cite);
+        std::puts("  `--from FILE` prints the whole 1041-byte frame instead,\n"
+                  "  with the real +6 out of that record.");
         std::puts("Re-run with --yes.");
         return 2;
     }
@@ -1379,7 +1481,8 @@ void listCpi() {
 }
 
 int cmdCpi(const std::string& stageArg, const std::string& xArg,
-           const std::string& yArg, bool verbose, bool yes,
+           const std::string& yArg, const std::string& fromFile,
+           bool verbose, bool yes,
            UnknownBytes policy, const std::string& vaultPath) {
     char* end = nullptr;
     const long stage = std::strtol(stageArg.c_str(), &end, 10);
@@ -1433,6 +1536,34 @@ int cmdCpi(const std::string& stageArg, const std::string& xArg,
     const std::size_t at =
         kCpiBlockFirst + kCpiEntryLen * static_cast<std::size_t>(stage - 1);
 
+    // The stage-4 note belongs to BOTH offline paths, and it is the one place
+    // in this tool where our bytes may legitimately differ from the vendor's.
+    const bool stage4Deviation = (stage == 4 && x != y);
+
+    if (!fromFile.empty()) {
+        if (yes) {
+            std::puts("--from is offline only. Re-run without it to write.");
+            return 2;
+        }
+        std::vector<std::uint8_t> before;
+        if (!loadRecord(fromFile, before)) return 2;
+        if (stage4Deviation)
+            std::printf("NOTE: for stage 4 ONLY, cfg107 computes this flag from"
+                        " stage 3's boxes\n"
+                        "(0x40edde/0x40ede4, §7.8 -- a vendor bug, and it is"
+                        " [O] since 2026-09-06:\n"
+                        "windows-capture/13-cpi-stage34.pcapng shows it from"
+                        " both ends). We compute it\n"
+                        "from stage 4, so record 0x%02zx below can legitimately"
+                        " differ from what the\nvendor sends.\n", at);
+        char label[64];
+        std::snprintf(label, sizeof label, "cpi %ld = %ld x %ld", stage, x, y);
+        return previewRun(before, fromFile.c_str(), at, entry, kCpiEntryLen,
+                          label,
+                          "config-protocol.md §7.19, cfg107 0x40d880-0x40d93a",
+                          policy);
+    }
+
     if (!yes) {
         std::printf("cpi %ld = %ld x %ld would write record 0x%02zx..0x%02zx:\n",
                     stage, x, y, at, at + kCpiEntryLen - 1);
@@ -1440,7 +1571,7 @@ int cmdCpi(const std::string& stageArg, const std::string& xArg,
                     entry[3], entry[4]);
         std::printf("  [0] is the X!=Y flag, computed: %s\n",
                     entry[0] ? "X and Y differ" : "X and Y are equal");
-        if (stage == 4 && x != y)
+        if (stage4Deviation)
             std::puts("  NOTE: for stage 4 ONLY, cfg107 computes this flag from"
                       " stage 3's boxes\n"
                       "  (0x40edde/0x40ede4, §7.8 -- a vendor bug). We compute it"
@@ -1580,6 +1711,12 @@ int cmdHandedness(const std::string& want, const std::string& fromFile,
     }
     if (!changed) {
         std::printf("Already %s-handed. Nothing to write.\n", want.c_str());
+        // The other three verbs reach previewRun even when the diff is empty,
+        // so they always say where the answer came from. This branch returns
+        // before that, and without the line a --from run and a device run print
+        // the identical sentence -- one of which read the mouse.
+        if (!fromFile.empty())
+            std::puts("Nothing was sent. No device was opened.");
         return 0;
     }
 
@@ -1597,10 +1734,19 @@ int cmdHandedness(const std::string& want, const std::string& fromFile,
                   "  direction instead; we swap both ways so a filter you set\n"
                   "  deliberately is not silently overwritten.");
         std::puts("  derived: config-protocol.md §7.20, cfg107 0x408b00");
-        std::puts(fromFile.empty() ? "Re-run with --yes."
-                                   : "This was decided offline; re-run without"
-                                     " --from and with --yes to apply it.");
-        return 2;
+        if (fromFile.empty()) {
+            std::puts("Re-run with --yes.");
+            return 2;
+        }
+        // With a record in hand, print the WHOLE frame, the same way `map`,
+        // `cpi` and `multiclick` do. Handedness has had --from since it was
+        // written and still only showed the two entries; a reader could not
+        // see that nothing else moved, which is the assertion that matters.
+        return previewRun(before, fromFile.c_str(), kButtonBlockFirst, out,
+                          2 * kButtonEntryLen,
+                          "handedness " + std::string(handednessName(now))
+                              + " -> " + want,
+                          "config-protocol.md §7.20, cfg107 0x408b00", policy);
     }
     if (!fromFile.empty()) {
         std::puts("--from is offline only. Re-run without it to write.");
@@ -1648,7 +1794,8 @@ void listMulticlick() {
 }
 
 int cmdMulticlick(const std::string& buttonArg, const std::string& mode,
-                  const std::string& valueArg, bool verbose, bool yes,
+                  const std::string& valueArg, const std::string& fromFile,
+                  bool verbose, bool yes,
                   UnknownBytes policy, const std::string& vaultPath) {
     std::size_t button = kMulticlickCount;
     for (std::size_t i = 0; i < kMulticlickCount; ++i)
@@ -1676,6 +1823,23 @@ int cmdMulticlick(const std::string& buttonArg, const std::string& mode,
         return 2;
     }
     const std::size_t at = kMulticlickFirst + kMulticlickStride * button;
+
+    if (!fromFile.empty()) {
+        if (yes) {
+            std::puts("--from is offline only. Re-run without it to write.");
+            return 2;
+        }
+        std::vector<std::uint8_t> before;
+        if (!loadRecord(fromFile, before)) return 2;
+        const std::string suffix =
+            (mode == "off") ? (" " + std::to_string(value)) : std::string();
+        return previewRun(before, fromFile.c_str(), at, &byte, 1,
+                          "multiclick " + std::string(kMulticlickButtons[button])
+                              + " " + mode + suffix,
+                          "config-protocol.md §7.22, cfg107 0x405f84 /"
+                          " 0x406645 / 0x406653",
+                          policy);
+    }
 
     if (!yes) {
         // The suffix is built into a NAMED string first. Writing
@@ -1914,7 +2078,7 @@ int main(int argc, char** argv) {
     if (cmd == "encode" && args.size() == 5)
         return cmdEncode(args[1], args[2], args[3], args[4], policy);
     if (cmd == "map" && args.size() > 2)
-        return cmdMap(args[1], args[2], verbose, yes, policy, vaultPath);
+        return cmdMap(args[1], args[2], fromFile, verbose, yes, policy, vaultPath);
     if (cmd == "map") {
         if (args.size() >= 2 && args[1] == "--machine") { listButtonsMachine(); return 0; }
         listButtons();
@@ -1922,7 +2086,7 @@ int main(int argc, char** argv) {
     }
     if (cmd == "cpi" && args.size() > 2)
         return cmdCpi(args[1], args[2], args.size() > 3 ? args[3] : std::string(),
-                      verbose, yes, policy, vaultPath);
+                      fromFile, verbose, yes, policy, vaultPath);
     if (cmd == "cpi") { listCpi(); return 2; }
     if (cmd == "handedness" && args.size() > 1)
         return cmdHandedness(args[1], fromFile, verbose, yes, policy, vaultPath);
@@ -1930,7 +2094,7 @@ int main(int argc, char** argv) {
     if (cmd == "multiclick" && args.size() > 2)
         return cmdMulticlick(args[1], args[2],
                              args.size() > 3 ? args[3] : std::string(),
-                             verbose, yes, policy, vaultPath);
+                             fromFile, verbose, yes, policy, vaultPath);
     if (cmd == "multiclick") { listMulticlick(); return 2; }
     if (cmd == "set") { listSettable(); return 2; }
     usage();

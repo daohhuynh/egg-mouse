@@ -29,6 +29,9 @@ RESET = os.path.join(ROOT, "windows-run", "07-factory-reset.pcapng")
 FLASH = os.path.join(ROOT, "windows-run", "08-flash.pcapng")
 BIN = os.path.join(ROOT, "build", "egg-config")
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_handedness import every_capture      # noqa: E402  -- both capture dirs
+
 
 def vendor_out_frames(path):
     """Host-to-device HID feature reports, in order.
@@ -154,12 +157,19 @@ class Delays(unittest.TestCase):
         self.delays = our_delays()
 
     def observed(self, opcode):
-        """min SET->next-GET gap for this opcode over every capture."""
+        """min SET->next-GET gap for this opcode over every capture.
+
+        BOTH capture directories since 2026-09-07. This swept `windows-run/`
+        only, so the seven firmware-1.10 captures -- which are the ONLY vendor
+        traffic we have from the firmware currently on the mouse -- could not
+        lower a single one of these bounds. The direction of the miss is the bad
+        one: this test passes when our delay is >= the vendor's shortest
+        observed gap, so evidence it cannot see can only make us look safer
+        than we are.
+        """
         gaps = []
-        for name in sorted(os.listdir(os.path.join(ROOT, "windows-run"))):
-            if not name.endswith(".pcapng"):
-                continue
-            ev = timed_frames(os.path.join(ROOT, "windows-run", name))
+        for directory, name in every_capture():
+            ev = timed_frames(os.path.join(directory, name))
             for i, e in enumerate(ev):
                 if e[0] != "SET" or e[3] != opcode:
                     continue
@@ -170,6 +180,20 @@ class Delays(unittest.TestCase):
                     if ev[j][0] == "SET":
                         break
         return gaps
+
+    def test_both_capture_runs_contribute_samples(self):
+        """A directory that contributes nothing is indistinguishable from one
+        that is not being read, and that is precisely how this test spent a day
+        blind to `windows-capture/`."""
+        per_dir = {}
+        for directory, name in every_capture():
+            ev = timed_frames(os.path.join(directory, name))
+            n = sum(1 for e in ev if e[0] == "SET")
+            per_dir[os.path.basename(directory)] = \
+                per_dir.get(os.path.basename(directory), 0) + n
+        for d in ("windows-run", "windows-capture"):
+            self.assertGreater(per_dir.get(d, 0), 0,
+                               "%s contributed no SET frames: %r" % (d, per_dir))
 
     def test_every_delay_is_no_shorter_than_the_vendor_waited(self):
         """The safe direction is slower. A delay shorter than the vendor's puts

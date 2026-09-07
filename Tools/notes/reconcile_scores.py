@@ -201,6 +201,34 @@ def main():
         problems.append("a second tally is written into the prose at %r. Counts "
                         "live in the table only." % stray.group(0))
 
+    # ---- 5. NO PRE-REGISTRATION FILE GOES UNCOUNTED ------------------------
+    # Checks 2-4 all start from what the scoreboard already names, so every one
+    # of them was satisfied while three device runs were missing from the file
+    # entirely -- including the two that hold this project's only device-run
+    # REFUTATIONS. The tally was internally consistent and the denominator was
+    # 3 where it should have been 6, which is the worst shape a scoreboard can
+    # have: it read as a clean sheet BECAUSE the misses were absent.
+    #
+    # So this check starts from the DIRECTORY instead. A prediction file either
+    # gets an entry here, or gets declared UNSCORED here with a reason. Never
+    # neither. Found 2026-09-07.
+    for name in sorted(os.listdir(os.path.join(ROOT, "notes"))):
+        if not name.startswith("prediction-") or not name.endswith(".md"):
+            continue
+        rel = "notes/" + name
+        if rel == "notes/prediction-scores.md":
+            continue
+        if rel in files:
+            continue
+        if re.search(r"^\|\s*`%s`\s*\|\s*UNSCORED:" % re.escape(rel),
+                     sc, re.M):
+            continue
+        problems.append(
+            "`%s` exists and is neither scored in prediction-scores.md nor "
+            "declared there as `| `%s` | UNSCORED: <why> |`. A pre-registration "
+            "that nothing counts cannot lower the tally, only raise it."
+            % (rel, rel))
+
     if problems:
         print("\nNOT RECONCILED:")
         for p in problems:

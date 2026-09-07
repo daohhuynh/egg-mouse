@@ -50,9 +50,30 @@ def tree_with(edits):
         dst = os.path.join(d, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy(os.path.join(ROOT, rel), dst)
-    # The tool checks that own-file scorings name a file that exists.
-    for f in ("prediction-factory-reset.md", "prediction-restore.md",
-              "prediction-read-firmware.md"):
+    # The tool checks own-file scorings BOTH WAYS: every file the scoreboard
+    # names must exist, and every notes/prediction-*.md must be scored or
+    # declared UNSCORED. So the temp tree has to carry the same SET of those
+    # files the real tree does.
+    #
+    # This was a hardcoded list of three names until 2026-09-07, and it broke
+    # the moment three more device runs were scored -- the tool correctly said
+    # they named files that did not exist, and it was the HARNESS that was
+    # wrong. Exactly the drift this suite exists to catch, one directory over:
+    # a list written once beside the thing it is supposed to track.
+    #
+    # Mirrored from the real tree rather than derived from the scoreboard,
+    # deliberately. Building the filesystem out of the scoreboard's own claims
+    # would make the check that compares them circular, and it would pass on a
+    # scoreboard naming a file nobody ever wrote.
+    #
+    # Contents do not matter -- the tool checks existence, never text -- so
+    # placeholders keep the temp tree small and make it obvious that no
+    # prediction content is being read here.
+    mirrored = [f for f in sorted(os.listdir(os.path.join(ROOT, "notes")))
+                if f.startswith("prediction-") and f.endswith(".md")
+                and f != "prediction-scores.md"]
+    assert mirrored, "no notes/prediction-*.md found to mirror"
+    for f in mirrored:
         open(os.path.join(d, "notes", f), "w").write("placeholder\n")
     for rel, subs in edits.items():
         p = os.path.join(d, rel)
@@ -156,6 +177,43 @@ def main():
         {SCORES: [("`notes/prediction-restore.md` stage A",
                    "`notes/prediction-restore-v2.md` stage A")]},
         ["that file does not exist"])
+
+    # 9. THE SAME CHECK FROM THE OTHER SIDE, and it is the one that matters
+    #    most. Checks 1-8 all start from what the scoreboard already names, so
+    #    every one of them was satisfied on 2026-09-06 while THREE scored device
+    #    runs were missing from the file entirely -- including the two holding
+    #    this project's only device-run REFUTATIONS. The tally was internally
+    #    consistent and the denominator was 3 where it should have been 6.
+    #
+    #    That is the worst shape a scoreboard can have: it read as a clean sheet
+    #    BECAUSE the misses were absent. So the tool now starts from the
+    #    DIRECTORY, and this plants a pre-registration that nothing counts.
+    d = tree_with({})
+    try:
+        open(os.path.join(d, "notes", "prediction-zzz-unscored.md"),
+             "w").write("a pre-registration nothing counts\n")
+        rc, out = run_in(d)
+        ok("a pre-registration file that the scoreboard never mentions",
+           rc != 0 and "prediction-zzz-unscored.md" in out,
+           "rc=%d\n%s" % (rc, out))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    # 10. ...and that an UNSCORED declaration is accepted, so the check above
+    #     is a requirement to account for a file rather than to score it. A
+    #     guard with no legitimate escape gets worked around instead of used.
+    d = tree_with({})
+    try:
+        open(os.path.join(d, "notes", "prediction-zzz-unscored.md"),
+             "w").write("a pre-registration nothing counts\n")
+        s2 = open(os.path.join(d, SCORES)).read()
+        s2 += ("\n| `notes/prediction-zzz-unscored.md` | UNSCORED: the run it "
+               "pre-registers has not happened |\n")
+        open(os.path.join(d, SCORES), "w").write(s2)
+        rc, out = run_in(d)
+        ok("...and declaring it UNSCORED is accepted", rc == 0, out)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
     print("\n%s (%d failure%s)" % ("FAILED" if FAILS else "all passed",
                                    len(FAILS), "" if len(FAILS) == 1 else "s"))

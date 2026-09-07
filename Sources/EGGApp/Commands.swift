@@ -232,10 +232,47 @@ enum Commands {
         ["encode", field, value, input, output]
     }
 
+    // THE OFFLINE FORMS OF THE FOUR RUN VERBS.
+    //
+    // `map`, `cpi`, `multiclick` and `handedness` write a contiguous RUN of
+    // record bytes rather than one field, and until 2026-09-07 none of them
+    // could show a frame without a mouse attached -- `dryrun` covers `set` and
+    // `restore` only. `--from FILE` gives all four the dry run §4.3 asks for:
+    // the whole 1041 bytes, the diff against the record, no device opened.
+    //
+    // EACH ONE IS THE DEVICE FORM PLUS TWO ARGUMENTS, deliberately, rather
+    // than a second argv spelled out here. A duplicate list would be free to
+    // drift from the form that actually reaches the mouse, and the point of
+    // the preview is that it shows you THAT command. The CLI refuses `--from`
+    // together with `--yes`, per verb, so the offline form cannot become a
+    // write by having a flag appended to it.
+    static func previewMap(button: String, action: String,
+                           from path: String) -> [String] {
+        previewMap(button: button, action: action) + ["--from", path]
+    }
+
+    static func previewCpi(stage: Int, x: Int, y: Int?,
+                           from path: String) -> [String] {
+        previewCpi(stage: stage, x: x, y: y) + ["--from", path]
+    }
+
+    static func previewMulticlick(button: String, mode: String, value: Int?,
+                                  from path: String) -> [String] {
+        previewMulticlick(button: button, mode: mode, value: value)
+            + ["--from", path]
+    }
+
     /// `handedness SIDE --from FILE` -- the offline plan, nothing on the wire.
     static func previewHandedness(_ side: String, from path: String) -> [String] {
-        ["handedness", side, "--from", path]
+        previewHandedness(side) + ["--from", path]
     }
+
+    /// `map --machine`. An interface between our own two programs: the tables
+    /// one record per line, so the app never parses prose. Named here rather
+    /// than written inline at the call site because an argument list nobody
+    /// can see is an argument list no test checks -- this one was a literal in
+    /// ConfigView until 2026-09-07.
+    static func mapMachine() -> [String] { ["map", "--machine"] }
 
     /// `-v` on either tool. It is a LOGGING flag and nothing else: both CLIs
     /// parse it into `Log` and no code path branches on it, so the byte stream
@@ -533,6 +570,44 @@ enum Commands {
         if !current.isEmpty { a += ["--backup", current] }
         if buttonEntered { a.append("--i-know-this-is-button-entered") }
         return a
+    }
+
+    // ----------------------------------------------- the button/action tables
+
+    /// What `map --machine` says. ONE parser, because two would be free to
+    /// disagree about which buttons the CLI will accept -- and a GUI offering
+    /// a choice the tool refuses is the exact defect an audit found on
+    /// 2026-09-06, when the picker was scraping the human listing and offering
+    /// `e.g.`, `for`, `minus`, `grave` and `pagedown` as bindable actions.
+    struct ButtonTables {
+        /// Only the buttons the vendor's own page offers a row for. `left` and
+        /// `cpi-button` are excluded because the CLI refuses them on purpose:
+        /// a mouse with no left click cannot be un-configured, and the CPI
+        /// button is how you get back.
+        var buttons: [String] = []
+        var actions: [String] = []
+        /// Action name -> the argument it needs: "cpi", "key", or "none".
+        var actionArg: [String: String] = [:]
+        var keyNames: [String] = []
+    }
+
+    static func parseButtonTables(_ text: String) -> ButtonTables {
+        var t = ButtonTables()
+        for line in text.split(separator: "\n") {
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+                        .map(String.init)
+            switch (f.first, f.count) {
+            case ("BUTTON", 3):
+                if f[2] == "1" { t.buttons.append(f[1]) }
+            case ("ACTION", 4):
+                t.actions.append(f[1]); t.actionArg[f[1]] = f[3]
+            case ("KEY", 2):
+                t.keyNames.append(f[1])
+            default:
+                continue
+            }
+        }
+        return t
     }
 
     // ------------------------------------------------------------------ parse

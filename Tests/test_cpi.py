@@ -15,7 +15,7 @@ This checks both without trusting the notes:
   2. The trackbar path is recovered separately, from `0x40c2f0`. Two derivations
      that must agree; if they ever disagree, ONE of them is a misreading and
      neither may be trusted (§1.2b: never rule anything out from one view).
-  3. Every A0 11 write and every large read in `windows-run` is decoded as four
+  3. Every A0 11 write and every large read in BOTH capture runs is decoded as four
      CPI stages, and every X and Y the vendor ever put on the wire must be a
      value our encoder would accept. That is the check that cannot be faked by
      transcribing the same function twice.
@@ -265,11 +265,16 @@ def captured_cpi_blocks():
     it, so the rule needs no filename and stays right if captures are added.
     """
     import usbpcap
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_handedness import every_capture
     seen = set()
-    for name in sorted(os.listdir(CAPTURES)):
-        if not name.endswith(".pcapng"):
-            continue
-        tr = usbpcap.control_transfers(usbpcap.read(os.path.join(CAPTURES, name)))
+    # BOTH capture runs (2026-09-07). This swept windows-run only, so the two
+    # captures that exist BECAUSE of CPI -- 13-cpi-stage34 and 14-fixed-cpi, the
+    # first X != Y stages ever written -- were outside the one check that says
+    # the vendor never wrote a value our normaliser would refuse.
+    for directory, name in every_capture():
+        tr = usbpcap.control_transfers(
+            usbpcap.read(os.path.join(directory, name)))
         asked = False
         for t in tr:
             d = bytes(t.data or b"")
@@ -282,10 +287,15 @@ def captured_cpi_blocks():
                 asked = False
             if not take:
                 continue
-            for k in range(CPI_STAGES):
-                o = PAYLOAD + CPI_FIRST + CPI_LEN * k
-                seen.add((name, k, d[o:o + CPI_LEN]))
+            stages = tuple(d[PAYLOAD + CPI_FIRST + CPI_LEN * k:
+                             PAYLOAD + CPI_FIRST + CPI_LEN * (k + 1)]
+                           for k in range(CPI_STAGES))
+            seen.add((name, stages))
     return seen
+
+
+def xy(entry):
+    return (entry[1] | (entry[2] << 8), entry[3] | (entry[4] << 8))
 
 
 @unittest.skipUnless(os.path.isdir(CAPTURES), "captures not present")
@@ -300,45 +310,109 @@ class TheVendorNeverWroteAValueWeWouldRefuse(unittest.TestCase):
     def test_there_is_something_to_check(self):
         self.assertGreaterEqual(len(self.blocks), 4)
 
+    def test_both_capture_runs_are_in_the_corpus(self):
+        """Until 2026-09-07 this class swept windows-run only -- so the two
+        captures that exist BECAUSE of CPI, `13-cpi-stage34` and `14-fixed-cpi`,
+        were outside the one check that says the vendor never wrote a value our
+        normaliser would refuse."""
+        names = {n for n, _ in self.blocks}
+        self.assertTrue(any(n.startswith(("13-", "14-")) for n in names),
+                        "the firmware-1.10 CPI captures are not in the corpus: "
+                        + ", ".join(sorted(names)))
+
     def test_no_flash_capture_was_mistaken_for_a_settings_record(self):
         """The bug this class shipped with, pinned so it cannot come back."""
         # Named, not substring-matched: `10-postflash-baseline` is a config
         # capture and belongs in the set. Only these two carry A0 06/A0 07.
         bad = {"08-flash.pcapng", "09-flash-again.pcapng"}
-        got = sorted({n for n, _, _ in self.blocks} & bad)
+        got = sorted({n for n, _ in self.blocks} & bad)
         self.assertEqual([], got, "firmware blocks decoded as CPI: %s" % got)
 
     def test_every_captured_cpi_is_on_our_grid(self):
         bad = []
-        for name, k, e in sorted(self.blocks):
-            x = e[1] | (e[2] << 8)
-            y = e[3] | (e[4] << 8)
-            for v in (x, y):
-                if v != normalise(v):
-                    bad.append("%s stage %d: %d" % (name, k + 1, v))
+        for name, stages in sorted(self.blocks):
+            for k, e in enumerate(stages):
+                for v in xy(e):
+                    if v != normalise(v):
+                        bad.append("%s stage %d: %d" % (name, k + 1, v))
         self.assertEqual([], bad, "CPI values the vendor wrote and we refuse: "
                          + ", ".join(bad))
 
-    def test_the_flag_byte_is_x_differs_from_y_in_every_capture(self):
+    def test_stages_one_to_three_carry_their_own_x_differs_from_y_flag(self):
         bad = []
-        for name, k, e in sorted(self.blocks):
-            x = e[1] | (e[2] << 8)
-            y = e[3] | (e[4] << 8)
-            if bool(e[0]) != (x != y):
-                bad.append("%s stage %d: flag %d, x=%d y=%d"
-                           % (name, k + 1, e[0], x, y))
+        for name, stages in sorted(self.blocks):
+            for k, e in enumerate(stages[:3]):
+                x, y = xy(e)
+                if bool(e[0]) != (x != y):
+                    bad.append("%s stage %d: flag %d, x=%d y=%d"
+                               % (name, k + 1, e[0], x, y))
         self.assertEqual([], bad, "; ".join(bad))
 
+    def test_stage_four_carries_STAGE_THREES_flag_because_the_vendor_is_buggy(self):
+        """§7.8 derived it from cfg107 `0x40edde`; §8.1 observed it twice.
+
+        The vendor's collect pass computes stage 4's `X != Y` flag from STAGE
+        THREE's edit boxes -- a copy-paste bug in their own code. So the rule
+        that holds for stages 1-3 is FALSE for stage 4, and asserting it there
+        is what made this class fail the moment it was widened to see the
+        firmware-1.10 captures (2026-09-07).
+
+        Written as a positive assertion rather than an exemption. `[D]` and
+        `[O]` both say stage 4's flag tracks stage 3, so that is what is
+        checked -- and if a future firmware ever fixed the bug, this fails and
+        says so, which an exemption could not do.
+        """
+        bad = []
+        for name, stages in sorted(self.blocks):
+            s3x, s3y = xy(stages[2])
+            flag = stages[3][0]
+            if bool(flag) != (s3x != s3y):
+                x4, y4 = xy(stages[3])
+                bad.append("%s: stage 4 flag %d, but stage 3 is %d/%d "
+                           "(stage 4 itself is %d/%d)"
+                           % (name, flag, s3x, s3y, x4, y4))
+        self.assertEqual([], bad, "; ".join(bad))
+
+    def test_the_bug_is_actually_exercised_by_the_corpus(self):
+        """Otherwise the test above is satisfied by every record in which
+        stages 3 and 4 happen to agree, and proves nothing."""
+        witnesses = [name for name, stages in sorted(self.blocks)
+                     if bool(stages[3][0]) != (xy(stages[3])[0]
+                                               != xy(stages[3])[1])]
+        self.assertTrue(
+            witnesses,
+            "no captured record has a stage-4 flag that disagrees with stage "
+            "4's own X/Y, so the check above cannot tell the vendor's rule "
+            "from ours")
+
     def test_we_reproduce_every_captured_block_byte_for_byte(self):
+        """Stages 1-3 exactly. Stage 4 exactly EXCEPT the flag, where the
+        vendor's value is their bug and ours is the correct one.
+
+        §8.1's consequence, restated as code: `0x32` is not a field we compute
+        from stage 4. `cpi` writes what the stage says and a read-modify-write
+        preserves whatever the vendor left, which is why the difference below
+        is expected and is allowed for that byte and no other.
+        """
         missing = []
-        for name, k, e in sorted(self.blocks):
-            x = e[1] | (e[2] << 8)
-            y = e[3] | (e[4] << 8)
-            ours = tool_bytes(k + 1, x, y if y != x else None)
-            if ours is None or bytes(ours) != e:
+        for name, stages in sorted(self.blocks):
+            for k, e in enumerate(stages):
+                x, y = xy(e)
+                ours = tool_bytes(k + 1, x, y if y != x else None)
+                if ours is None:
+                    missing.append("%s stage %d: refused" % (name, k + 1))
+                    continue
+                ours = bytes(ours)
+                if ours == e:
+                    continue
+                if k == 3 and ours[1:] == e[1:]:
+                    # The §8.1 flag, and only that byte. Assert the shape so a
+                    # genuine encoder drift cannot hide here: our flag must be
+                    # the correct one for stage 4's own values.
+                    if bool(ours[0]) == (x != y):
+                        continue
                 missing.append("%s stage %d: vendor %s, ours %s"
-                               % (name, k + 1, e.hex(),
-                                  bytes(ours).hex() if ours else "refused"))
+                               % (name, k + 1, e.hex(), ours.hex()))
         self.assertEqual([], missing, "; ".join(missing))
 
 

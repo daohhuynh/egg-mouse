@@ -158,31 +158,19 @@ final class ConfigModel: ObservableObject {
         // record per line with a leading keyword, and anything unrecognised is
         // ignored -- so a wording change in the human listing can no longer
         // reach this code.
-        guard let r = try? await runner.run("egg-config", ["map", "--machine"])
+        // The PARSE lives in Commands.parseButtonTables. It was inline here
+        // until 2026-09-07, when the Advanced screen needed the same tables
+        // for its offline previews -- and a second copy of this loop would
+        // have been free to disagree with this one about which buttons the
+        // CLI accepts, which is the same class of defect as the prose
+        // scraping it replaced.
+        guard let r = try? await runner.run("egg-config", Commands.mapMachine())
         else { return }
-        var b: [String] = [], a: [String] = [], k: [String] = []
-        var arg: [String: String] = [:]
-        for line in r.text.split(separator: "\n") {
-            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
-                        .map(String.init)
-            switch (f.first, f.count) {
-            case ("BUTTON", 3):
-                // f[2] == "1" means the vendor's own page offers a row for it.
-                // `left` and `cpi-button` are 0 and the CLI refuses them, so
-                // showing them would be presenting a choice that cannot work.
-                if f[2] == "1" { b.append(f[1]) }
-            case ("ACTION", 4):
-                a.append(f[1]); arg[f[1]] = f[3]
-            case ("KEY", 2):
-                k.append(f[1])
-            default:
-                continue
-            }
-        }
-        buttons = b
-        actions = a
-        actionArg = arg
-        keyNames = k
+        let t = Commands.parseButtonTables(r.text)
+        buttons = t.buttons
+        actions = t.actions
+        actionArg = t.actionArg
+        keyNames = t.keyNames
     }
 }
 

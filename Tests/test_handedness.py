@@ -18,6 +18,7 @@ button, applying twice, byte +6). A test that cannot fail for the right reason
 has to say so out loud.
 """
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -28,6 +29,25 @@ sys.path.insert(0, os.path.join(ROOT, "Tools", "capture"))
 EGGCONFIG = os.path.join(ROOT, "build", "egg-config")
 CAPTURES = os.path.join(ROOT, "windows-run")
 
+# BOTH capture runs. windows-run/ is the firmware-1.07 session; windows-capture/
+# is the 1.10 one taken 2026-09-06. Tools/capture/whatmoved.py was widened to
+# read both in fca893a and the ctest gates were not, so the 26 settings records
+# that cover CPI stages 3/4, FIXED CPI with X != Y, the MEDIA actions and the
+# key set sat outside every automated check (found 2026-09-07).
+CAPTURE_DIRS = [os.path.join(ROOT, d) for d in ("windows-run", "windows-capture")]
+
+
+def every_capture():
+    """(directory, filename) for every .pcapng in the repo, in a stable order."""
+    out = []
+    for d in CAPTURE_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if name.endswith(".pcapng"):
+                out.append((d, name))
+    return out
+
 PAYLOAD = 16
 LARGE = 0x411
 BLOCK = 0x37
@@ -35,14 +55,18 @@ ENTRY = 7
 MULTICLICK = [0x3D, 0x44, 0x4B, 0x52, 0x59]
 
 
-def records(name):
+def records(name, directory=None):
     """Every settings record in a capture, in order.
 
     Structural selection, the same rule Tests/test_cpi.py uses: a large GET is a
     settings record only when the SET before it was `A1 12`. Writes are `A0 11`.
+
+    `directory` defaults to windows-run so existing callers are unchanged; the
+    corpus-wide gates pass it explicitly.
     """
     import usbpcap
-    tr = usbpcap.control_transfers(usbpcap.read(os.path.join(CAPTURES, name)))
+    tr = usbpcap.control_transfers(
+        usbpcap.read(os.path.join(directory or CAPTURES, name)))
     out, asked = [], False
     for t in tr:
         d = bytes(t.data or b"")
@@ -108,8 +132,131 @@ class ScoredAgainstTheVendorsOwnLeftHandedRecord(unittest.TestCase):
         save(self.before, self.tmp)
         got, out, rc = plan(self.tmp, "left")
         self.assertIsNotNone(got, out)
-        self.assertEqual(2, rc, "a dry run must not report success")
+        self.assertEqual(0, rc, out)
         self.assertEqual(block(self.after).hex(), got.hex())
+        self.assertIn("Nothing was sent. No device was opened.", out)
+
+    def test_the_exit_code_distinguishes_a_preview_from_a_refusal(self):
+        """`--from` exits 0. A verb with NEITHER --from nor --yes exits 2.
+
+        THIS CHANGED ON 2026-09-07 and the change was deliberate, so the
+        reasoning is here rather than in a commit message. This test asserted
+        `2` with the message "a dry run must not report success", which was a
+        fair instinct and the wrong code, for three reasons:
+
+        1. **2 is a PROMPT.** Everywhere else in this tool it means "I did not
+           do it, and you probably meant me to -- re-run with --yes." There is
+           no --yes form of `--from`: the CLI refuses the two together, per
+           verb. So the sentence 2 exists to say is not true here.
+        2. **The other purely-offline verbs already exit 0.** `dryrun` and
+           `encode` both do, and `--from` is the same kind of thing: a complete
+           operation that did exactly what was asked and touched no device.
+        3. **It collapsed a success onto a failure.** A bad button name also
+           exits 2. With `--from` exiting 2 as well, nothing -- not a script,
+           not the GUI, whose ToolResult.ok is `status == 0` -- could tell "here
+           is your frame" from "your arguments were wrong."
+
+        Pinned in BOTH directions, because the point is the distinction and a
+        test of one half would let the other drift into agreeing with it.
+        """
+        save(self.before, self.tmp)
+
+        # --from, valid: a completed offline operation.
+        r = subprocess.run([EGGCONFIG, "handedness", "left", "--from", self.tmp],
+                           capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+        # --from, INVALID argument: still a refusal, and distinguishable.
+        r = subprocess.run([EGGCONFIG, "handedness", "sideways", "--from", self.tmp],
+                           capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(2, r.returncode,
+                         "a bad argument must not look like a good preview")
+
+        # --from together with --yes: refused, per verb. Every one of these
+        # carries --from, so none of them can reach a device.
+        for argv in (["handedness", "left"],
+                     ["map", "middle", "browser"],
+                     ["cpi", "2", "800"],
+                     ["multiclick", "left", "off", "8"]):
+            r = subprocess.run([EGGCONFIG] + argv + ["--from", self.tmp, "--yes"],
+                               capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(2, r.returncode, " ".join(argv))
+            self.assertIn("--from is offline only", r.stdout + r.stderr)
+
+        # ...and WITHOUT --from and without --yes: still the prompt, still 2.
+        #
+        # `handedness` IS DELIBERATELY NOT IN THIS LIST, and the reason is the
+        # point rather than an inconvenience. Its preview OPENS THE DEVICE AND
+        # READS IT: §7.20 makes handedness a MOVE between button entries rather
+        # than a flag, so the tool cannot say what it would write without
+        # knowing what is there. `egg-config handedness left` therefore puts an
+        # A1 12 on the wire, and a test that runs it is a test that talks to the
+        # mouse. This suite must never do that -- CLAUDE.md §4.2a: the question
+        # "what does this answer, and can it be answered without touching the
+        # device?" has an answer here, and the answer is the three verbs below.
+        #
+        # (Found the honest way, 2026-09-07: the first version of this test DID
+        # include handedness, and it exited 1 -- Device::open found no openable
+        # interface and returned before any frame, so nothing went out. It was a
+        # near miss, not a hit, and the fix is structural rather than a promise
+        # to remember.)
+        for argv in (["map", "middle", "browser"],
+                     ["cpi", "2", "800"],
+                     ["multiclick", "left", "off", "8"]):
+            r = subprocess.run([EGGCONFIG] + argv,
+                               capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(2, r.returncode,
+                             "%s with no --yes must stay a prompt" % " ".join(argv))
+            self.assertNotIn("Nothing was sent", r.stdout,
+                             "the bare preview is the SHORT one; the whole-frame "
+                             "form is what --from is for")
+
+    def test_all_four_run_verbs_preview_offline_and_send_nothing(self):
+        """The §4.3 dry run, for the four verbs that write a RUN of bytes.
+
+        Each must print a whole 1041-byte frame from a file. `dryrun` cannot
+        express any of them -- it takes a FIELD and a value -- so before
+        2026-09-07 the four newest write paths, the ones most likely to be got
+        wrong, were the four with no way to show what they would send.
+        """
+        save(self.before, self.tmp)
+        # `left`, not `right`: self.before IS right-handed, so `right` is a
+        # no-op that returns before the frame is ever built. That case is worth
+        # asserting too, and it is -- separately, below.
+        for argv in (["handedness", "left"],
+                     ["map", "middle", "browser"],
+                     ["cpi", "3", "1200", "2400"],
+                     ["multiclick", "left", "off", "12"]):
+            with self.subTest(verb=" ".join(argv)):
+                r = subprocess.run([EGGCONFIG] + argv + ["--from", self.tmp],
+                                   capture_output=True, text=True, cwd=ROOT)
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertIn("Nothing was sent. No device was opened.", r.stdout)
+                hexlines = [l for l in r.stdout.splitlines()
+                            if re.match(r"^  [0-9a-f]{4}  [0-9a-f]+$", l)]
+                self.assertEqual(33, len(hexlines),
+                                 "expected the whole 1041-byte frame, got %d "
+                                 "hex lines" % len(hexlines))
+                body = "".join(l.split()[1] for l in hexlines)
+                self.assertEqual(0x411 * 2, len(body))
+                self.assertTrue(body.startswith("a011"),
+                                "the frame must carry report 0xa0, command 0x11")
+
+    def test_an_offline_no_op_still_says_it_was_offline(self):
+        """A --from run that changes nothing must not read like a device run.
+
+        `handedness right` on a record that is already right-handed returns
+        before any frame is built, so it never reaches the shared preview. The
+        sentence it prints on its own is true of BOTH paths, and only one of
+        them left the mouse alone.
+        """
+        save(self.before, self.tmp)
+        r = subprocess.run([EGGCONFIG, "handedness", "right", "--from", self.tmp],
+                           capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Already right-handed", r.stdout)
+        self.assertIn("Nothing was sent. No device was opened.", r.stdout)
+        self.assertNotIn("  0000  ", r.stdout, "a no-op prints no frame")
 
     def test_the_vendor_moved_exactly_two_bytes_and_so_do_we(self):
         """`0x38` and `0x3f` -- the `+1` mask of each entry.
@@ -183,10 +330,8 @@ class TheMulticlickAndSpdtBytesAreOBSERVED(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.seen = {k: [] for k in range(len(MULTICLICK))}
-        for name in sorted(os.listdir(CAPTURES)):
-            if not name.endswith(".pcapng"):
-                continue
-            for f in records(name):
+        for directory, name in every_capture():      # both runs, 2026-09-07
+            for f in records(name, directory):
                 for k, at in enumerate(MULTICLICK):
                     cls.seen[k].append(f[PAYLOAD + at])
 

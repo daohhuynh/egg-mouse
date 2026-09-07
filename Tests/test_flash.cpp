@@ -11,6 +11,7 @@
 // nothing.
 #include "egg/BootloaderEntry.h"
 #include "egg/FlashCommands.h"
+#include "egg/FirmwareManifest.h"
 #include "egg/FlashPlan.h"
 #include "egg/Firmware.h"
 #include "egg/HidBootloaderLink.h"
@@ -22,6 +23,7 @@
 
 #include <unistd.h>
 
+#include <concepts>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -31,6 +33,27 @@ using namespace egg;
 using namespace egg::fw;
 
 static int failures = 0;
+
+// THE DELETED OVERLOAD, and it belongs here as much as in test_config.cpp.
+//
+// `ok("...", []{ return x == y; })` compiles against the `bool` overload -- a
+// lambda converts to `true` -- so the assertion is never evaluated and the test
+// prints PASS having checked nothing. That happened for real in test_config.cpp,
+// where ctest was green while all ten CPI mutants SURVIVED, and only
+// Tests/mutants.sh caught it.
+//
+// The guard was then added to test_config.cpp ALONE. This file is the one that
+// drives the erase, and it had no protection against the identical mistake for
+// two days: `ok("no write before preflight", []{...})` would have printed PASS
+// over the single most consequential invariant in the project. Added 2026-09-07.
+//
+// A template constrained on callability is a better match than `bool` for
+// anything callable, and being `= delete` makes the mistake a compile error
+// rather than something a later mutation run has to notice.
+template <class F>
+    requires requires(F f) { { f() } -> std::convertible_to<bool>; }
+void ok(const char* what, F fn, const std::string& detail = "") = delete;
+
 static void ok(const char* what, bool cond, const std::string& detail = "") {
     std::printf("  %s  %s%s%s\n", cond ? "PASS" : "FAIL", what,
                 detail.empty() ? "" : "  --  ", detail.c_str());
@@ -1914,6 +1937,105 @@ static void testNoQuitDuringWrite() {
     }());
 }
 
+// ---------------------------------------------------------------------------
+// The release manifest
+// ---------------------------------------------------------------------------
+// FirmwareManifest.cpp had no mutants until 2026-09-07, and the reason it could
+// not have any is worth recording: `Tests/mutants.sh` grades everything outside
+// EGGConfigCore with `test-flash`, and `test-flash` never named the manifest.
+// Its only checks were in `Tests/test_manifest.py`, which parses the SOURCE
+// rather than running it -- so no mutation of the LOOKUP functions could ever
+// have been caught, however wrong.
+//
+// That matters more than the usual coverage argument. `releaseForUpdaterSha`
+// is the function that decides WHICH firmware image is about to be written to
+// the one mouse there is, from the hash of a file a person handed us. §2:
+// "nothing downstream of us catches a wrong-but-well-formed image."
+static void testManifest() {
+    std::printf("\nFirmwareManifest\n");
+
+    ok("there is at least one release", kReleaseCount >= 1);
+
+    // Exactly one row may claim to have been flashed, and it must be first,
+    // because primaryRelease() is kReleases[0] and the flash defaults to it.
+    std::size_t proven = 0, provenIdx = kReleaseCount;
+    for (std::size_t i = 0; i < kReleaseCount; ++i)
+        if (kReleases[i].provenOnDevice) { ++proven; if (provenIdx == kReleaseCount) provenIdx = i; }
+    ok("exactly one release is proven on the device", proven == 1,
+       "found " + std::to_string(proven));
+    ok("and it is the one primaryRelease() returns", provenIdx == 0);
+    ok("primaryRelease() is kReleases[0]",
+       &primaryRelease() == &kReleases[0]);
+    ok("the primary release is the proven one",
+       primaryRelease().provenOnDevice);
+
+    // The primary row must agree with the compile-time constants the narrow
+    // single-release loader uses. Two places state the same fact; if they ever
+    // disagree, `flash` and `flash --version 1.10` would write different bytes.
+    ok("the primary image sha matches kExpectedSha256",
+       std::string(primaryRelease().imageSha256) == kExpectedSha256);
+    ok("the primary resource id matches kResourceName",
+       primaryRelease().resourceId == kResourceName);
+    ok("the primary image size matches kExpectedImageSize",
+       primaryRelease().imageSize == kExpectedImageSize);
+
+    // Labels are exact. `findRelease` has no fuzzy match and no default.
+    ok("findRelease finds the primary by its own label",
+       findRelease(primaryRelease().label) == &primaryRelease());
+    ok("findRelease refuses a label that is not a row",
+       findRelease("1.99") == nullptr);
+    ok("findRelease refuses a PREFIX of a real label",
+       findRelease("1.1") == nullptr);
+    ok("findRelease refuses null", findRelease(nullptr) == nullptr);
+
+    // Hashes are exact too, case-insensitively on the hex. A prefix match here
+    // would be a way to select a release with a short string.
+    {
+        const std::string sha = primaryRelease().updaterSha256;
+        ok("releaseForUpdaterSha finds the primary",
+           releaseForUpdaterSha(sha) == &primaryRelease());
+
+        std::string upper = sha;
+        for (char& c : upper)
+            if (c >= 'a' && c <= 'f') c = static_cast<char>(c - 'a' + 'A');
+        ok("...and is case-insensitive on the hex",
+           releaseForUpdaterSha(upper) == &primaryRelease());
+        ok("...but the uppercase form really was different", upper != sha);
+
+        ok("a 63-character prefix selects nothing",
+           releaseForUpdaterSha(sha.substr(0, 63)) == nullptr);
+        ok("an over-long hash selects nothing",
+           releaseForUpdaterSha(sha + "0") == nullptr);
+        ok("an empty hash selects nothing",
+           releaseForUpdaterSha("") == nullptr);
+
+        std::string flipped = sha;
+        flipped[63] = (flipped[63] == '0') ? '1' : '0';
+        ok("one different hex digit selects nothing",
+           releaseForUpdaterSha(flipped) == nullptr);
+    }
+
+    // Every row is distinct in the two fields that select it, and every row is
+    // structurally what the flasher requires. A duplicate hash would make
+    // selection depend on table ORDER, which nothing states.
+    bool distinctSha = true, distinctLabel = true, wellFormed = true;
+    for (std::size_t i = 0; i < kReleaseCount; ++i) {
+        if (std::string(kReleases[i].updaterSha256).size() != 64) wellFormed = false;
+        if (std::string(kReleases[i].imageSha256).size() != 64)   wellFormed = false;
+        if (kReleases[i].imageSize != kExpectedImageSize)         wellFormed = false;
+        if (kReleases[i].imageSize % kBlockSize != 0)             wellFormed = false;
+        for (std::size_t j = i + 1; j < kReleaseCount; ++j) {
+            if (std::string(kReleases[i].updaterSha256) == kReleases[j].updaterSha256)
+                distinctSha = false;
+            if (std::string(kReleases[i].label) == kReleases[j].label)
+                distinctLabel = false;
+        }
+    }
+    ok("no two releases share an updater hash", distinctSha);
+    ok("no two releases share a label", distinctLabel);
+    ok("every row is 65 whole blocks with two 64-hex hashes", wellFormed);
+}
+
 int main() {
     std::printf("EGGFlashCore\n");
     testByteMaps();
@@ -1932,6 +2054,7 @@ int main() {
     testLinkPolicy();
     testWriteProgress();
     testNoQuitDuringWrite();
+    testManifest();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

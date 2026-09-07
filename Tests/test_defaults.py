@@ -249,21 +249,46 @@ class OnlyNamedBytesEverMove(unittest.TestCase):
     def setUpClass(cls):
         import collections
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from test_handedness import records as recs
+        from test_handedness import records as recs, every_capture
         cls.vals = collections.defaultdict(set)
         cls.n = 0
-        for name in sorted(os.listdir(CAPTURES)):
-            if not name.endswith(".pcapng"):
-                continue
-            for f in recs(name):
+        cls.per_dir = collections.Counter()
+        # EVERY capture in the repo, not just windows-run. This gate's own
+        # docstring calls itself the standing check on new captures, and until
+        # 2026-09-07 it could not see windows-capture/ at all -- so dropping a
+        # new capture into that directory would not have failed ctest, which is
+        # the one thing the gate exists to do.
+        for directory, name in every_capture():
+            for f in recs(name, directory):
                 cls.n += 1
+                cls.per_dir[os.path.basename(directory)] += 1
                 for r in range(0x73):
                     cls.vals[r].add(f[PAYLOAD + r])
 
     NAMED = {0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x70, 0x71, 0x72}
 
     def test_the_corpus_is_the_whole_corpus(self):
-        self.assertEqual(82, self.n, "expected 82 settings records")
+        """Both capture runs must contribute, and the corpus must not shrink.
+
+        This used to be `assertEqual(82, ...)`, a number that described
+        windows-run alone. A floor plus a per-directory check is the right shape
+        for a gate whose whole purpose is that ADDING a capture is noticed: a
+        new file raises the total and must not break the test, while a lost
+        capture or a directory that stopped being read still fails.
+        """
+        for d in ("windows-run", "windows-capture"):
+            self.assertGreater(
+                self.per_dir[d], 0,
+                "%s contributed no settings records. Either the directory is "
+                "gone or this gate has stopped reading it -- both make the "
+                "checks below vacuous for that run. Got: %s"
+                % (d, dict(self.per_dir)))
+        self.assertGreaterEqual(
+            self.n, 108,
+            "the corpus was 108 settings records on 2026-09-07 (82 in "
+            "windows-run, 26 in windows-capture) and is now %d. Regenerate "
+            "with `python3 Tools/capture/whatmoved.py | head -1`, which counts "
+            "the same way." % self.n)
 
     def test_every_byte_that_moved_is_named_cpi_or_button(self):
         stray = []
