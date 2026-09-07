@@ -1,18 +1,38 @@
 #!/bin/sh
-# Refuse a commit that leaves an analysis tool unparseable.
+# Refuse any commit that stages a planted mutation-test marker.
 #
-# Why this exists: commit 3602d95, titled "validate classify.py before relying
-# on it", committed classify.py with a syntax error (a corrected docstring
-# pasted above the stale one, delimiters colliding). It did not parse for a
-# day. Numbers derived from it went into notes/ and were then quoted rather
-# than regenerated, and nobody could re-run the tool to check them.
-# CLAUDE.md 6 says regenerate numbers, never quote them -- which is impossible
-# if the generator is broken. This makes that failure loud at commit time.
-set -e
-fail=0
-for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true); do
-  [ -f "$f" ] || continue
-  python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" || {
-    echo "pre-commit: $f does not parse" >&2; fail=1; }
-done
-exit $fail
+# WHY THIS EXISTS. Twice on 2026-09-06 a `// MUTANT` reached a commit -- once
+# into the FLASH WRITE PHASE, an unbounded A1 09 retry in the one path CLAUDE.md
+# §4.2 says must never spin without reporting an unrecoverable state. Both times
+# the cause was `git add -A` while `Tests/mutants.sh` was running: it plants a
+# mutant, builds, tests, restores, and anything staged mid-cycle catches one.
+#
+# working-memory.md had already recorded the hazard in prose, twice, and prose
+# did not prevent the second one. CLAUDE.md §6.2's rule applies to the committer
+# as much as to a reader: when the actor is unreliable, make the property
+# decidable without trusting it. Hence a hook rather than another reminder.
+#
+# ctest's `tree_clean` runs the same check, but only when someone runs ctest --
+# which is after the commit. This runs before, which is the point.
+#
+# Enable (once per clone):  git config core.hooksPath .githooks
+staged=$(git diff --cached --name-only --diff-filter=ACM -- 'Sources/*' 'Tests/*.cpp' 'Tests/*.swift')
+[ -z "$staged" ] && exit 0
+
+hits=$(git diff --cached -U0 -- $staged | grep -n '^+.*// MUTANT')
+if [ -n "$hits" ]; then
+    echo "REFUSED: this commit stages a planted mutant."
+    echo
+    echo "$hits"
+    echo
+    echo "Tests/mutants.sh is probably running. Check:  pgrep -f mutants.sh"
+    echo "  If it IS running   -- WAIT. Its EXIT trap restores every file."
+    echo "  If it is NOT       -- restore ONLY the listed files from the last"
+    echo "                        clean commit, e.g."
+    echo "                          git checkout <clean-rev> -- <file>"
+    echo
+    echo "NEVER 'git checkout -- Sources/': mutants.sh backs up to a mktemp dir"
+    echo "that dies with it, so a blanket revert also destroys uncommitted work."
+    exit 1
+fi
+exit 0
