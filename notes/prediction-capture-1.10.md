@@ -271,7 +271,7 @@ values.
 | 2 | Keypad + (SHIFT auto-ticked) | **see below — two live outcomes** |
 | 3 | F5 with WIN ticked | `08 3e` |
 | 4 | Print Screen | `00 46` |
-| 5 | Scroll Lock | `00 47` |
+| 5 | Num Lock (**optional**, skip if absent) | `00 53` |
 
 Step 1 doubles as the check that a modifier pressed AS a key is distinct from a
 modifier ticked as a checkbox: `+1` must be `00` here, not `02`.
@@ -299,11 +299,21 @@ Two outcomes, and they are distinguishable:
 A third possibility to watch for: the owner is on a laptop, and if its numpad is an
 `Fn` overlay the hardware itself may have sent Shift+`=`. That is indistinguishable
 from the second outcome in the bytes alone, so **`02 2e` is not by itself proof
-the dialog is character-driven.** Step 5 is what separates them.
+the dialog is character-driven.**
 
-**Step 5 exists to break that tie.** Scroll Lock emits no character in any layout,
-so no character path and no overlay can produce it. `00 47` confirms the jump
-table is live for a non-character key regardless of what step 2 did.
+**Step 4 breaks that tie and was already in the list.** Print Screen emits no
+character in any layout, so `00 46` shows the dialog can read a key that types
+nothing -- which means a `+` re-expressed as Shift+`=` was re-expressed *because a
+`+` can be typed another way*, not because the dialog cannot read keys at all.
+I added a Scroll Lock step for this and withdrew it: step 4 already covers it and
+The owner's laptop has no Scroll Lock key.
+
+**Step 5 (Num Lock) is optional and nothing rests on it.** It is the one key on
+the numeric keypad that types no character, so it would separate "the keypad is
+unreadable" from "character-producing keys get re-expressed". Worth a click if
+the key exists, but even a `02 2e` plus a missing step 5 leaves nothing we would
+do differently: our `kp-*` names stay `[D]`-correct from the jump table either
+way, and the only casualty is a parity claim about the vendor UI.
 
 ### §7 `17-restore.pcapng`
 
