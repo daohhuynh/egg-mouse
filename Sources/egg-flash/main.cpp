@@ -219,6 +219,11 @@ static int usage() {
         "a LEFT+RIGHT button entry -- PID, bcdDevice and product string are\n"
         "identical either way.\n"
         "\n"
+        "  --i-know-my-firmware-is-unseen    flash a mouse whose firmware is not\n"
+        "                                    1.07 or 1.10, the only two ever seen\n"
+        "  --i-accept-losing-my-settings     flash with no settings undo. Only\n"
+        "                                    for a mouse already latched, where\n"
+        "                                    `egg-config read` can no longer run\n"
         "  --i-know-this-is-button-entered   flash a bootloader this tool did not\n"
         "                                    enter. Deliberately not --yes.\n"
         "\n"
@@ -292,6 +297,10 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
           "\n"
           "That is recoverable, not a brick, and it is the cost of this command.\n"
           "\n"
+          "BEFORE THIS: `flash` refuses without a settings undo, and after A1 3A\n"
+          "you cannot make one (`egg-config read` needs application mode). Run\n"
+          "`egg-config read` first. --yes refuses here if it is missing.\n"
+          "\n"
           "Re-run with --yes.\n");
 
         // Show the preflight rather than only describing it. Same predicate the
@@ -313,6 +322,45 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
         else
             std::printf("  -> NOT ready: --yes would refuse and send nothing.\n");
         return 2;
+    }
+
+    // §4.2b: "do everything that can fail BEFORE sending A1 3A."
+    //
+    // This gate is that rule applied to the one failure that used to arrive too
+    // late to act on. `flash` refuses without a settings undo (the A1 13 gate
+    // below), and the only way to create one is `egg-config read`, which opens
+    // PID 0x1978. After A1 3A the mouse is 0x1977, so the instruction the
+    // refusal prints cannot be carried out: `egg-config read` cannot see the
+    // device, `leave-bootloader` does not clear the latch [O], and the two verbs
+    // that would clear it are the two the gate blocks. A first-time user
+    // following the documented order reached a mouse that could not be
+    // recovered by any command this tool offers.
+    //
+    // It was invisible during development because ~/.egg-mouse-known-good.bin
+    // has existed on this machine since the first read. It hit every stranger on
+    // their first run. So refuse HERE, while the mouse is still a mouse and the
+    // fix is one command away.
+    if (!egg::cfg::FileRecordVault(defaultVaultPath()).holds()) {
+        std::printf(
+          "REFUSED: there is no settings undo, and after this command you could\n"
+          "not create one.\n"
+          "\n"
+          "A flash ends with A1 13, which is byte-for-byte the config tool\x27s\n"
+          "Factory Reset, so `flash` requires a saved settings record before it\n"
+          "will run. That record is written by `egg-config read`, which needs\n"
+          "the mouse in application mode (PID 0x%04x). This command puts it in\n"
+          "the bootloader (PID 0x%04x) and the flag survives power loss, so from\n"
+          "here `egg-config read` cannot see the mouse at all.\n"
+          "\n"
+          "Run this first, then come back:\n"
+          "  egg-config read\n"
+          "\n"
+          "It saves a known-good record to\n"
+          "  %s\n"
+          "and never overwrites it. NOTHING WAS SENT.\n",
+          egg::kProductIdApplication, egg::kProductIdBootloader,
+          defaultVaultPath().c_str());
+        return 1;
     }
 
     egg::Log log(verbose);
@@ -789,6 +837,39 @@ static bool checkBackup(const std::string& path, const Image& img) {
         std::printf("           identical to the image about to be written: this\n"
                     "           is a re-flash of what is already there. The vendor\n"
                     "           does this too (capture 09-flash-again).\n");
+
+    // A COPY YOU CANNOT PUT BACK IS NOT AN UNDO, AND THIS SAYS SO.
+    //
+    // The size-and-variety check above is everything 4.2 asks of a backup: it is
+    // the right length and it is not a failed read. It is NOT enough to make the
+    // file restorable. `restore-firmware` requires the <image>.origin sidecar
+    // that `read-firmware` writes, and refuses an image without one, so a stale
+    // or hand-made 66560-byte file passes here and is rejected later, at the one
+    // moment it was being kept for. The GUI makes that easy to hit: its default
+    // backup path is a fixed name in ~/Documents, and the flash gate only asks
+    // whether that path exists.
+    //
+    // WARN RATHER THAN REFUSE, deliberately. `read-firmware` needs the
+    // bootloader, so a backup can only be taken once the mouse is already
+    // latched; refusing here would strand exactly the person holding a backup
+    // and no sidecar, which is the same dead end 4.2b's own gate created before
+    // 2026-09-08. A loud warning costs them nothing and tells them the truth.
+    const egg::fw::Provenance pv = egg::fw::readProvenance(path);
+    if (!pv.ok) {
+        std::printf("\n*** THIS BACKUP IS NOT RESTORABLE BY THIS TOOL ***\n"
+                    "           %s\n"
+                    "           It satisfies 4.2 as a copy (right size, not a\n"
+                    "           failed read), but `restore-firmware` requires the\n"
+                    "           %s.origin sidecar that `read-firmware` writes,\n"
+                    "           and will refuse this file. If the flash goes\n"
+                    "           wrong you would have no undo. Taking a fresh\n"
+                    "           backup with `read-firmware` costs one read and\n"
+                    "           sends no write.\n",
+                    pv.reason.c_str(), path.c_str());
+    } else {
+        std::printf("           restorable: sidecar present, firmware 0x%04x %s\n",
+                    pv.bcdDevice, pv.product.c_str());
+    }
     return true;
 }
 
@@ -811,7 +892,8 @@ static bool checkBackup(const std::string& path, const Image& img) {
 // the entry-receipt gate below.
 static int cmdFlash(const Image& img, const std::string& vaultPath,
                     const std::string& confirmArg, const std::string& backupPath,
-                    bool verbose, bool restoring, bool allowButtonEntry) {
+                    bool verbose, bool restoring, bool allowButtonEntry,
+                    bool acceptSettingsLoss, bool allowUnseenFirmware) {
     const std::string token = confirmToken(img);
     const char* const verbName = restoring ? "restore-firmware" : "flash";
 
@@ -895,11 +977,32 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     // A1 13 is in the plan, so this flash WILL reset settings. §4.2's "never
     // erase without a saved copy" is not specific to firmware: refuse rather
     // than warn. reportSettingsUndo already prints where to get one.
-    if (!reportSettingsUndo(vaultPath)) {
+    if (!reportSettingsUndo(vaultPath) && !acceptSettingsLoss) {
         std::printf("\nREFUSED: this flash ends with A1 13 (factory reset) and\n"
                     "there is no settings undo. Run `egg-config read` first.\n"
-                    "NOTHING WAS SENT.\n");
+                    "NOTHING WAS SENT.\n"
+                    "\n"
+                    "IF THE MOUSE IS ALREADY IN THE BOOTLOADER, that instruction\n"
+                    "cannot be followed: `egg-config read` needs application mode\n"
+                    "(PID 0x%04x) and A1 3A does not wear off. `enter-bootloader`\n"
+                    "now refuses without an undo so nobody else arrives here, but\n"
+                    "that does not help a mouse already latched. For that case\n"
+                    "only:\n"
+                    "\n"
+                    "  --i-accept-losing-my-settings\n"
+                    "\n"
+                    "It proceeds with the flash and lets A1 13 take the settings\n"
+                    "back to the device's own defaults. That is a real loss and it\n"
+                    "is not undoable, but it is recoverable: a mouse with default\n"
+                    "settings is a working mouse, and a latched one is not.\n"
+                    "Deliberately not --yes, which gets typed by reflex.\n",
+                    egg::kProductIdApplication);
         return 1;
+    }
+    if (!reportSettingsUndo(vaultPath) && acceptSettingsLoss) {
+        std::printf("\noverride   --i-accept-losing-my-settings given. A1 13 will\n"
+                    "           reset this mouse's settings and there is no saved\n"
+                    "           copy to put back.\n");
     }
 
     if (!checkBackup(backupPath, img)) {
@@ -960,6 +1063,59 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
 
     const bool fromApp  = (app == 1 && boot == 0);
     const bool fromBoot = (app == 0 && boot == 1);
+
+    // THE APPLICATION SIDE GETS AN IDENTITY CHECK TOO.
+    //
+    // The comment below says fromApp "gets a full identity check for free"
+    // because enterBootloaderAndConfirm verifies PID + bcdDevice + product. That
+    // is true and it is about the BOOTLOADER, after entry. Nothing ever looked
+    // at what firmware was about to be ERASED. A mouse on 1.11 or 1.05 got A1
+    // 3A, then A0 03, then 1.10 written over it, with no evidence anywhere that
+    // this build had ever seen that device -- while the fromBoot path three
+    // lines down refuses an unrecognised bootloader outright. That asymmetry was
+    // a gap, not a policy (found 2026-09-08).
+    //
+    // Off-wire: this reads only what enumeration already returned, so it adds no
+    // frame (4.2's rule that a safety measure changing the byte stream is not
+    // free). It is before A1 3A, so refusing here leaves nothing latched.
+    if (fromApp) {
+        std::uint16_t appRel = 0;
+        for (const auto& d : seen0)
+            if (d.productId == egg::kProductIdApplication &&
+                d.usagePage == egg::kUsagePageVendor)
+                appRel = d.releaseNumber;
+
+        std::printf("  application firmware: 0x%04x (%s)\n",
+                    appRel, versionOrRaw(appRel).c_str());
+
+        if (!egg::isObservedAppRelease(appRel) && !allowUnseenFirmware) {
+            std::printf(
+              "\nREFUSED: this mouse reports firmware 0x%04x (%s), which this\n"
+              "project has never seen.\n"
+              "\n"
+              "Every protocol fact in this tool came off ONE mouse, on firmware\n"
+              "1.07 and 1.10. engineering-rules.md 5: a third version is a\n"
+              "different device until shown otherwise. The erase sequence, the\n"
+              "block layout and the settings record are all measurements from\n"
+              "those two versions, and none of them has been checked against\n"
+              "yours.\n"
+              "\n"
+              "NOTHING WAS SENT, and nothing is latched.\n"
+              "\n"
+              "If you have read the above and want to proceed anyway:\n"
+              "  --i-know-my-firmware-is-unseen\n"
+              "Deliberately not --yes. You would be the first person to run this\n"
+              "against your firmware, and the recovery it relies on (LEFT+RIGHT\n"
+              "on plug-in) has itself never been tested on a broken image.\n",
+              appRel, versionOrRaw(appRel).c_str());
+            return 1;
+        }
+        if (!egg::isObservedAppRelease(appRel) && allowUnseenFirmware)
+            std::printf("\noverride   --i-know-my-firmware-is-unseen given. 0x%04x is\n"
+                        "           not 1.07 or 1.10 and nothing here has been tested\n"
+                        "           against it.\n", appRel);
+    }
+
     if (!fromApp && !fromBoot) {
         std::printf("  -> NOT ready: need exactly one mouse, in exactly one mode.\n"
                     "     NOTHING WAS SENT.\n");
@@ -1331,6 +1487,8 @@ int main(int argc, char** argv) {
     bool yes = false, verbose = false, checkOnly = false;
     bool acceptUnproven = false;
     bool allowButtonEntry = false;
+    bool acceptSettingsLoss = false;
+    bool allowUnseenFirmware = false;
     int n = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -1347,6 +1505,12 @@ int main(int argc, char** argv) {
         // be typed in full every time, and it says what it is agreeing to.
         // Not folded into --yes, for §4.2c's reason -- --yes is typed by
         // reflex and a second meaning attached to it is approved by reflex too.
+        if (a == "--i-know-my-firmware-is-unseen") {
+            allowUnseenFirmware = true; continue;
+        }
+        if (a == "--i-accept-losing-my-settings") {
+            acceptSettingsLoss = true; continue;
+        }
         if (a == "--i-know-this-is-button-entered") {
             allowButtonEntry = true; continue;
         }
@@ -1438,7 +1602,8 @@ int main(int argc, char** argv) {
                         primaryRelease().label);
         reportSettingsUndo(vaultPath);
         return cmdFlash(rimg, vaultPath, confirmArg, backupPath, verbose,
-                        /*restoring=*/true, allowButtonEntry);
+                        /*restoring=*/true, allowButtonEntry,
+                        acceptSettingsLoss, allowUnseenFirmware);
     }
 
     if (n < 2) return usage();
@@ -1525,7 +1690,8 @@ int main(int argc, char** argv) {
         // refuse against a file the user never named or, worse, silently accept
         // an unrelated file that happened to be sitting there.
         return cmdFlash(img, vaultPath, confirmArg, backupPath, verbose,
-                        /*restoring=*/false, allowButtonEntry);
+                        /*restoring=*/false, allowButtonEntry,
+                        acceptSettingsLoss, allowUnseenFirmware);
     }
 
     // "stream" prints every frame in full, one per line, so the whole outbound

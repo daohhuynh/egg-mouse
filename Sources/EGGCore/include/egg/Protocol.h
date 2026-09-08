@@ -48,6 +48,22 @@ inline constexpr std::uint16_t kProductIdBootloader  = 0x1977;
 // §4.2: "if the bootloader reports a version or an identity of any kind, refuse
 // anything unrecognised." All three are checked, not just the PID.
 inline constexpr std::uint16_t kBootloaderRelease = 0x0006;
+
+// THE APPLICATION FIRMWARE VERSIONS THIS PROJECT HAS ACTUALLY SEEN, as
+// bcdDevice. engineering-rules.md 5: every [O] fact here spans 1.07 and 1.10 on
+// ONE mouse, and "a third version is a different device until shown otherwise".
+//
+// The bootloader side has always been checked against kBootloaderRelease before
+// an erase. The application side was checked for nothing but a 16-bit product
+// id, so a mouse on an unseen firmware was erased and overwritten with no
+// evidence that this build had ever met that device. Found 2026-09-08.
+inline constexpr std::uint16_t kObservedAppReleases[] = { 0x0107, 0x0110 };
+
+inline constexpr bool isObservedAppRelease(std::uint16_t bcd) {
+    for (std::uint16_t r : kObservedAppReleases)
+        if (r == bcd) return true;
+    return false;
+}
 inline constexpr const char*   kBootloaderProduct = "Bootloader";
 
 // The vendor collection, and the reason this is not optional.
@@ -312,7 +328,19 @@ inline constexpr const char* kButtonEntrySteps =
 inline constexpr const char* kButtonEntryReflashNote =
     "It can be re-flashed from there -- with --i-know-this-is-button-entered,\n"
     "because the buttons are not an A1 3A entry and egg-flash refuses a\n"
-    "bootloader it did not enter itself (engineering-rules.md 4.2b). The bootloader is\n"
-    "forced by hardware and does not depend on any firmware being valid.";
+    "bootloader it did not enter itself (engineering-rules.md 4.2b).\n"
+    "\n"
+    "[O] the button entry itself: three trials, bootloader enumerates directly.\n"
+    "[O] the buttons do NOT clear an A1 3A latch. Held on plug-in with the mouse\n"
+    "    already software-latched, nothing changes. A completed flash is the\n"
+    "    only observed way out (notes/bootloader-observed.md 5c).\n"
+    "[O] the bootloader is visible without a host: the DPI light underneath\n"
+    "    blinks green, at a shade and interval no CPI stage uses. To tell a\n"
+    "    latched bootloader from a button-entered one, replug holding nothing --\n"
+    "    still in the bootloader means latched.\n"
+    "[G] that the buttons still work with the application blank or partial (every\n"
+    "    trial was on a healthy device), and [G] that a button-entered bootloader\n"
+    "    accepts a write (nothing has ever been sent to one). Strongly plausible,\n"
+    "    not observed -- notes/bootloader-observed.md 6.";
 
 }  // namespace egg

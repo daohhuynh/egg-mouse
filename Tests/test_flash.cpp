@@ -1951,6 +1951,41 @@ static void testNoQuitDuringWrite() {
 // is the function that decides WHICH firmware image is about to be written to
 // the one mouse there is, from the hash of a file a person handed us. §2:
 // "nothing downstream of us catches a wrong-but-well-formed image."
+// THE APPLICATION-SIDE FIRMWARE GATE (added 2026-09-08).
+//
+// The bootloader has always been checked against kBootloaderRelease before an
+// erase; the application side was checked for nothing but a 16-bit product id,
+// so a mouse on a firmware nobody has seen was erased and overwritten anyway.
+// engineering-rules.md 5: a third version is a different device until shown
+// otherwise.
+//
+// Positive controls first, deliberately: a predicate that answered false to
+// everything would pass a test that only fed it unknown versions, and that is
+// the shape of vacuous check this project has shipped before.
+static void testObservedAppReleases() {
+    ok("1.10 is recognised: it is the firmware on the one mouse",
+       egg::isObservedAppRelease(0x0110), "0x0110");
+    ok("1.07 is recognised: everything observed before 2026-09-05 came off it",
+       egg::isObservedAppRelease(0x0107), "0x0107");
+
+    ok("a LATER unseen version is refused", !egg::isObservedAppRelease(0x0111),
+       "0x0111");
+    ok("an EARLIER unseen version is refused", !egg::isObservedAppRelease(0x0106),
+       "0x0106");
+    ok("zero is refused, which is what a failed enumeration leaves behind",
+       !egg::isObservedAppRelease(0x0000), "0x0000");
+    ok("the BOOTLOADER's own release is not an application release",
+       !egg::isObservedAppRelease(egg::kBootloaderRelease), "0x0006");
+
+    // The set is exactly two. engineering-rules.md 1.2a: "the set is exactly N"
+    // is a claim about everywhere you did not look, so pin it rather than
+    // assert it in prose, and a third entry has to fail here and be justified.
+    std::size_t n = 0;
+    for (std::uint16_t r : egg::kObservedAppReleases) { (void)r; ++n; }
+    ok("the observed set is exactly the two versions the derivation used",
+       n == 2, std::to_string(n));
+}
+
 static void testManifest() {
     std::printf("\nFirmwareManifest\n");
 
@@ -2055,6 +2090,7 @@ int main() {
     testWriteProgress();
     testNoQuitDuringWrite();
     testManifest();
+    testObservedAppReleases();
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",
                 failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
