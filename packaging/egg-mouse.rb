@@ -82,7 +82,9 @@ class EggMouse < Formula
 
       If your mouse ever stops responding: hold LEFT and RIGHT together, plug
       the cable in while still holding, keep holding a few seconds, release.
-      It comes back as a re-flashable bootloader.
+      That has reached the bootloader every time it has been tried, but every
+      trial was on a healthy mouse and nothing has ever been written to a
+      bootloader reached that way. Both limits are in the README.
     EOS
   end
 
