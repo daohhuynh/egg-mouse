@@ -50,6 +50,15 @@ class EggMouse < Formula
     prefix.install "EGG Mouse.app"
 
     bin.install "build/egg-config", "build/egg-flash"
+
+    # hidapi is compiled into these binaries and is BSD-3-Clause, which
+    # requires its notice and disclaimer to accompany a binary redistribution.
+    # Homebrew installs LICENSE, NOTICE and README.md on its own; it does not
+    # know about this one, and the installed NOTICE explicitly points at it.
+    (prefix/"third_party/hidapi").install \
+      "third_party/hidapi/LICENSE-bsd.txt",
+      "third_party/hidapi/AUTHORS.txt",
+      "third_party/hidapi/README.md"
   end
 
   def caveats
