@@ -603,8 +603,8 @@ project rather than general preference:
 
 It is permissive, so nothing about it binds anyone — including this project,
 which is deliberately kept free of copyleft obligations it has not accepted
-(see `engineering-rules.md` §1.1 for why the two existing community projects are
-quarantined rather than borrowed from).
+(see `engineering-rules.md` §1.1: every fact here was derived from the vendor's
+own binaries and captures, and no other implementation was read).
 
 The licence governs **this code**. It says nothing about whether deriving the
 protocol was permissible, which is untouched either way, and it does not make
