@@ -383,10 +383,73 @@ mistake about the project's own history, where it is easier to make because the
 history feels like something you would remember. Date a claim from a file's
 timestamp, never from recollection of what happened when.
 
+## 5c. The bootloader has a VISIBLE tell, and a button entry does not clear a software latch [O]
+
+2026-09-08, off the physical mouse.
+
+**The tell.** In bootloader mode the DPI/CPI indicator LED underneath blinks
+*green*, at a shade and a blink interval that no CPI stage uses. It is
+distinguishable by eye from every normal running state, with no host, no
+enumeration and no software involved.
+
+This is the first indicator of bootloader state that does not require a USB
+stack. Everything in §2, §5a and §5b was read off enumeration; this can be read
+off the mouse while it is plugged into a charger, a phone, or a machine with no
+tools installed at all.
+
+**The second half, and it is the one that changes advice.** With the mouse
+already in a SOFTWARE-entered (`A1 3A`) bootloader, performing the hardware
+button entry -- LEFT+RIGHT held while plugging in -- **changes nothing**. The LED
+signature is unchanged, and the mouse stays in the bootloader across the replug.
+The software latch is not overridden by the hardware path.
+
+So the button entry is **not an escape** from a software-entered bootloader. It
+is an entry mechanism, and you are already in. §5a's "a power cycle exits it"
+describes a bootloader entered BY THE BUTTONS and does not generalise: §5b showed
+the software latch survives a plain power cycle, and this shows it also survives
+a power cycle *with the buttons held*, which was the remaining way someone might
+reasonably have expected to get out.
+
+**Operational consequence, and it is the whole of it: once `A1 3A` has been sent,
+a completed flash is the only observed way back.** Not a replug, not `A1 09`
+(§5b), and not the buttons. This is exactly what engineering-rules.md §4.2b
+already assumed, and it was an assumption until now.
+
+**What this still does NOT establish**, kept here so §6 stays the only place that
+matters is not the only place it is said:
+
+- It says nothing about a device whose application region is blank or partial.
+  The mouse was healthy throughout; only the entry mechanism was being tested.
+- It says nothing about whether the LED distinguishes the two ENTRIES from each
+  other. What was observed is one bootloader signature, reached both ways. A
+  human can tell "in the bootloader" from "not in the bootloader"; nothing
+  reported here lets them tell "latched" from "not latched", and that is the
+  distinction that decides whether a replug will help.
+
+**THE DISCRIMINATOR IS THE REPLUG, not the light.** This supersedes an
+LED-timing comparison first drafted here, which was a worse answer to the same
+question:
+
+1. The LED says **in the bootloader / not in the bootloader**.
+2. Unplug and replug, holding nothing. **Still in the bootloader** means a
+   software latch, and only a completed flash clears it. **Back to a working
+   mouse** means it was a button entry, and nothing is wrong.
+
+That is the whole test. It needs no host, no tools and no enumeration; it is a
+physical action, so by §4.2a gate 3 it cannot latch, cannot misfire and needs no
+undo; and it is non-destructive in both outcomes, because the replug is exactly
+what exits a button entry (§5a) and provably does nothing to a software one
+(§5b). It is also self-reinforcing: a user who runs it and stays in the
+bootloader has learned the one fact they need, which is that they must flash.
+
+Whether the two entries differ in blink period is now an idle question rather
+than a useful one, and no test of it is worth arranging.
+
 ## 6. What this does NOT establish
 
 - **That the bootloader survives a corrupted application.** What was shown is
-  that a *button* reaches the bootloader from a *healthy* device. Whether the
+  that a *button* reaches the bootloader from a *healthy* device, and (§5c) that
+  it does nothing at all to a device already latched by `A1 3A`. Whether the
   same mechanism works when the application region is blank or partial is still
   `[G]`. It is now strongly plausible — a force-entry path whose whole purpose is
   recovery would be strange to gate on a valid application — but plausible is

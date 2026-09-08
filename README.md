@@ -33,6 +33,33 @@ the mouse byte-identical to where theirs does.
 One device, no spare. Everything here was derived from static analysis; nothing
 was copied from any third-party implementation.
 
+> **Read this before you flash anything.** Every protocol fact in this project
+> came off **one** OP1 8k v2, on firmware **1.07 and 1.10**. Those are the only
+> two versions any of it has been observed against. If your mouse reports a
+> different version, nothing here has been tested on it, and the settings record
+> layout, the defaults and the flash sequence are all assumptions rather than
+> measurements. `egg-config` is read-modify-write and verifies what it wrote, so
+> it is the safe half. `egg-flash` erases. Use it on an unseen version only if
+> you accept that you are the first person to try.
+>
+> **If a flash goes wrong, the mouse is still in the bootloader, and the fix is
+> to flash again.** That is the recovery, and it is not the buttons. `egg-flash`
+> enters by `A1 3A`, which latches: the mouse stays in the bootloader across a
+> replug, across `leave-bootloader`, and (observed 2026-09-08) across a
+> LEFT+RIGHT button entry too. Nothing gets you out of it but a completed flash.
+> You can see the state without any software: in the bootloader the DPI light
+> underneath blinks green, at a shade and interval no CPI stage uses.
+>
+> Holding **LEFT and RIGHT while plugging in** is how you *reach* the bootloader
+> from a mouse that is not in it. It has worked every time it has been tried, and
+> it is why attempting this with one mouse is reasonable at all. But **the case
+> you would need it for is the one nobody has tested**: every trial was on a
+> healthy device, nothing has ever been written to a bootloader reached that way,
+> and whether the buttons still reach it when the firmware is blank or
+> half-written has never been observed (`notes/bootloader-observed.md` §6). Good
+> guesses, because a force-entry path whose purpose is recovery would be strange
+> to gate on a valid application. Guesses all the same.
+
 ## Install
 
 **With Homebrew, and no security warning at all:**
@@ -57,8 +84,40 @@ signed only ad-hoc, not with an Apple Developer certificate, because that costs
 99 USD a year and this is a free project. macOS genuinely cannot verify who
 built it. To allow it: double-click, click Done on the warning, then open
 System Settings, Privacy & Security, scroll to Security, and click **Open
-Anyway** next to the message about EGG Mouse. Once only. The Homebrew line
-above avoids this entirely.
+Anyway** next to the message about EGG Mouse.
+
+The app carries `egg-config` and `egg-flash` inside it, and macOS assesses those
+separately from the app that spawns them. If the app opens but then reports that
+`egg-config` could not be verified, clear the download flag from the whole bundle
+in one go:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/EGG Mouse.app"
+```
+
+The Homebrew line above avoids all of this, because nothing is ever downloaded.
+
+### macOS will not let it open the mouse until you say so
+
+**Grant Input Monitoring, or nothing works.** macOS does not hand over the
+vendor HID collection without it, and the failure looks like a broken app rather
+than a permission: every setting reads as unavailable and the tools report that
+the interface was found but could not be opened.
+
+System Settings, Privacy & Security, **Input Monitoring**, and add whichever of
+these you are using:
+
+- the app: `EGG Mouse`
+- the CLIs: **the terminal you run them from** (Terminal, iTerm, or your editor),
+  not `egg-config` itself. macOS attributes the request to the responsible
+  process, so granting it to the tool leaves the permission visibly on and the
+  open still failing.
+
+Then quit that app fully and reopen it. A running process does not pick up a new
+grant. If it is already granted and still refused, and you have rebuilt the app
+since granting it, remove the entry and add it again: an ad-hoc signature changes
+on every build, and macOS keeps showing the old entry as enabled while it no
+longer matches.
 
 Neither route needs `brew install hidapi` any more. The HID backend is compiled
 in from pinned upstream sources (`third_party/hidapi/`), so a released binary
@@ -105,11 +164,25 @@ redacted in place, byte-for-byte the same length, on 2026-09-07.
 Hold **LEFT and RIGHT mouse buttons together**. Keep holding. Plug the cable in.
 Keep holding for a few more seconds, then release.
 
-The mouse re-enumerates as ProductID `0x1977`, Product string `Bootloader`, and
-can be re-flashed from there. This is forced by hardware and **does not depend
-on any firmware being valid**. It is observed behaviour on the device, not an
-inference. It is also the single fact that makes the rest of this project
-reasonable to attempt with one mouse and no spare.
+The mouse re-enumerates as ProductID `0x1977`, Product string `Bootloader`.
+**That much is observed** [O]: three trials on this device, and the kernel log
+shows the bootloader enumerating directly, with no application enumeration
+first, so the application takes no part in any entry path that enumerates.
+
+**Two things about it are NOT observed, and they are the two that matter in a
+recovery** (`notes/bootloader-observed.md` §6):
+
+- whether the buttons still reach the bootloader when the application region is
+  blank or partial. Every trial so far was on a healthy device.
+- whether that bootloader accepts a write. Nothing has ever been sent to a
+  button-entered one, which is also why `egg-flash` refuses one unless you pass
+  `--i-know-this-is-button-entered`.
+
+Both are `[G]`, and strongly plausible: a force-entry path whose purpose is
+recovery would be odd to gate on a valid application. But this project's rule is
+that plausible is not observed, and the honest version of "the single fact that
+makes this reasonable to attempt with one mouse" is that it is a very good bet
+rather than a measurement.
 
 **How you got into the bootloader decides whether you can leave it.** A
 *button* entry is not latched: the device sat in the bootloader for four hours
@@ -118,6 +191,24 @@ and returned to normal on one replug, no buttons held. A *software* entry
 a flash. Two power cycles failed to clear it; a completed flash did, twice,
 once by Endgame's updater and once by this one. Identical USB identity does not
 mean identical state (`notes/bootloader-observed.md` §5a, §5b).
+
+**The buttons do not get you out of a software latch either.** Observed
+2026-09-08: with the mouse already in an `A1 3A` bootloader, holding LEFT+RIGHT
+while plugging in changes nothing at all. That was the last plausible way out
+short of a flash, and it does not work. The buttons are how you *reach* the
+bootloader, not how you leave one (§5c).
+
+**Telling the two apart, with no software at all.** In the bootloader the DPI
+light underneath blinks green, at a shade and interval no CPI stage uses, so you
+can see *that* it is in the bootloader from across the room. To find out *which
+kind*, unplug it and plug it back in holding nothing:
+
+- **back to a working mouse**: it was a button entry, and nothing is wrong.
+- **still blinking green**: it is software latched, and a completed flash is the
+  only way out. `egg-flash flash ...` is that flash.
+
+The replug is safe either way. It is what exits a button entry, and it provably
+does nothing to a software one.
 
 **And if it is stuck as `0x1977`, Endgame's own Windows updater will fix it.**
 That is not a hopeful reading of their tool. It is a dedicated path in it. The
@@ -183,7 +274,9 @@ find them.
 Four screens. **Settings** reads the mouse and shows every setting decoded into
 words, and changes one thing at a time with a preview before every write.
 **Firmware** backs the current image up and writes a new one. **New versions**
-identifies an updater or config tool this build has never seen. **Advanced** is
+identifies an updater or config tool this build has never seen, and needs the
+source checkout because it runs the repository's own ingest scripts: in a
+downloaded or Homebrew install it says so and is greyed out. **Advanced** is
 everything the tools can do without writing: compare two saved records, preview
 a change with the mouse unplugged, list every USB interface, dump the exact
 command frames, and turn on the hex log.
@@ -281,9 +374,9 @@ capture run the vendor's *own* writes were gone by the next session in five gaps
 out of six, and duration, power loss, re-enumeration and launch-time writes were
 each eliminated in turn. What was left was the obvious explanation nobody had
 checked: **the tester reset the settings between capture sections** for a clean
-per-section baseline, and the single gap that *held* is the one he thinks he
-missed. No device mechanism, and none was ever found. Recollection rather than a
-log, and recorded as such (`notes/config-wire-observed.md` §5.1).
+per-section baseline, and the single gap that *held* is the one section where
+that reset was missed. No device mechanism, and none was ever found. Recollection
+rather than a log, and recorded as such (`notes/config-wire-observed.md` §5.1).
 
 `egg-config` prints all of this after every successful write.
 
@@ -309,6 +402,15 @@ this tool's own backups**: `read-firmware` writes a sidecar `<image>.origin`
 recording the SHA-256 it saved, and `restore-firmware` refuses an image with no
 sidecar or one whose bytes no longer hash to what the sidecar says. It never
 opens a PE, so there is no resource for a file to suggest.
+
+**It has never been run against the hardware, and that is deliberate.**
+Everything testable without a device is tested (`Tests/test_flash_restore.sh`,
+the mock bootloader, the mutation harness, and the write phase it shares
+unchanged with `flash`). What is untested is the only part a test cannot reach:
+how the device answers. Exercising it means erasing a working mouse to find out,
+and if the path were wrong the erase would already have happened. So it stays a
+guess about the device, it is documented as one, and it is for the situation it
+exists for: when it is the best remaining option.
 
 ### The entry receipt
 
@@ -343,9 +445,16 @@ trust the sequence is that it matches a capture of Endgame doing it.
 egg-flash enter-bootloader --yes            # A1 3A. THIS LATCHES.
 egg-flash read-firmware backup.bin
 python3 Tools/score-read-firmware.py backup.bin
-egg-flash flash "...Updater 1.10.exe" --backup backup.bin --confirm ecfc8f88
+egg-flash flash "...Updater 1.10.exe" --backup backup.bin --confirm <code>
 egg-config restore ~/.egg-mouse-known-good.bin --yes
 ```
+
+`<code>` is printed by the same command run without `--confirm`, alongside the
+plan it belongs to. It is deliberately not written out here. The token exists so
+that an approval is bound to bytes the approver has actually looked at, and a
+code pasted out of a README is an approval of something you have not read. If
+the plan changes by one byte the code changes with it, so a stale one cannot
+work by accident.
 
 Everything that can fail is checked **before** `A1 3A` goes out: image hash,
 block range, backup file, approval token, settings undo, device count. So the
@@ -417,6 +526,10 @@ only in this file.
 - **New versions.** Hand it an Endgame `.exe` this build has never seen, for
   either a firmware updater or a config tool, and it re-derives what it needs
   and prints what it found. It refuses rather than guessing.
+  **This one needs the repository.** It shells out to `Tools/pe/ingest.py`,
+  which neither the `.dmg` nor the Homebrew formula installs, so it works only
+  when the app is run from inside a checkout. The card says so and is disabled
+  everywhere else, rather than letting you choose a file and then explaining.
 
 Every argument list the app can build is a pure function in
 `Sources/EGGApp/Commands.swift`, and `Tests/test_app_commands.swift` runs those

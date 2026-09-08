@@ -110,8 +110,33 @@ std::unique_ptr<Device> Device::open(std::uint16_t productId, Log& log) {
             if (productId == kProductIdApplication) {
                 for (const Match& m : all)
                     if (m.productId == kProductIdBootloader)
-                        log.note("the mouse is in BOOTLOADER mode. Unplug and "
-                                 "replug it without holding any button.");
+                        // TWO WAYS IN, AND ONLY ONE OF THEM UNPLUGS OUT.
+                        // This used to say only "unplug and replug", which is
+                        // right for a LEFT+RIGHT button entry and wrong for an
+                        // A1 3A one: that latch survives loss of power [O],
+                        // twice, and `leave-bootloader` does not clear it
+                        // either. Telling a latched user to replug sends them
+                        // round a loop that cannot terminate, at the moment
+                        // they most need the real answer.
+                        log.note("the mouse is in BOOTLOADER mode, and how it "
+                                 "got there decides how it leaves.");
+                        // THE TEST FIRST, because a person reading this wants
+                        // to know what to DO. Both outcomes are safe: the
+                        // replug is exactly what exits a button entry, and it
+                        // provably does nothing to a software one.
+                        log.note("  TELL THEM APART: unplug it and plug it back "
+                                 "in, holding NOTHING.");
+                        log.note("    back to a working mouse -> it was a "
+                                 "LEFT+RIGHT button entry. Nothing is wrong.");
+                        log.note("    still in the bootloader -> A1 3A put it "
+                                 "there, and only a completed flash clears it. "
+                                 "Not a replug, not `leave-bootloader`, and not "
+                                 "the buttons [O]. Run: egg-flash flash ...");
+                        log.note("  You can see the mode without any software: "
+                                 "in the bootloader the DPI light underneath "
+                                 "blinks green, at a shade and interval no CPI "
+                                 "stage uses [O]. It does not tell you WHICH "
+                                 "entry, which is what the replug above is for.");
             }
         }
         return nullptr;

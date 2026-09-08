@@ -75,7 +75,9 @@ std::string indentLines(const char* text, const char* prefix) {
 }  // namespace
 
 const std::string kRecoveryProcedure =
-    "RECOVERY (observed on the device, notes/bootloader-observed.md):\n"
+    "RECOVERY (entry observed on a HEALTHY device; what is not established is\n"
+    "in notes/bootloader-observed.md 6, and read it carefully, because you are\n"
+    "reading this at the moment it matters):\n"
     + indentLines(egg::kButtonEntrySteps, "  ") + "\n"
     + indentLines(egg::kButtonEntryReflashNote, "  ") + "\n"
     // Flasher-only, and deliberately NOT in the shared text: egg-config's help
