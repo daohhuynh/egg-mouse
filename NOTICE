@@ -24,6 +24,29 @@ talking to hardware the author owns. No Endgame Gear source code, protocol
 documentation, or confidential material was used.
 
 --------------------------------------------------------------------------
+THIRD-PARTY CODE INCLUDED IN THIS SOFTWARE
+--------------------------------------------------------------------------
+
+This software includes hidapi, which is not covered by the Apache License
+above and is not the author's work.
+
+    hidapi 0.15.0 <https://github.com/libusb/hidapi>
+    Copyright (c) 2010, Alan Ott, Signal 11 Software
+    All rights reserved.
+
+hidapi is tri-licensed (GPL-3.0-only OR BSD-3-Clause OR HIDAPI); this project
+uses it under the BSD-3-Clause option. The full licence text, its conditions
+and its disclaimer are in third_party/hidapi/LICENSE-bsd.txt, and the
+contributor list is in third_party/hidapi/AUTHORS.txt. BSD-3-Clause requires
+those to accompany binary redistributions, so any built artefact that ships
+this code must carry that file with it; Tools/make-release.sh puts it in the
+disk image for that reason.
+
+Only hidapi's macOS backend is included, unmodified. Every vendored file is
+hash-pinned in third_party/hidapi/README.md and checked by
+Tests/test_vendored_hidapi.py.
+
+--------------------------------------------------------------------------
 ABOUT THE FIRMWARE FLASHER SPECIFICALLY
 --------------------------------------------------------------------------
 

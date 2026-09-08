@@ -108,7 +108,11 @@ WHAT IT DOES
 SOURCE
   https://github.com/daohhuynh/egg-mouse
 TXT
-cp LICENSE NOTICE dist/ 2>/dev/null || true
+cp LICENSE NOTICE dist/
+# BSD-3-Clause requires the hidapi notice and disclaimer to accompany a BINARY
+# redistribution, and this disk image is one. Not optional, so not `|| true`.
+cp third_party/hidapi/LICENSE-bsd.txt "dist/LICENSE-hidapi-bsd.txt"
+cp third_party/hidapi/AUTHORS.txt     "dist/AUTHORS-hidapi.txt"
 ln -s /Applications dist/Applications
 
 echo "==> hdiutil"
