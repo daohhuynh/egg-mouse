@@ -74,9 +74,10 @@ const char* describe(UnknownBytes p);
 // leave the choice implicit by accident. Every executable and every test reads
 // its default from here.
 //
-// DECIDED 2026-09-05: MatchVendor. the owner's own reading ("shouldn't we do what
-// they do? what if that's how the mouse recognizes the right thing"), and an
-// independent adversarial review reached the same answer from the evidence:
+// DECIDED 2026-09-05: MatchVendor. Two routes reached the same answer -- do
+// what the vendor does, in case that is how the mouse recognises a record it
+// should act on -- and an independent adversarial review agreed from the
+// evidence:
 //
 //   [D] NO vendor config tool can write record 0x01-0x04, in any version. The
 //       serializer was re-decoded in all four: cfg107 0x4042d0-0x4045dc,

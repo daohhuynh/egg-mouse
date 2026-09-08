@@ -102,7 +102,7 @@ inline constexpr std::size_t kRecordLen = 0x73;   // 115
 // DECIDED 2026-09-05: zero them, matching the vendor. The policy lives in
 // EGGConfigCore/ConfigRecord.h as kDefaultUnknownBytes, which is where the
 // reasoning and the reversal instructions are; this header only names the
-// range. (Said "UNRESOLVED, the owner's call" until 2026-09-06, months of commits
+// range. (Said "UNRESOLVED, pending a decision" until 2026-09-06, months of commits
 // after the decision -- one decision described in three places is two places
 // too many, and both of the extras went stale.)
 inline constexpr std::size_t kRecordUnknownFirst = 0x01;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """test_handedness.py -- score `egg-config handedness` against the ONE capture
-in which the owner actually ticked the vendor's Left-handed Mode box.
+in which the vendor's Left-handed Mode box was actually ticked.
 
 config-protocol.md §7.20 derives the transform from cfg107 `0x408b00`. That is
 `[D]`. `04-buttons.pcapng` line 1 is the same change performed by the vendor's

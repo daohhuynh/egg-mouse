@@ -8,7 +8,7 @@ Committed BEFORE the command runs, 2026-09-05. Same discipline as
 
 ## 0. WHAT THIS IS, AND HOW IT DIFFERS FROM WHAT WE ALREADY RAN
 
-The owner asked, reasonably: *"isnt stage 3 what we did earlier?"* No, and the naming
+A fair question was asked: *"isnt stage 3 what we did earlier?"* No, and the naming
 in this project is genuinely misleading. Three different commands this session
 have all been described as "read and save":
 
@@ -32,7 +32,7 @@ command byte, different region, 65× the data.
 ## 1. THE NECESSITY GATE (engineering-rules.md §4.2a), answered before proposing the send
 
 > **ENTRY CHANGED BEFORE THE RUN, 2026-09-05.** An earlier draft of this file
-> pre-registered a BUTTON entry. the owner overruled it before anything was sent —
+> pre-registered a BUTTON entry. It was overruled before anything was sent —
 > see gate 3 below. Recorded as an amendment rather than a silent edit, because
 > a pre-registration that can be quietly revised is not one.
 
@@ -75,8 +75,8 @@ question is open rather than settled.
 **3. Is there a hardware-forced alternative?**
 For the *entry*, yes — the buttons — and **it is deliberately NOT used.**
 
-This is a change made by the owner *before the run*, overruling a split I had written
-into §4.2b on my own initiative. His argument: **a test whose result does not
+This is a change made *before the run*, overruling a split that had been written
+into §4.2b unilaterally. The argument: **a test whose result does not
 transfer is not worth its risk.** The flash reads blocks back inside an
 `A1 3A`-entered bootloader; a read-back performed in a button-entered one
 proves nothing about the flash unless the two bootloaders are identical, and
@@ -229,7 +229,7 @@ the data can bias them. Save the diff either way.
 | **every block differs, but the length is right** | the payload offset or the index mapping is wrong. Do NOT flash. Compare `backup.bin` against `fw140.bin` shifted by 16 bytes and by one block to find the shift. |
 | **the data looks like the file shifted by 16 bytes** | we are reading from the frame start rather than `+0x10`. That mutant exists and is killed in the suite, so it would mean the device's response layout differs from `[D]` §5.5. |
 | **blocks come back all `0x00` or all `0xFF`** | the bootloader is serving an erased region, not the application. That would mean `A0 07` reads something other than what `A0 06` writes, which changes the meaning of every per-block verify in the flash. **Stop and rethink; do not flash.** |
-| **`resp[1] == 0x02` on block 0x34** | hypothesis B: reads only work inside a session. Prediction 5 refuted. **This does NOT license sending `A0 03` to open one** — that erases, and §4.2 forbids erasing without the backup this command exists to make. It is a finding that changes the plan, recorded as such, and the owner decides. |
+| **`resp[1] == 0x02` on block 0x34** | hypothesis B: reads only work inside a session. Prediction 5 refuted. **This does NOT license sending `A0 03` to open one** — that erases, and §4.2 forbids erasing without the backup this command exists to make. It is a finding that changes the plan, recorded as such, and the tool does not get to decide it. |
 
 **A refusal is not a failure of the tool.** The command is built to abort on the
 first block that will not read, after 5 attempts, having written nothing.

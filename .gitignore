@@ -78,11 +78,12 @@ notes/zzz-planted-*.md
 # removed from the index with `git rm --cached`; the files are still on disk.
 # ============================================================================
 
-# Agent working files. Process, not product.
+# Working files. Process, not product.
 #
-# CLAUDE.md is the rules file and working-memory.md is local working state
-# (§1.7). Neither is documentation for a user of this software. The
-# protocol findings they point at live in notes/, which stays public.
+# CLAUDE.md is a local rules file and working-memory.md is the working state of
+# whoever is doing the work (§1.7). Neither is documentation for a user of this
+# software. The protocol findings they point at live in notes/, which stays
+# public, and the rules themselves are published as docs/engineering-rules.md.
 #
 # CONSEQUENCE, stated because it is a real cost: git is no longer the backup
 # for working-memory.md. §1.7 exists because a session that dies takes its
@@ -92,10 +93,11 @@ CLAUDE.md
 working-memory.md
 .claude/
 
-# Quarantined evidence (§1.1a). the owner, 2026-09-06: "you cannot trust anything in
-# the root log.txt. much of it is wrong." Kept on disk because it holds
-# his in-progress corrections; never published, because a file that misdescribes
-# what was done is worse than no file at all. Anchored with a leading slash so
+# Quarantined evidence (§1.1a). The root log.txt was found to misdescribe what
+# was actually done at the device, so it is unreliable in full rather than in
+# part. Kept on disk because it holds in-progress corrections; never published,
+# because a file that misdescribes what was done is worse than no file at all.
+# Anchored with a leading slash so
 # windows-run/log.txt -- a different file, still evidence -- stays tracked.
 /log.txt
 

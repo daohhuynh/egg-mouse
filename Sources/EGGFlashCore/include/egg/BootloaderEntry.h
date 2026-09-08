@@ -132,8 +132,8 @@ inline constexpr unsigned kExitPollCeilMs = 30000;
 //
 // RAISED FROM 60 s TO THEIRS, 2026-09-05, by audit. The old comment said
 // "giving up here costs nothing because the image is already verified
-// resident". That was wrong, and wrong in the direction the owner had already
-// corrected once the same day: giving up SKIPS A1 13, which leaves the user's
+// resident". That was wrong, and wrong in a direction already corrected once
+// the same day: giving up SKIPS A1 13, which leaves the user's
 // old settings under newly written firmware -- a state the vendor's tool never
 // produces, and the exact reason A1 13 was put back in the plan. So impatience
 // here does have a cost.

@@ -33,7 +33,7 @@ struct Progress {
 // Tests/test_golden_vendor.py could see it. Found by driving the real code
 // path against the mock and counting: 134 frames sent, 133 planned.
 //
-// It was the same defect the owner had caught in the A0 07 backup read an hour
+// It was the same defect caught in the A0 07 backup read an hour
 // earlier, still present one function away. The fix is structural rather than
 // a policy flag: with no link in scope, preflight CANNOT send, and no future
 // edit can reintroduce this without changing the signature.

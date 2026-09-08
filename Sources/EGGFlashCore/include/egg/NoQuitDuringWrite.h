@@ -4,9 +4,9 @@
 // engineering-rules.md §3: "Trap SIGINT/SIGTERM explicitly during the write phase."
 //
 // NEVER IMPLEMENTED UNTIL 2026-09-05, when an adversarial audit noticed the
-// rule had no code behind it. It is not hypothetical: earlier the same day the owner
-// watched a command sit silent and asked "uhh my terminal froze do i control c
-// this?" -- of a read-only command, where the answer was yes. During the write
+// rule had no code behind it. It is not hypothetical: earlier the same day a
+// command sat silent long enough that interrupting it looked like the obvious
+// move -- of a read-only command, where it would have been fine. During the write
 // phase the answer is no, and the difference cannot be left to a judgement call
 // made under stress.
 //

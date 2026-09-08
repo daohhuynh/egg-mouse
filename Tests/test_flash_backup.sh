@@ -4,7 +4,7 @@
 #
 # engineering-rules.md §4.2, added 2026-09-05: "Never erase without a saved copy of what is
 # being erased." Until the same day, cmdFlash satisfied that itself by reading
-# all 65 blocks out with A0 07 immediately before A0 03. the owner's call was that
+# all 65 blocks out with A0 07 immediately before A0 03. The decision was that
 # this is worse, not better: the vendor never sends A0 07 before A0 03, and
 # inserting 65 frames into the one sequence we have a capture of trades a rule
 # we wrote for a deviation from the only evidence we have. So the backup moved
@@ -25,7 +25,7 @@ EXE="Endgame Gear OP1 8k v2 Firmware Updater 1.10.exe"
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
 # 77, not 0. engineering-rules.md 6.2: a harness that cannot produce a bad result is not
 # evidence. This used to `exit 0`, so on any machine without Endgame's binaries
-# -- a fresh clone, CI, anyone but the owner -- ctest printed a green pass for a test
+# -- a fresh clone, CI, anyone without them -- ctest printed a green pass for a
 # that had asserted nothing. CMakeLists sets SKIP_RETURN_CODE 77 so the run says
 # "Skipped" instead, which is the true statement.
 [ -f "$EXE" ] || { echo "SKIP: $EXE not present"; exit 77; }
@@ -115,7 +115,7 @@ PY
 # only reachable when a mouse is attached in exactly one mode, so this file's
 # own header promise -- "every case below runs with no mouse attached" -- was
 # false for its single positive case, and the suite flipped to FAIL the moment
-# the owner unplugged the mouse. A gate that depends on hardware is not a gate.
+# the mouse was unplugged. A gate that depends on hardware is not a gate.
 #
 # What this case is about is whether the BACKUP was accepted. So it checks that:
 # the backup block is printed and no refusal naming the backup appears. Both

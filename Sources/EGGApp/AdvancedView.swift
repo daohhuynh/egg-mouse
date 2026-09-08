@@ -62,8 +62,8 @@ struct AdvancedView: View {
     /// one of `set`'s fields, so the three boxes above cannot reach it.
     @State private var handSide = "left"
 
-    // The offline run-verb preview (2026-09-07). the owner asked for `--from` in the
-    // app: "that's something certain more advanced users would like to know."
+    // The offline run-verb preview (2026-09-07). `--from` belongs in the app as
+    // well as the CLI: it is something more advanced users will want to reach.
     @State private var pvVerb: PreviewVerb = .map
     @State private var pvButton = ""
     @State private var pvAction = ""

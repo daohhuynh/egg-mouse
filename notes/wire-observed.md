@@ -16,7 +16,7 @@ a basis for a write (§1.3).**
 
 | | |
 | --- | --- |
-| captured by | the owner, 2026-09-05, borrowed Windows 11 25H2 laptop |
+| captured | 2026-09-05, borrowed Windows 11 25H2 laptop |
 | tool | Wireshark + USBPcap, interface `USBPcap1`, link type 249 |
 | size | 6,976 bytes |
 | contents | vendor config tool 1.07 launched, settings page reached, nothing changed |
@@ -111,7 +111,7 @@ been observed — but nothing here is waiting on it any more.
 ### 2.1a CONFIRMED ON macOS — hidapi is the third API and it agrees  [O], 2026-09-05
 
 §2.1 left one thing open: "hidapi's own report-id convention is a *third* API and
-has not been observed." It has now. `egg-config read` on the owner's device, macOS
+has not been observed." It has now. `egg-config read` on this device, macOS
 15 / hidapi via Homebrew, first successful read from the physical mouse.
 
 **The result is (a) again, and the test was not a judgement call.** The macOS
@@ -162,7 +162,7 @@ The 63-byte reply to `A1 02` (frame 1 of `01-baseline.pcapng`):
 | --- | --- | --- |
 | `0x00` | `a1` | report-id slot, always `0xA1` (above) |
 | `0x01` | `01` | status, `0x01` = ready |
-| `0x11`–`0x12` | `07 01` | **firmware 1.07** — the version the owner's device reports |
+| `0x11`–`0x12` | `07 01` | **firmware 1.07** — the version this device reports |
 | `0x14`–`0x15` | `67 33` | **VID `0x3367`** little-endian |
 | `0x16`–`0x17` | `78 19` | **PID `0x1978`**, the application-mode id |
 

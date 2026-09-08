@@ -112,7 +112,7 @@ values recoverable without writing them down.
     6. next section: back to step 1
 
 **Only the OPENING has to be inside the recording**, which is why the close
-comes first (the owner's suggestion, 2026-09-05, and it is the better order — an
+comes first (suggested 2026-09-05, and it is the better order — an
 earlier version of this file had the close inside the capture for no reason).
 
 The reason the opening matters: the differ compares each APPLY's frame against
@@ -128,7 +128,7 @@ snapping *on top of that*; line 9 toggles ripple control on top of that. Each
 APPLY differs from the one before it by exactly one change, which is what makes
 the diff between two consecutive frames *be* that setting and nothing else. Undo
 a setting before making the next change and every line moves two things, and
-neither can be attributed. (the owner asked, 2026-09-05 — it is the single easiest
+neither can be attributed. (Asked 2026-09-05 — it is the single easiest
 thing to get wrong here and it would quietly ruin a whole section.)
 
 The mouse ends the session in an odd configuration. That is expected;
@@ -206,8 +206,8 @@ four. Whichever you see settles which list is dead.
 **There is no LED capture and no LED questions.** There was, until 2026-09-05.
 `notes/gui-surface.md` §3 has the working; the short version is that the LED
 page exists in the resources of all four config-tool versions and is created as
-a tab by none of them, so there is nothing to click. the owner independently reported
-seeing no LED controls and no lights on the mouse. The one LED setting that *is*
+a tab by none of them, so there is nothing to click. It was independently
+reported that there are no LED controls and no lights on the mouse. The one LED setting that *is*
 reachable, `Disable LED on Lift-Off`, is on the Basic page and is already line
 10 of `02-basic`.
 
@@ -303,7 +303,7 @@ exists, a skipped option is a feature we cannot ship); number → **three values
 | 36 | radio buttons → click the **3rd** |
 | 37 | radio buttons → click the **4th** |
 
-**About lines 31–33** (the owner spotted the checkbox, 2026-09-05; an earlier version
+**About lines 31–33** (the checkbox was spotted 2026-09-05; an earlier version
 said to write `LOCKED` and skip, which would have thrown the experiment away).
 `X/Y Settings` is checkbox 1063 on DIALOG 135. X and Y move together until it is
 ticked.
@@ -337,7 +337,7 @@ record, which is `0x00` in all four and whose meaning is currently unknown.
 twice: 04 and 05 were the wrong way round, and the acknowledgement checkbox has
 to be ticked before the sliders will move.)*
 
-**Order matters on this page.** the owner found that the *"I understand that the
+**Order matters on this page.** It was found at the machine that the *"I understand that the
 Multiclick Filter is not a traditional debounce slider…"* checkbox must be
 ticked before any Multiclick slider will change — Slamclick Filter being the one
 exception. So it is line 2 here, not the last line, and it gets a numbered line
@@ -346,7 +346,7 @@ device or is purely a UI gate. If it writes, its diff has to be attributable;
 if it does not, line 2 shows no change and that is the answer.
 
 Line 1 is Slamclick Filter *before* the tick, deliberately: it is the control
-The owner says is not gated, and doing it first proves that independently.
+reported as not gated, and doing it first proves that independently.
 
 | # | do exactly this |
 |---|---|
@@ -375,7 +375,7 @@ If the `SPDT:` combos turn out to be gated by the acknowledgement too, that is
 fine — it is already ticked by then. If either combo holds more than three
 items, keep going and renumber.
 
-**On the caption.** the owner reports the on-screen text is cut off at *"lower values
+**On the caption.** The on-screen text is reported cut off at *"lower values
 dont affect latenc"*. The full string in the resource is *"I understand that the
 Multiclick Filter is not a traditional debounce slider, lower values don't
 affect click latency."* — so the control is clipping its own label. Cosmetic,
@@ -385,7 +385,7 @@ and it confirms this is checkbox 1064 on DIALOG 153.
 
 Each mouse button has a dropdown, and the dropdowns are **nested**: the top
 level groups functions, and you open a group to reach the actual function.
-The owner confirmed the shape on 2026-09-05 — e.g. Right Button → **MOUSE** → **LEFT
+The shape was confirmed on 2026-09-05 — e.g. Right Button → **MOUSE** → **LEFT
 CLICK**.
 
 There is no entry for the left mouse button itself. That is expected.
@@ -433,7 +433,7 @@ probably one byte; `FIXED CPI` has to carry a *number* and `KEYBOARD KEY` a
 keycode plus modifier flags, so these lines are what reveal how wide a button
 record really is.
 
-Lines 10–12 are a deliberate three-step. the owner confirmed on 2026-09-05 that the
+Lines 10–12 are a deliberate three-step. Confirmed on 2026-09-05 that the
 four modifier boxes — SHIFT, CTRL, WIN, ALT — are **independent tick boxes, not
 mutually exclusive**. So:
 

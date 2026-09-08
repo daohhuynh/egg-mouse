@@ -94,7 +94,7 @@ FP=Sources/EGGFlashCore/src/FlashPlan.cpp
 # mutant below pretends otherwise.
 HL=Sources/EGGFlashCore/src/HidBootloaderLink.cpp
 
-# The two off-wire guards the owner chose on 2026-09-06 -- the restore provenance
+# The two off-wire guards chosen on 2026-09-06 -- the restore provenance
 # sidecar and the bootloader entry receipt. Both are pure file logic with no
 # device in them, so every line here is gradeable without hardware, which is
 # exactly the property that made them worth putting in the library instead of
@@ -591,7 +591,7 @@ mutate kill "backup reports ok before it has checked anything" "$FP" \
 
 # ---- The restore provenance gate and the entry receipt. --------------------
 #
-# Both are the owner's calls of 2026-09-06 and both fail SILENTLY when broken: the
+# Both were decided on 2026-09-06 and both fail SILENTLY when broken: the
 # restore proceeds, the frames are correct, the device does what it is told. The
 # only evidence a guard has stopped working is that it stopped refusing, and
 # nothing on the wire shows it. That is the same shape as the backup gate above
@@ -599,8 +599,8 @@ mutate kill "backup reports ok before it has checked anything" "$FP" \
 
 # THE ONE THAT MATTERS. Without the sidecar check, `restore-firmware` writes any
 # 66560-byte file with two different bytes in it -- which is what the verb was
-# specifically not allowed to be. the owner's answer was "yes, but only its own
-# backups"; this mutant is that word "only" being deleted.
+# specifically not allowed to be. The answer was: yes, but only its own
+# backups. This mutant is that word "only" being deleted.
 mutate kill "restore accepts an image with no provenance at all" "$FW" \
 '    const Provenance p = readProvenance(imagePath);
     if (!p.ok) {|||    const Provenance p = readProvenance(imagePath);

@@ -117,7 +117,7 @@ What bounds it:
 - **The ack is 6–14 ms** in both captures. A flash erase is not that fast. Weak
   evidence — it could be asynchronous — but it points the same way.
 - **ENDGAME'S OWN UPDATER RECOVERS A STUCK BOOTLOADER, ON A DEDICATED PATH.**
-  Added after the owner asked whether a Windows laptop is a way out. It is.
+  Added after the question of whether a Windows laptop is a way out. It is.
   `FUN_00403600` returns a *mode code* — 1 for PID `0x1978`, **2 for PID
   `0x1977`** (`0x00403717`) — and actively alternates its search between the two
   PIDs ten times (`0x403680`). On mode 2 the caller starts a different thread,
@@ -132,9 +132,9 @@ What bounds it:
   what is missing is a device-backed `BootloaderLink` and the `flash` verb.
 
 **Revised honest summary:** small probability, and the bad outcome is now "the
-mouse is unusable until the owner reaches a Windows machine" rather than "until we
+mouse is unusable until a Windows machine is reached" rather than "until we
 finish the flasher under pressure". That is a materially smaller tail, and the
-question that produced it was the owner's, not mine.
+question that produced it was not one the analysis had thought to ask.
 
 ## What this rung CANNOT establish
 
@@ -262,8 +262,8 @@ application"* — and it happened.
 
 ## The risk section was right, including about the way out
 
-It said the bad outcome was *"the mouse is unusable until the owner reaches a Windows
-machine"* rather than a brick, on the strength of `updater-protocol.md` §5.1a.
+It said the bad outcome was *"the mouse is unusable until a Windows machine is
+reached"* rather than a brick, on the strength of `updater-protocol.md` §5.1a.
 That still holds and is unchanged by anything observed since. What the section
 got wrong was only its probability estimate ("small"), which is unscoreable on
 one trial.

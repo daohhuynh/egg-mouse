@@ -171,7 +171,7 @@ records a defect in the vendor's repair loop; we do not copy it. The deviation
 must be commented at the site with a pointer to §5.6, or a later reader will
 "fix" our code back into the bug.
 
-### 2.4 `A1 13` after a successful flash — a decision for the owner
+### 2.4 `A1 13` after a successful flash — a decision left open
 
 The vendor sends `A1 13` after a successful flash (§5.4a), and `A1 13` is
 **factory reset** (`config-protocol.md` §5, §7.1c). So a normally-completing
@@ -185,7 +185,7 @@ Two facts make this a real decision rather than a detail:
   and requires `resp[1] == 1` (`config-protocol.md` §4). Same command byte,
   different caller discipline; if we send it, we should use the checked form.
 
-**This is Flagged-for-decision item #1 and is not decided here.**
+**This is flagged-for-decision item #1 and is not decided here.**
 
 ---
 
@@ -240,7 +240,7 @@ worthless unless invariant 3 holds, so 3 is a prerequisite, not a nicety.
 ### 3.4 Dry-run
 
 Emit the exact bytes that would be sent, to stdout, with no device open at all.
-This is the artefact the owner can review before anything is plugged in, and it is the
+This is the artefact to review before anything is plugged in, and it is the
 input to the golden file.
 
 ---

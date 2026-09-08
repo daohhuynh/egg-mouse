@@ -218,7 +218,7 @@ EntryGate entryGate(bool allowButtonEntry, std::uint16_t liveBcd,
         g.allowed = true;
         return g;
     }
-    // The escape hatch. the owner chose "enforce it, with an escape hatch"
+    // The escape hatch. The decision was to enforce it, but with a way out
     // (2026-09-06); the hatch is a flag that has to be typed in full and is
     // deliberately not --yes, because --yes is typed every time (\u00a74.2c).
     if (allowButtonEntry) {

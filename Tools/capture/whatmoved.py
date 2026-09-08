@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """whatmoved.py -- what would ANOTHER Windows capture session actually buy?
 
-The question this answers, asked by the owner on 2026-09-06: the repo-root log.txt is
+The question this answers, asked on 2026-09-06: the repo-root log.txt is
 quarantined, so is the whole windows-run/ capture session worth redoing?
 
 It is answered by partitioning the 115 settings-record bytes into:
@@ -10,7 +10,7 @@ It is answered by partitioning the 115 settings-record bytes into:
             windows-run/. These are the bytes the captures actually
             demonstrate, and every one is already named.
   REACHABLE never moved, but a control in the vendor tool DOES write it --
-            the owner simply did not exercise that control. A redo would move
+            that control was simply never exercised. A redo would move
             these. They are already [D] from cfg107 with a cited address,
             so a redo CORROBORATES them; it does not derive them.
   CLOSED    never moved and no control in ANY of cfg100/101/104/107 writes
@@ -115,7 +115,7 @@ def main():
     print("%d settings records across %s\n"
           % (n, ", ".join(os.path.basename(d) for d in dirs)))
     print("MOVED     %3d  the captures demonstrate these" % len(moved))
-    print("REACHABLE %3d  a control writes them; the owner did not exercise it."
+    print("REACHABLE %3d  a control writes them; it was never exercised."
           % len(reachable))
     print("               A redo WOULD move these -- and every one is already")
     print("               [D] from cfg107, so a redo corroborates, not derives.")

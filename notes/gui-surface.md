@@ -25,21 +25,21 @@ each pushed with parent id `0x424` = 1060:
 
 The captions are literals at `0x1573e8`. [D]
 
-The owner confirmed the same four tabs and the same four names by looking at the
-running program before being told what they were. [O]
+Confirmed at the machine: the same four tabs and the same four names, read off
+the running program before being told what they were. [O]
 
 Two buttons on the Basic page carry no `WS_VISIBLE`: `Apply CPI settings` (1059)
 and `Surface Calibration` (1061). That is a prediction that they are invisible,
 not an observation — a program can call `ShowWindow` at runtime. The session log
-asks the owner to look. [D]
+asks for a look at the running program. [D]
 
 ## 2. Button assignment is a nested menu
 
 Six dropdowns, one per remappable button: right, middle, forward, back, wheel
 up, wheel down. **There is no entry for the left button.** [D]
 
-The menu is **nested** — a top-level group opens to reveal functions. the owner
-observed the shape directly: Right Button → `MOUSE` → `LEFT CLICK`. [O]
+The menu is **nested** — a top-level group opens to reveal functions. The
+shape was observed directly at the machine: Right Button → `MOUSE` → `LEFT CLICK`. [O]
 
 The function names are UTF-16 literals in one run at `0x155cde`, in this order:
 [D]
@@ -60,7 +60,7 @@ Two entries open a further modal:
   key display, four checkboxes `SHIFT` (1075), `CTRL` (1076), `WIN` (1077),
   `ALT` (1078), and `OK`. [D]
 
-  the owner confirmed this modal exists and that **the four modifier boxes are
+  Confirmed at the machine: this modal exists and **the four modifier boxes are
   independent, not mutually exclusive**. [O] All four are `AUTOCHECKBOX` in the
   template, which agrees. Whether the wire encoding is a bitmask or an
   enumeration does **not** follow from that and is [G] — ticking two at once is
@@ -98,8 +98,8 @@ page by none of them.
    (`  Basic Settings  `, `  Advanced Settings  `, `  Button Mapping  `) and
    three-page creation runs (135, 140, 139). DIALOG 137 is absent from those
    too, and those builds have no DIALOG 153 at all.
-6. the owner independently reported no LED controls anywhere in the running program,
-   and no visible lights or light apertures on the mouse. [O]
+6. Independently reported from the machine: no LED controls anywhere in the
+   running program, and no visible lights or light apertures on the mouse. [O]
 
 **What the method cannot see:** a path that reaches the dialog through a stored
 pointer rather than a literal member offset, or a page added by a build variant
@@ -145,7 +145,7 @@ supports "hidden as shipped"; it never supports "hidden while running", and
 
 ## 5. The APPLY button is gated on dirty state  [O]
 
-The owner, 2026-09-05, at the machine: *"the APPLY button is greyed out if i havent
+At the machine, 2026-09-05: *"the APPLY button is greyed out if i havent
 changed anything, if i apply after ticking angle snapping then i cant click
 apply again."*
 
@@ -172,7 +172,7 @@ does. Nothing depends on it.
 
 ## 6. `X/Y Settings` is a host-side control that writes nothing  [O]
 
-The owner, 2026-09-05, mid-capture: *"the X/Y settings ticking does not enable apply
+At the machine, 2026-09-05, mid-capture: *"the X/Y settings ticking does not enable apply
 because i guess it doesnt count as changing anything"*. Earlier the same
 session: *"the slider snaps the other axis if X/Y settings is not ticked and if
 it is ticked then it doesnt snap the other"*.
@@ -198,7 +198,7 @@ control that never writes cannot be what sets it.
 
 ## 7. The Multiclick Filter acknowledgement is one-shot  [O]
 
-The owner, 2026-09-05: *"after you tick i understand and click apply, the whole line
+At the machine, 2026-09-05: *"after you tick i understand and click apply, the whole line
 disappears"*. The `I understand the multiclick filter is not a traditional
 debounce slider...` checkbox gates the multiclick sliders, and once acknowledged
 and applied it is removed from the page permanently — it cannot be un-ticked.
@@ -224,11 +224,11 @@ Not derived. No address is offered for the gate and none was looked for.
 
 ## 8. GX Safe forces that button's multiclick filter to 8  [O]
 
-The owner, 2026-09-05: *"changing to gx safe mode locks the multiclick filter at 8 and
+At the machine, 2026-09-05: *"changing to gx safe mode locks the multiclick filter at 8 and
 greys it out so you cant change it"*, and it is per-button — *"if i do the first
 SPDT it does that to the left button filter"*.
 
-**Both** non-Off modes lock it — the owner, same session: *"gx speed mode also locks
+**Both** non-Off modes lock it — same session: *"gx speed mode also locks
 the value. going back to off ungreys it, but it still stays 8 all the way"*.
 
 So the SPDT mode combo (`Off` / `GX Speed` / `GX Safe`) and the multiclick

@@ -891,7 +891,7 @@ static void testReadBackAndToken() {
         ok("the plan BEGINS with A1 3A, as the vendor's does", hasEnter);
         ok("and A1 3A is literally frame 0",
            frames.front() == enterBootloader());
-        // Reversed 2026-09-05 by the owner. My reason for omitting A1 13 was
+        // Reversed 2026-09-05. The reason for omitting A1 13 had been
         // aesthetic; the reasons for keeping it are not. It is [D] in two
         // binaries and [O] at 21/21 on this mouse, the undo is verified, and
         // leaving stale settings under new firmware invents a state the
@@ -910,7 +910,7 @@ static void testReadBackAndToken() {
 // ---------------------------------------------------------------------------
 // 10. The backup gate. §4.2: "never erase without a saved copy."
 //
-// `flash` no longer takes the backup -- the owner, 2026-09-05 -- so this check is the
+// `flash` no longer takes the backup -- decided 2026-09-05 -- so this check is
 // ONLY thing standing between a bad or absent backup and an erase. It replaced
 // an in-flash A0 07 read-back, i.e. it took over a guarantee that used to be
 // enforced by actually doing the read. A check that replaces a stronger
@@ -1062,7 +1062,7 @@ static void testBackupGate() {
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // 10a. The provenance gate on restore-firmware, and the bootloader entry
-// receipt. Both are the owner's calls of 2026-09-06 and both are OFF-WIRE guards --
+// receipt. Both were decided on 2026-09-06 and both are OFF-WIRE guards --
 // §4.2b: "refusing, checking a file, pinning a hash, requiring a token -- cost
 // nothing and are always allowed."
 //

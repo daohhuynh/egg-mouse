@@ -1,7 +1,7 @@
 """Tests/test_ingest_config.py -- the config-tool ingest, and proof it can fail.
 
-The owner asked whether adapting to an uploaded config version was "genuinely
-impossible, or just difficult but still possible". The answer shipped as
+The question was whether adapting to an uploaded config version was genuinely
+impossible, or just difficult but still possible. The answer shipped as
 Tools/pe/ingest_config.py: possible, by RE-DERIVING every byte egg-config can
 write from the new binary rather than assuming the layout held.
 

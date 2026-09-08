@@ -103,7 +103,7 @@ public:
                          std::string& error);
 
     // The THIRD and last loader: an image this tool read off this device with
-    // A0 07 and saved with `read-firmware`. the owner's call, 2026-09-06 -- restoring
+    // A0 07 and saved with `read-firmware`. Decided 2026-09-06 -- restoring
     // a backup is allowed, but ONLY a backup, and only one whose bytes have not
     // changed since it was taken.
     //

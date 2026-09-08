@@ -4,7 +4,7 @@
 Score by diffing afterwards; disagreements are disagreements (§7's tiebreaker is
 the device).
 
-Built the way the owner asked: **start from the screenshots** — everything the vendor's
+Built as asked: **start from the screenshots** — everything the vendor's
 own software exposes — and check each control off, rather than starting from our
 record map, which can only list what we already found. That reframing is what
 found §7.32.
@@ -22,7 +22,7 @@ Sources: `windows-run/screenshots/*.png`, `dlgdump.py`, `gui-surface.md`.
 | --- | --- | --- | --- |
 | Firmware Version (display) | `info` | yes | `A1 02` |
 | Software Version (display) | n/a | n/a | host-side only |
-| **Factory Reset** button | `factory-reset` | yes | proven on device 21/21. **Reachable from every tab** (the owner, 2026-09-06, `[O]`) — it is in this bar, not on the Basic page |
+| **Factory Reset** button | `factory-reset` | yes | proven on device 21/21. **Reachable from every tab** (confirmed at the machine, 2026-09-06, `[O]`) — it is in this bar, not on the Basic page |
 
 ### Basic tab
 
@@ -112,7 +112,7 @@ were found by reading the per-frame diff rather than the summary.
 
 ## 2. Nothing is blocked by the loss of `log.txt`
 
-The owner asked for the category "captured, but unimplementable because there is no
+A category was asked for: "captured, but unimplementable because there is no
 log to say which click caused it". **For config, that category is EMPTY.**
 
 Every one of the 38 record bytes that ever moved is named, and its encoding is
@@ -132,14 +132,14 @@ the rest did not. Note only the ORDER of sections.
 
 ### Sequencing note that changes the predictions
 
-`docs/CAPTURE-STEPS.md` is the operational file the owner follows; these predictions are
+`docs/CAPTURE-STEPS.md` is the operational file followed at the machine; these predictions are
 keyed to its section numbers and its exact values. Two things in it move the
 predictions off the first draft:
 
 1. **A factory reset comes FIRST** (`12-reset-1.10.pcapng`), so every prediction
    below starts from known defaults: CPI3 `1600/1600`, CPI4 `3200/3200`. It also
    captures firmware 1.10's factory record, which has never been observed.
-2. **`X/Y Settings` is ticked before any CPI edit.** the owner, 2026-09-05: *"the
+2. **`X/Y Settings` is ticked before any CPI edit.** At the machine, 2026-09-05: *"the
    slider snaps the other axis if X/Y settings is not ticked"* (`gui-surface.md`
    §6). Unticked, the axes mirror and the section is worthless. Ticked, setting
    X alone leaves Y where it was — so the flag moves one step EARLIER than the
@@ -177,7 +177,7 @@ is entry 2, record `0x45`-`0x4b`.
 **The popup carries its own `X/Y Settings` tick.** `[D]` already, and I missed
 it when drafting the steps: `gui-surface.md` line 58 has DIALOG 150 as *"a value
 EDIT + trackbar, an `X/Y Settings` checkbox with its own X and Y pair, and
-`OK`"*, read from the dialog resource. the owner restated it from the running tool on
+`OK`"*, read from the dialog resource. It was restated from the running tool on
 2026-09-06 — corroboration of a `[D]`, not new evidence.
 
 It revises the steps: the tick goes on FIRST, every time the popup opens, and
@@ -194,7 +194,7 @@ every existing capture is X=Y.
 
 400 = `0x0190` = `90 01`; 2500 = `0x09c4` = `c4 09`; 2510 = `0x09ce` = `ce 09`.
 
-**The owner reports ending at X = 2510, Y = 400** (2026-09-06), which is an X != Y pair
+**The run ended at X = 2510, Y = 400** (reported 2026-09-06), which is an X != Y pair
 with two distinct values, so **the order question is answered by that apply alone**
 -- `ce 09 90 01` confirms X at `+2`/`+3`, `90 01 ce 09` refutes it. Score the
 capture's actual writes; the table below is what was asked for, not necessarily
@@ -217,14 +217,14 @@ identical bytes for steps 1 and 2. The uncited `26000` bound survived a 14/14
 replay test for exactly this reason, so the cost of leaving a `[D]`-only chain
 untested where testing is free is a cost this project has already paid once.
 
-**Step 3's UI half is already confirmed, `[O]`.** the owner, 2026-09-06, before
+**Step 3's UI half is already confirmed, `[O]`.** At the machine, 2026-09-06, before
 capturing: *"2505 doesnt work it automatically corrects me to 2510"*. That is
 `0x401e70` behaving exactly as derived, and the first `[O]` on the FIXED CPI
 normaliser -- the domain whose uncited `26000` bound was the shipping bug the
 audit found. The capture is still wanted for the **wire** bytes: the UI showing
 2510 does not prove the record receives `ce 09`.
 
-Also `[O]` from the owner, 2026-09-06, and why the steps set both boxes every time:
+Also `[O]` from the machine, 2026-09-06, and why the steps set both boxes every time:
 **the popup does not retain values between openings, it reopens at 400.** So an
 "unchanged" box is not a held value, and a step that typed only X twice would
 have emitted two identical applies -- possibly zero writes, since
@@ -302,7 +302,7 @@ values.
 Step 1 doubles as the check that a modifier pressed AS a key is distinct from a
 modifier ticked as a checkbox: `+1` must be `00` here, not `02`.
 
-**Step 2 is no longer a simple corroboration.** the owner, 2026-09-06: *"I used the +
+**Step 2 is no longer a simple corroboration.** At the machine, 2026-09-06: *"I used the +
 on the keypad and it entered + accurately, but it automatically ticked SHIFT
 alongside it."* `[O]`, and it was not predicted. The dialog sets the modifier
 boxes from the keypress, so they are not purely manual input.
@@ -322,12 +322,12 @@ Two outcomes, and they are distinguishable:
   §7.32) and the device may well accept `0x57` -- but it would mean the vendor
   tool cannot emit those five, which is worth knowing before we claim parity.
 
-A third possibility, now **weakened but not closed**: the owner is on a laptop, and if
+A third possibility, now **weakened but not closed**: the capture machine is a laptop, and if
 its numpad is an `Fn` overlay the hardware itself may have sent Shift+`=`. That is
 indistinguishable from the second outcome in the bytes alone, so **`02 2e` is not
 by itself proof the dialog is character-driven.**
 
-What weakened it: the owner, 2026-09-06, on step 3 -- *"I DID HAVE TO USE FN F5 AND IT
+What weakened it: at the machine, 2026-09-06, on step 3 -- *"I DID HAVE TO USE FN F5 AND IT
 REGISTERED CORRECTLY AS F5."* `[O]`. So on **this** laptop `Fn` is resolved inside
 the keyboard and the tool receives the intended key, not a substitute. An `Fn`
 layer that hands F5 through cleanly is less likely to hand `+` through as
@@ -342,10 +342,10 @@ remains the tie-breaker, and it needs no `Fn` reasoning at all.
 character in any layout, so `00 46` shows the dialog can read a key that types
 nothing -- which means a `+` re-expressed as Shift+`=` was re-expressed *because a
 `+` can be typed another way*, not because the dialog cannot read keys at all.
-I added a Scroll Lock step for this and withdrew it: step 4 already covers it and
-The owner's laptop has no Scroll Lock key.
+A Scroll Lock step was added for this and withdrawn: step 4 already covers it and
+the capture laptop has no Scroll Lock key.
 
-**Step 5 (Num Lock) was optional and the owner skipped it** (2026-09-06, no Num Lock
+**Step 5 (Num Lock) was optional and was skipped** (2026-09-06, no Num Lock
 key on the laptop). Nothing rests on it. It is the one key on
 the numeric keypad that types no character, so it would separate "the keypad is
 unreadable" from "character-producing keys get re-expressed". Worth a click if
@@ -364,7 +364,7 @@ Two MOUSE menu picks, then the reset.
 | 3 | Factory Reset, **from Button Mapping, no tab switch** | whole record returns to §2's values |
 
 **Step 1 was added 2026-09-06 because step 2 alone can silently do nothing.**
-The owner: *"i cant set middle button to middle click because its already middle click
+At the machine: *"i cant set middle button to middle click because its already middle click
 so apply stays greyed out."* `[O]` -- another instance of `gui-surface.md` §5's
 dirty gate. Arriving here from §6 the button holds a keyboard action so step 2
 would have fired, but the section must not depend on the order it is run in.
@@ -393,11 +393,11 @@ only as defaults carried by read-modify-write, so the menu-item -> byte link is
 
 ### 5c. Does an X!=Y record survive being re-loaded?  — NOT TESTED BY THIS RUN
 
-Raised 2026-09-06, when the owner restated that `X/Y Settings` is a view mode: *"Apply
+Raised 2026-09-06, when `X/Y Settings` was restated as a view mode: *"Apply
 only works on the condition that a setting changes. Clicking X/Y Settings
 maintains Apply greyed out because you are not actually changing a setting."*
 Nothing new in that -- it is the same `[O]` as `gui-surface.md` §6, which quotes
-him saying it on 2026-09-05.
+the same point made on 2026-09-05.
 
 **The hazard.** `A0 11` writes all 115 bytes from the tool's in-memory model, so
 the model's state at APPLY time matters even for bytes the user never touched. If
@@ -405,7 +405,7 @@ the tool mirrors Y onto X when it LOADS a record where they differ (rather than
 only when a control is edited), then any later APPLY silently rewrites the CPI
 block.
 
-**Why this run cannot answer it, and that is fine.** the owner, 2026-09-06: *"i factory
+**Why this run cannot answer it, and that is fine.** At the machine, 2026-09-06: *"i factory
 reset between each run like i did the last captures."* `[O]` So sections 4-6 do
 not open on section 3's `1200/2400`; they open on factory defaults where every
 stage has X == Y, which is exactly the input that makes a load-time mirror
@@ -415,7 +415,7 @@ invisible.
 - The hazard is **moot for this run**. Section 3's result cannot be corrupted by
   sections 4-6, because the reset already discarded it before they start.
 - An instruction was withdrawn because of this. Section 4 used to open by asking
-  the owner to read the CPI 3 box and report `1200/2400` vs `1200/1200`. With a reset in
+  for a read of the CPI 3 box and a report of `1200/2400` vs `1200/1200`. With a reset in
   between it reads `1600/1600` regardless, so the answer would have been
   **uninformative and easy to misread as evidence of mirroring.** Removed
   2026-09-06 rather than left in to be misinterpreted later.
@@ -427,8 +427,8 @@ vendor's UI, not about the record.
 
 ### 5d. What the between-run factory resets buy
 
-The owner's standing practice, `[O]`, and it is worth stating as a property rather than
-a habit: **every capture in this run starts from the same known record.** Combined
+Standing practice at the machine, `[O]`, and it is worth stating as a property
+rather than a habit: **every capture in this run starts from the same known record.** Combined
 with opening the tool inside each capture (which emits `A1 02` then `A1 12` and
 writes nothing), each file is self-anchoring -- its own opening read establishes
 the baseline its writes are deltas from.

@@ -22,7 +22,7 @@ Holding a button while plugging the mouse in re-enumerates it as **PID
 > **Hold LEFT and RIGHT mouse buttons together. Keep holding. Plug the cable in.
 > Keep holding for a few more seconds, then release.**
 
-Reported by the owner, 2026-09-05, as performed in the run logged above. This is the
+Reported 2026-09-05, as performed in the run logged above. This is the
 recovery procedure for the entire project and it belongs in the README, in
 `egg-flash --help`, and printed by the flasher before it sends anything.
 
@@ -253,7 +253,7 @@ and **both are cleared by finishing a flash**, so the recovery is the same.
 
 **UPGRADED FROM `[G]` TO `[O]`, 2026-09-05.** "A completed flash clears the
 latch" was an inference when written. It is now observed: after the `A1 3A`
-above left the mouse latched at `0x1977`, **the owner ran Endgame's Windows updater,
+above left the mouse latched at `0x1977`, **Endgame's Windows updater was run,
 the flash completed, and the mouse returned to `0x1978` application mode** — it
 is there now (`egg-config devices`: seven interfaces, PID `0x1978`,
 `bcdDevice 0x0110`). No other action cleared it; two power cycles had already

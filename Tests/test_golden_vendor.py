@@ -4,7 +4,7 @@
 §4.3 asks for a golden file: freeze a trusted byte stream and diff every future
 run against it. This is better than that. The reference is not something we
 produced and then declared trusted -- it is what Endgame's updater 1.10 actually
-sent to the owner's mouse on 2026-09-05, captured with USBPcap, in the run that took
+sent to this mouse on 2026-09-05, captured with USBPcap, in the run that took
 the device from firmware 1.07 to 1.10 and left it working.
 
 So this test does not ask "does the code still do what it did yesterday". It

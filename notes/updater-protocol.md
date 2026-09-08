@@ -554,7 +554,7 @@ bootloader, with no application-mode handshake first.**
 
 ### 5.1a THE UPDATER RECOVERS A DEVICE THAT IS ALREADY IN THE BOOTLOADER [D]
 
-Derived 2026-09-05 from raw disassembly, prompted by the owner asking whether the
+Derived 2026-09-05 from raw disassembly, prompted by the question whether the
 official Windows updater is a way out if a mouse gets stuck in bootloader mode.
 **It is, and it is a dedicated code path with its own thread entry point.**
 

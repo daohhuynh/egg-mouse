@@ -11,7 +11,7 @@ A1 13 destroys the user's settings and is the only command in egg-config that
 does. It was the least-checked frame in the repository.
 
 The reference is again not something we produced: it is what Endgame's config
-tool 1.07 and their updater 1.10 actually sent to the owner's mouse on 2026-09-05.
+tool 1.07 and their updater 1.10 actually sent to this mouse on 2026-09-05.
 
 Scope, so it is not mistaken for more: host-to-device bytes only. It says
 nothing about what the device DOES with them -- see engineering-rules.md 1.2, the meaning

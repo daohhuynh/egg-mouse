@@ -2,8 +2,8 @@
 # test_flash_restore.sh -- `restore-firmware` writes back a backup, and ONLY a
 # backup this tool made.
 #
-# the owner's call, 2026-09-06, asked as a question and answered "yes, but only its
-# own backups". The gate that makes that true is a sidecar <image>.origin
+# Decided 2026-09-06, asked as a question and answered: yes, but only its own
+# backups. The gate that makes that true is a sidecar <image>.origin
 # written by `read-firmware`, checked against the image's bytes at load time.
 #
 # WHY THIS FILE EXISTS SEPARATELY FROM test_flash.cpp. The unit tests drive
@@ -24,7 +24,7 @@ EXE="Endgame Gear OP1 8k v2 Firmware Updater 1.10.exe"
 [ -x "$BIN" ] || { echo "build $BIN first"; exit 2; }
 # 77, not 0. engineering-rules.md 6.2: a harness that cannot produce a bad result is not
 # evidence. This used to `exit 0`, so on any machine without Endgame's binaries
-# -- a fresh clone, CI, anyone but the owner -- ctest printed a green pass for a test
+# -- a fresh clone, CI, anyone without them -- ctest printed a green pass for a
 # that had asserted nothing. CMakeLists sets SKIP_RETURN_CODE 77 so the run says
 # "Skipped" instead, which is the true statement.
 [ -f "$EXE" ] || { echo "SKIP: $EXE not present"; exit 77; }
@@ -74,7 +74,7 @@ sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
 run() { "$BIN" restore-firmware "$@" "${V[@]}" 2>&1; }
 
-echo "egg-flash restore-firmware -- the provenance gate (the owner, 2026-09-06)"
+echo "egg-flash restore-firmware -- the provenance gate (decided 2026-09-06)"
 echo
 
 # --- it exists at all -------------------------------------------------------

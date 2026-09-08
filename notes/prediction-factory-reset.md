@@ -12,7 +12,7 @@ before == after proved nothing.
 immediately after a flash whose final command was `a1 13`. It is therefore
 the 1.10 post-reset state, produced by Endgame's own tool on this device.
 
-The owner's device today differs from it in **21 bytes** (wire offsets, byte 0
+This device today differs from it in **21 bytes** (wire offsets, byte 0
 excluded because §2.3 shows it is not stable on macOS):
 
 | wire | payload | now | expected after reset |

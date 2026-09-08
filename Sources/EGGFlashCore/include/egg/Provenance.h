@@ -1,4 +1,4 @@
-// Provenance.h -- two small off-wire guards, both decided by the owner 2026-09-06.
+// Provenance.h -- two small off-wire guards, both decided 2026-09-06.
 //
 // Neither puts a byte on the wire. §4.2b: "Off-wire guards -- refusing,
 // checking a file, pinning a hash, requiring a token -- cost nothing and are

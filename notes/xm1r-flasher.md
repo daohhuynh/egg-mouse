@@ -12,7 +12,7 @@ Tags in this file are deliberately **not** the §1.2 tags, so that nothing here
 can be mistaken later for an OP1 finding:
 
 - **`[D-X]`** — derived from `XM1r_Flash_Upgrade_1.9.46.exe`, address cited.
-- **`[V]`** — observed in a vendor video of the tool running, relayed by the owner
+- **`[V]`** — observed in a vendor video of the tool running, relayed
   from screenshots, a transcript and a moderator's DM dated 2022-04-05.
 - `[V]` is **not** `[O]`. §1.2's `[O]` means read off *our* device. This is a
   second-hand observation of someone else's device, mediated by a description.

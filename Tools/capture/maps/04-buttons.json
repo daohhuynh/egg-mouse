@@ -1,7 +1,7 @@
 {
  "_comment": [
   "Strict 1:1, all 15 lines, in order. This section is the clearest evidence",
-  "that the owner used the root log rather than the stale copy: there the 'I",
+  "that the root log was followed rather than the stale copy: there the 'I",
   "understand' tick is line 2 because it GATES the sliders, and the record 0x72",
   "write really is the second one in the capture. Under the stale copy that tick",
   "is line 15 and the order does not fit."

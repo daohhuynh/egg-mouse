@@ -1,7 +1,7 @@
 # The config protocol, on the wire [O]
 
-From `windows-run/01`–`07` and `10`: Endgame's config tool 1.07 driving the owner's
-mouse, one setting change per APPLY, captured 2026-09-05. All `[O]`.
+From `windows-run/01`–`07` and `10`: Endgame's config tool 1.07 driving this
+project's mouse, one setting change per APPLY, captured 2026-09-05. All `[O]`.
 
 The chronological order of the captures is **not** their numbering. By file
 mtime: 00, 01, 02, 03, 04, 05, **07, 06**, 08, 09, 10. Section 07 ran before
@@ -174,7 +174,7 @@ tracks it is record `0x01`: it reads `0x80` in every opening read except 04's,
 where it reads `0x00` — and `0x00` is what the vendor always writes there.
 
 The likeliest reading is that the record lives in RAM, reloads from
-firmware-held defaults on power cycle, and that the owner replugged the mouse between
+firmware-held defaults on power cycle, and that the mouse was replugged between
 most captures because USBPcap generally needs the device reattached to see it.
 That is `[G]`, and **the capture argues against the replug half of it.**
 
@@ -184,7 +184,7 @@ only at the flash captures (`08` sees 5 and 6, `09` sees 6, 7 and 8, `10` sees
 8) — which is what a bootloader re-enumeration looks like. So no address change
 is visible across the very boundaries where the settings vanished. Windows can
 reuse an address on the same port, so this is evidence rather than proof; but
-"The owner replugged between sections" is no longer the comfortable explanation it
+"the mouse was replugged between sections" is no longer the comfortable explanation it
 looked like, and something that reverts the record **without** re-enumeration
 now has to be considered.
 
@@ -301,11 +301,11 @@ and the first thing in section N+1 is a read returning defaults, **and nothing
 in between was ever captured.** Whatever reverts the record happens in a window
 no capture covers.
 
-**The cheapest remaining test is not a capture — it is asking the owner what he did
-between sections.** He ran them. If he pressed Factory Reset between sections to
+**The cheapest remaining test is not a capture — it is asking what was actually
+done between sections.** If Factory Reset was pressed between sections to
 get a clean baseline per section — which is what a careful person capturing
 `02-basic`, `03-sensor`, `04-buttons` separately would do, and it would explain
-`03 → 04` holding as the one he skipped — then there is no device behaviour here
+`03 → 04` holding as the one that got missed — then there is no device behaviour here
 at all and this whole subsection collapses into a methodology note. **Ask before
 deriving further.** §1.2a: the obvious human explanation was never checked.
 
@@ -335,25 +335,25 @@ nothing visible in section 07 because there was nothing to undo.
 
 ### 5.1 ANSWERED 2026-09-05: it was the tester, not the device
 
-The owner, asked directly rather than derived: **he reset the settings to defaults
+Asked directly rather than derived: **the settings were reset to defaults
 before the capture sections**, for a clean per-section baseline — *"i did reset
 the settings before the captures... maybe i missed one or two but i remember
 doing so."*
 
-That is the whole explanation. Five sections start from defaults because he put
-them there; the single gap that **held** (`03 → 04`) is exactly what "maybe I
+That is the whole explanation. Five sections start from defaults because a reset
+put them there; the single gap that **held** (`03 → 04`) is exactly what "maybe I
 missed one or two" predicts. No device mechanism is required, and after
 eliminating duration, power loss, re-enumeration and launch-time writes, none
 was ever found.
 
-**Confidence, stated rather than implied.** This is recollection and he hedged
-it. It is not a log and cannot be one — the resets happened outside every
+**Confidence, stated rather than implied.** This is recollection, and it was
+hedged when given. It is not a log and cannot be one — the resets happened outside every
 capture. What makes it strong is not the memory, it is that it is the only
 surviving candidate and it predicts the one anomaly (`03 → 04`) that every
 device-side hypothesis had to explain away.
 
 **This is the §1.2a case, and it went the way §1.2a says it goes.** Working
-memory carried the instruction "ASK FIRST — he ran the captures" alongside
+memory carried the instruction "ASK FIRST — someone ran these captures" alongside
 a growing body of mechanical elimination. The mechanical work was correct and
 necessary — it is what reduced the field to one candidate — but the answer was
 always going to come from asking the person who was there. **The subsection
@@ -368,9 +368,9 @@ answer, and still offers the unplug-replug check for anyone who wants it.
 
 > **THE LABELLING IN THIS SECTION IS VOID. Read §7 instead.**
 >
-> Everything below anchors on the repo-root `./log.txt`, which the owner quarantined
-> on 2026-09-06 (engineering-rules.md §1.1a: *"you cannot trust anything in the root
-> log.txt. much of it is wrong."*). §7 says so and replaces the anchor
+> Everything below anchors on the repo-root `./log.txt`, which was quarantined
+> on 2026-09-06 (engineering-rules.md §1.1a: the file was reported to misdescribe
+> what was actually done). §7 says so and replaces the anchor
 > with the factory-default screenshots; this banner was missing from §6's own
 > heading until 2026-09-07, so a reader arriving from the table of contents met
 > the void method with no warning and the correction 100 lines further on.
@@ -379,8 +379,8 @@ answer, and still offers the unplug-replug check for anyone who wants it.
 > What is void is every sentence that says which INSTRUCTION LINE produced a
 > given write. Do not cite a `log.txt` line number from this section.
 
-The owner asked on 2026-09-06 whether `windows-run/` is still usable given that his
-filled-in `log.txt` was lost to a non-autosaving editor before upload. **It is.**
+The question was raised on 2026-09-06 whether `windows-run/` is still usable given
+that the filled-in `log.txt` was lost to a non-autosaving editor before upload. **It is.**
 All **73** config writes across the five config captures map one-to-one onto a
 numbered instruction line in the repo-root `./log.txt`, with every non-writing
 line separately explained. Nothing is ambiguous and nothing is guessed.
@@ -391,7 +391,7 @@ Two things make this work, and it is worth being explicit about why:
    session.** It is not a blank template — it already carries `NOT PRESENT`
    annotations (02 line 9, 03 lines 2 and 4, all "confirmed 2026-09-05"),
    `SKIPPED` markers (02 lines 31–37), inserted lines (`18a`–`18f`), the exact
-   intended values, and the reasoning for each. The lost file was the owner's
+   intended values, and the reasoning for each. The lost file held the
    *confirmations*, not the plan.
 2. **The record layout is already mapped**, so a diff labels itself. A write
    that moves `0x09` from `03` to `04` is a LOD change whatever any log says.
@@ -490,11 +490,11 @@ being worth waking anyone for.
 ## 7. The factory-default record, verified against the screenshots  [O]
 
 Supersedes §6's method. §6 reconciled the captures against the repo-root
-`./log.txt`; the owner quarantined that file on 2026-09-06 (engineering-rules.md §1.1a), so §6's
+`./log.txt`; that file was quarantined on 2026-09-06 (engineering-rules.md §1.1a), so §6's
 *labelling* is void. **Its byte-level observations stand** — they never depended
 on the log — and this section replaces the anchor with one that cannot lie.
 
-The owner's point, 2026-09-06: *"you have all of the defaults in the screenshots.
+The point made 2026-09-06: *"you have all of the defaults in the screenshots.
 theyre guaranteed defaults, you can trace what changed from what starting from
 the values in the screenshots."* That is checkable, and it checks out.
 
@@ -549,7 +549,7 @@ Two consequences:
 
 1. **The settings record layout is stable across 1.07 → 1.10.** One default
    changed; nothing moved. That is the strongest evidence yet that the config
-   work derived from a 1.07-era capture set is valid on the owner's 1.10 device — and
+   work derived from a 1.07-era capture set is valid on this 1.10 device — and
    it is now evidence rather than an assumption.
 2. **Never hardcode a default vector.** engineering-rules.md §5's "anything a new firmware
    version changes" is no longer hypothetical: it has exactly one known
@@ -564,7 +564,7 @@ rather than the 1041-byte feature report, and produced nonsense values for
 
 ## 8. The firmware-1.10 capture run, 2026-09-06  [O]
 
-Seven captures in `windows-capture/`, taken by the owner on the Windows laptop against
+Seven captures in `windows-capture/`, taken on the Windows laptop against
 firmware **1.10** with config tool **1.07**. Predictions were pre-registered in
 `notes/prediction-capture-1.10.md` and committed at `8a25286`, before any file was
 opened. Decode with:
@@ -701,13 +701,13 @@ question.
 entry `+4`). `encodeButtonEntry`'s separate stores are right, and the `1600x800`
 argument syntax stands.
 
-**The normaliser is confirmed too.** the owner typed `2505`; the box showed `2510` and
+**The normaliser is confirmed too.** `2505` was typed; the box showed `2510` and
 the wire carries `ce 09` = 2510, never `c9 09` = 2505. That is `0x00401e70`
 clamping to `[10, 30000]` then rounding to 10 with ties up, and it is the first
 `[O]` on the domain whose uncited `26000` bound was the shipping bug found on
 2026-09-06.
 
-The owner performed two applies rather than the three the steps asked for. It does not
+Two applies were performed rather than the three the steps asked for. It does not
 matter: one apply with X != Y and two distinct values determines the order by
 itself.
 
@@ -731,10 +731,10 @@ vendor UI, and the worry that they might not be is closed.
 **The modifier prediction was wrong, and the two misses share one cause.** I
 predicted Left Shift would give `+1 = 00`, on the reasoning that a modifier
 pressed AS a key is distinct from one ticked as a checkbox. It gave `+1 = 02`.
-The owner had already reported the same thing on the keypad: *"it automatically ticked
+The same had already been reported on the keypad: *"it automatically ticked
 SHIFT alongside it"*. So **the dialog sets the modifier bits from the keyboard
 state at the moment of the press**, independently of which key it records. Left
-Shift ticks SHIFT because shift is down; the keypad `+` ticked SHIFT on his laptop
+Shift ticks SHIFT because shift is down; the keypad `+` ticked SHIFT on that laptop
 for the same reason.
 
 Both bytes are still fully determined and our encoder is unaffected -- it takes an
@@ -765,8 +765,8 @@ that tempts hardcoding.
 
 ### 8.6 Prediction 5c answered as a side effect: the mirror is edit-time  [O]
 
-Written off before the run as untestable, on the grounds that the owner factory-resets
-between captures so every section would open on X == Y. He reset between most, but
+Written off before the run as untestable, on the grounds that a factory reset happens
+between captures so every section would open on X == Y. One happened between most, but
 **not between `13-cpi-stage34` and `14-fixed-cpi`** -- the latter opens on
 CPI3 = 1200/2400 and CPI4 = 3000/3000, carried straight over.
 
@@ -791,6 +791,6 @@ Here it stops at `A1 13`. Recorded as observed, **not** interpreted: the capture
 may simply have been stopped before the tool settled, and nothing distinguishes
 that from a version difference. Do not cite this as a 1.10 behaviour change.
 
-`11-open` and `12-reset` both open on **800/1200/2000/3200**, which is the owner's own
-CPI configuration rather than factory defaults -- the reset in `12-reset` is what
+`11-open` and `12-reset` both open on **800/1200/2000/3200**, which is the device's
+own configured CPI rather than factory defaults -- the reset in `12-reset` is what
 returns the mouse to 400/800/1600/3200 for everything after.

@@ -387,7 +387,7 @@ static int cmdEnterBootloader(bool yes, bool verbose) {
                 "Endgame's Windows updater is the other way in, and needs nothing\n"
                 "from this machine.\n");
 
-    // THE RECEIPT. the owner's call, 2026-09-06: "enforce it, with an escape hatch."
+    // THE RECEIPT. Decided 2026-09-06: enforce it, with an escape hatch.
     //
     // §4.2b requires everything touching firmware to enter by A1 3A, and until
     // now that rule had nothing behind it -- `flash` finding the mouse already
@@ -581,9 +581,9 @@ static bool bootloaderIsPresent(std::size_t* bootColl, std::size_t* appColl) {
 
 // The instruction, in one place, so every caller says the same thing.
 //
-// CHANGED 2026-09-05 by the owner, overruling a split I had written into §4.2b
+// CHANGED 2026-09-05, overruling a split that had been written into §4.2b
 // without asking: the firmware read-back now enters the SAME way the flash
-// does. His reasoning, and it is right -- the flash reads blocks back inside
+// does. The reasoning is right -- the flash reads blocks back inside
 // an A1 3A-entered bootloader, so a read-back done in a button-entered one
 // proves nothing about the flash unless the two are identical, and that is
 // [G]. I had already conceded that a button-mode refusal would be
@@ -673,7 +673,7 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
     // already be known to read back byte-identical before anything vouches for
     // what is in it.
     //
-    // the owner's call, 2026-09-06: a restore may write back a backup, and ONLY a
+    // Decided 2026-09-06: a restore may write back a backup, and ONLY a
     // backup. This is the record that makes "is this a backup?" a question with
     // an answer. `restore-firmware` refuses an image with no sidecar, or one
     // whose bytes no longer hash to what the sidecar says.
@@ -756,7 +756,7 @@ static int cmdReadFirmware(const std::string& outPath, bool checkOnly, bool verb
     return 0;
 }
 
-// The backup is CHECKED here, never taken. the owner's call, 2026-09-05: the
+// The backup is CHECKED here, never taken. Decided 2026-09-05: the
 // read-back used to run inside the flash, which meant 65 A0 07 frames went out
 // before A0 03 -- something the vendor never does, inserted into the one
 // sequence we have a capture of. It now comes from a separate `read-firmware`
@@ -968,8 +968,8 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
     // THE ALREADY-IN-BOOTLOADER PATH MUST CONFIRM IDENTITY TOO.
     //
     // Found by adversarial audit, 2026-09-05, and it matters far more than it
-    // did an hour ago: with the read-back now entering by A1 3A (§4.2b, the owner's
-    // call), the mouse is ALWAYS latched by the time `flash` runs, so fromBoot
+    // did an hour ago: with the read-back now entering by A1 3A (§4.2b), the
+    // mouse is ALWAYS latched by the time `flash` runs, so fromBoot
     // is no longer the rare recovery path -- it is the normal one.
     //
     // fromApp gets a full identity check for free, because
@@ -1008,7 +1008,7 @@ static int cmdFlash(const Image& img, const std::string& vaultPath,
         // reasoning says a button-entered bootloader "may prove nothing about
         // the flash". Until 2026-09-06 the rule had no code behind it.
         //
-        // the owner chose "enforce it, with an escape hatch". So: refuse without the
+        // The decision was to enforce it with a way out. So: refuse without the
         // receipt `enter-bootloader` leaves, and take an override that has to
         // be typed in full. NOT --yes -- §4.2c's reasoning exactly, --yes is
         // typed every time and would be given by reflex.

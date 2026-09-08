@@ -56,7 +56,7 @@ ReadBack readApplicationRegion(BootloaderLink& link);
 // Is a file on disk a usable backup of the application region?
 //
 // The other half of the same §4.2 rule, and the half that decides whether an
-// erase is allowed to happen. the owner's call, 2026-09-05: `flash` no longer TAKES
+// erase is allowed to happen. Decided 2026-09-05: `flash` no longer TAKES
 // the backup -- doing so put 65 A0 07 frames in front of A0 03, which the
 // vendor never sends, inserting our own rule into the one sequence there is a
 // capture of. `read-firmware` takes it in a separate run and `flash` checks it.

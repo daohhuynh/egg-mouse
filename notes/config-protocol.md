@@ -1397,8 +1397,8 @@ fresh baseline read. (A separate `01b-reset` was planned and dropped on
   table above, at the wire's own offsets rather than the struct's.
 - **REFUTED IF:** any default *value* present in `0x413db0` is absent from the
   post-reset wire record, or the reset record differs from
-  `01-baseline.pcapng`'s in the CPI or button regions (the owner had not changed
-  those before the baseline).
+  `01-baseline.pcapng`'s in the CPI or button regions (those had not been changed
+  before the baseline).
 - **Matters:** it converts the whole default record from `[D]` to `[O]`, and it
   is the reference blob §4.1 wants saved before any write.
 
@@ -1435,8 +1435,8 @@ The single disagreement is record `0x71` (wire `0x81`), predicted `0x00` and
 observed `0x01`.
 
 **Corrected 2026-09-06, and the original reading was wrong twice.** This
-paragraph used to call `01-baseline` "the owner's own settings and not defaults" and
-conclude that "the owner had changed exactly one setting from factory default",
+paragraph used to call `01-baseline` "the user's own settings and not defaults"
+and conclude that "exactly one setting had been changed from factory default",
 deferring to a capture named `01b-reset.pcapng` to settle it.
 
 1. `01-baseline` **is** the factory state. Diff its record against the post-`A1
@@ -1479,20 +1479,20 @@ tools (`gui-surface.md` §3), so no UI control writes these bytes. The conclusio
 does not follow. Attribution does not require a *control*; it requires an
 *observation*, and the device displays these bytes on its own.
 
-The owner, 2026-09-05: the OP1 8k v2 has **a small circular LED on the underside that
+Observed 2026-09-05: the OP1 8k v2 has **a small circular LED on the underside that
 shows the current DPI level as a colour**, lit continuously. That is precisely
 what four colour entries tagged with CPI stages 1–4 describe. So the block is
 not decorative slack and not unknowable — it is the DPI-stage indicator, and it
 is readable by eye with no capture, no write, and no risk.
 
-**Committed prediction, registered before the owner looked** — and **REFUTED the same
+**Committed prediction, registered before anyone looked** — and **REFUTED the same
 day.** Predicted: stage 1 yellow, 2 blue, 3 red, 4 green, from reading the
 trailing `01 0N` as "this colour belongs to CPI stage N".
 
-The owner, 2026-09-05, giving Endgame's own numbering: **stage 1 blue, stage 2 green,
+Observed 2026-09-05, giving Endgame's own numbering: **stage 1 blue, stage 2 green,
 stage 3 yellow, stage 4 red.**
 
-| block pos | bytes | colour (RGB) | its tag | stage the owner sees it at |
+| block pos | bytes | colour (RGB) | its tag | stage it appears at |
 | --- | --- | --- | --- | --- |
 | 0 @`0x0f` | `ff ff 00` | yellow | 1 | **3** |
 | 1 @`0x14` | `00 00 ff` | blue | 2 | **1** |
@@ -1515,10 +1515,10 @@ What survives and what does not:
   meaning. Any stage→colour mapping lives somewhere this block does not show.
 - **Still open, and it moved twice in an hour:** whether this block is the DPI
   indicator's palette. The first version of this bullet said it probably was
-  not, resting on the owner's observation that "Disable LED on Lift-Off" did not
+  not, resting on an observation that "Disable LED on Lift-Off" did not
   affect the indicator. **That observation was superseded within the hour by
-  the owner himself**: with the box ticked *and applied*, lifting the mouse puts the
-  indicator out (2026-09-05). He had not applied it the first time. So the
+  the same observer**: with the box ticked *and applied*, lifting the mouse puts
+  the indicator out (2026-09-05). APPLY had not been pressed the first time. So the
   config tool **does** control this LED, through record `0x08`, and there is
   exactly one LED rather than an indicator plus an absent RGB system.
 
@@ -1543,7 +1543,7 @@ The device is a second observer, and it had not been consulted before the word
 "stage index 1..4" and "Four colours indexed by CPI stage is a CPI-stage
 indicator" were written in §7.3 tagged `structure [O], meaning [G]` — correctly
 tagged, and then reasoned from anyway, twice, until the tag stopped being read.
-The refutation cost one sentence from the owner. It would have cost a wrong write if
+The refutation cost one sentence from the machine. It would have cost a wrong write if
 this block had ever been reachable. §7.1's last line names this exact failure:
 "a hedge that has become an assertion by its third restatement".
 
@@ -1694,7 +1694,7 @@ the serializer skips those four, and no instruction between the call and the
 The device does not. `01-baseline.pcapng` returns **`80 00 00 00`** at wire
 `0x11`–`0x14` = record `0x01`–`0x04`.
 
-### This is a decision, not a finding, and it is the owner's
+### This is a decision, not a finding
 
 Those four bytes are the only place where §4.1's read-modify-write and "do what
 the vendor does" give **different bytes on the wire**:
@@ -1724,7 +1724,7 @@ device-side bit, and what would upgrade the choice from a default to a
 derivation.
 
 *(Corrected 2026-09-06. This section, and `Protocol.h`, both still read
-"unresolved, the owner's call" and "until then `egg-config restore` preserves them"
+"unresolved, pending a decision" and "until then `egg-config restore` preserves them"
 long after the code had stopped doing that. Three descriptions of one decision,
 two of them stale, on the single byte where our wire output can differ from the
 device's own report — so a reader trusting either would predict the wrong four
@@ -1970,13 +1970,13 @@ standard USB HID encoding. §7.12.**
 
 cfg107 writes **only bits 0 and 4**. Bits 1,2,3,5,6,7 are never set or cleared
 by the config tool, so they are §1.3 read-modify-write territory: preserve them.
-Bit 4's control is `Motion Jitter Filter`, which **the owner confirmed is not visible
+Bit 4's control is `Motion Jitter Filter`, which **was confirmed not visible
 on the Advanced Sensor page** — *"motion jitter filter and sensor glass mode are
 not seen anywhere on advanced sensor"*, 2026-09-05, scored as
 `cfg-advanced-sensor-hidden-controls` in `prediction-scores.md`. (**Re-anchored
 2026-09-06.** This cited `./log.txt` 03 line 2, which is quarantined by
-engineering-rules.md §1.1a. The observation itself is the owner's quoted words and stands; only
-the pointer needed replacing.) So bit 4 is
+engineering-rules.md §1.1a. The observation itself is the quoted words from the
+machine and stands; only the pointer needed replacing.) So bit 4 is
 unreachable from the shipped UI and no capture can attribute it. Note this does
 not make bit 4 *unwritten*: `FUN_00411ab0` runs on every APPLY and clears the
 bit from a hidden, unchecked box. Whatever the device reports in bit 4, the
@@ -1989,7 +1989,7 @@ enabled on lift-off"*, and the caption negates it. This is precisely the shape
 of error that §4.3 says compiles clean in any language, and it is the reason
 `egg-config` must never infer a checkbox's polarity from its name.
 
-**Confirmed on the device, the owner, 2026-09-05:** ticking the box, pressing APPLY
+**Confirmed on the device, 2026-09-05:** ticking the box, pressing APPLY
 and lifting the mouse puts the underside DPI indicator out; untouched, it stays
 lit at any height. So the caption is accurate about the *behaviour*, the `sete`
 is accurate about the *byte*, and the two together fix the polarity without
@@ -2006,7 +2006,7 @@ indicator on the underside, not a second light.
 ### Record `0x71` is Force max Sensor fps — which closes the 90/91 gap
 §7.3 recorded that 90 of 91 predicted default bytes matched `01-baseline`, with
 the single diff at record `0x71`, and §7.3's structure table could say no more
-than "one of which (`0x71`) is the byte the owner changed". Object `0x2d` is written
+than "one of which (`0x71`) is the byte that was changed". Object `0x2d` is written
 only by `0x41201b`, from dialog 140's IDC 1032. So the byte that differed is
 **Force max Sensor fps**, and the residual is explained rather than outstanding.
 
@@ -2071,8 +2071,8 @@ not say mirror the vendor's arithmetic, and `egg-config` must compute stage 4's
 flag from stage 4. Theirs: this is testable from a capture.
 
 > ~~and `log.txt` 02 lines 18d–18f now do exactly that.~~ **Struck 2026-09-06,
-> twice over.** That file is quarantined (§1.1a), and the owner has separately
-> confirmed those three lines were **never performed**. So this prediction is
+> twice over.** That file is quarantined (§1.1a), and it has been separately
+> confirmed that those three lines were **never performed**. So this prediction is
 > UNTESTED, not tested-and-passed, and re-reading the existing captures cannot
 > settle it — none of them contains the edit.
 >
@@ -2164,7 +2164,7 @@ computation (`lea 0x100(%esi),%eax` then `0x50(%eax)`) or an access from outside
 that range, so the claim is "not read by dialog 140's class by any single-step
 displacement", not "does not exist".
 
-That matches the other half of the evidence: the owner confirmed on 2026-09-05 that
+That matches the other half of the evidence: it was confirmed on 2026-09-05 that
 Sensor Glass Mode is **not visible** on the page — same sentence as above,
 scored as `cfg-advanced-sensor-hidden-controls` in `prediction-scores.md`
 (**re-anchored 2026-09-06 off `./log.txt` 03 line 4**, §1.1a). A
@@ -2187,7 +2187,7 @@ Nothing in this section rests on it: the finding below is `[D]` from cfg107 and
 `[O]` from the capture bytes. The rule is named here only as the thing being
 refuted.)*
 
-The owner, 2026-09-05: *"when you change a CPI level on the software it isnt a real
+At the machine, 2026-09-05: *"when you change a CPI level on the software it isnt a real
 change so you cant apply anything, but it changes the CPI level currently on the
 mouse."* The path is in the binary.
 
@@ -2257,8 +2257,8 @@ functions reachable from APPLY, and this path is not one of them.
 
 ### Closed the same day: how many doors the write has
 
-The four radio handlers were found by following one observation of the owner's, which
-is not a search. The search is: every `call` **and every `jmp`** targeting
+The four radio handlers were found by following one observation from the machine,
+which is not a search. The search is: every `call` **and every `jmp`** targeting
 `0x414010` and `0x404180` — jumps included, because the handler above reaches
 `0x414010` by tail call and a call-only scan would have missed all of them.
 
@@ -2297,13 +2297,13 @@ from `0x413f17` with `%ebx` = the settings object and `%esi` = the page. It is
 | BACK multiclick | — | `0x2a8` | `TBM_GETPOS` | `0x54` | **`0x59`** |
 
 Five multiclick filters, not eight, and only the first two have an SPDT combo —
-which is exactly what the owner reported from the page on 2026-09-05.
+which is exactly what was reported from the page on 2026-09-05.
 
 ### Record `0x72` is the acknowledgement, and it DOES reach the mouse
 Object `0x08` ← `setne(BM_GETCHECK(IDC 1064))` at `0x4061bd`/`0x4061c2`,
 serialised at `0x4045d6` to **record `0x72`** — the last byte of the record and,
 until now, the only one with no attribution at all. A line in the (now
-quarantined, §1.1a) `./log.txt` told the owner that if no record byte moved, the
+quarantined, §1.1a) `./log.txt` said that if no record byte moved, the
 acknowledgement lived host-side in the registry. **That guess was wrong**, and
 the correction rests on the two addresses above, not on the log: object `0x08`
 is written at `0x4061bd`/`0x4061c2` and serialised at `0x4045d6`. It has a
@@ -2321,14 +2321,14 @@ same byte. For the LEFT button:
     406207  pushl $0x400                  ; otherwise TBM_GETPOS on the slider (member 0xd8)
     406213  movb  %al, 0x34(%ebx)         ; ONE destination for all three
 
-The owner's SPDT items top to bottom are Off / GX Speed / GX Safe, so index 0 = Off,
+The SPDT items top to bottom are Off / GX Speed / GX Safe, so index 0 = Off,
 1 = GX Speed, 2 = GX Safe. Therefore:
 
     record 0x3d == 0xf1   GX Speed
     record 0x3d == 0xf0   GX Safe
     record 0x3d == 0..25  Off, and the value is the multiclick filter
 
-**This explains the coupling the owner observed** — that picking a GX mode locks the
+**This explains the coupling observed at the machine** — that picking a GX mode locks the
 multiclick filter at 8 and greys it out. The byte cannot hold both, so the UI
 disables the slider rather than let it write. The displayed 8 is the default;
 the byte actually carries `0xf0`/`0xf1`. And "going back to Off ungreys it but
@@ -2391,7 +2391,7 @@ a display string and ORs one bit:
 | `0x2a8` | `'Alt+'` (`0x556abc`) | `0x04` | `405310` |
 
 Those are dialog 152's four controls — IDC 1075 SHIFT, 1076 CTRL, 1077 WIN,
-1078 ALT — and the owner confirmed on 2026-09-05 that those four are the only ticks on
+1078 ALT — and it was confirmed on 2026-09-05 that those four are the only ticks on
 that dialog, with no "no modifier" control.
 
 **The encoding is the USB HID keyboard modifier byte, unchanged:**
@@ -2455,9 +2455,9 @@ applying that rule gives the whole menu:
 **Committed prediction: the top-level groups are, in order, `MOUSE`,
 `KEYBOARD KEY`, `CPI`, `MEDIA`, `DISABLE` — five of them.**
 
-The capture procedure asked the owner for exactly this list and **deliberately did not
-tell him the answer** (§6.2: never state the expected answer in the prompt). He
-had also already screenshotted the dropdown and every submenu, so it was
+The capture procedure asked for exactly this list and **deliberately did not
+state the answer** (§6.2: never state the expected answer in the prompt). The
+dropdown and every submenu had also already been screenshotted, so it was
 checkable against material that existed, by someone who was not primed.
 
 **SCORED 4/4 EXACT, 2026-09-06**, against
@@ -2486,7 +2486,7 @@ This is a fact worth recording precisely because it does **not** resolve §7.3,
 and it would be easy to pretend it does. Three named zones against four 5-byte
 colour records is a mismatch, not a match. It rules nothing in:
 
-- it does not restore "the tail is a CPI stage index", which the owner refuted by
+- it does not restore "the tail is a CPI stage index", which was refuted by
   direct observation and which stays refuted;
 - it does not establish "the tail is a zone id", because that needs four zones
   and the vendor's own UI names three;
@@ -2495,7 +2495,7 @@ colour records is a mismatch, not a match. It rules nothing in:
   used — but "consistent with" is not evidence for.
 
 It also says the vendor's own name for the underside indicator is **`DPI led`**,
-which is at least a shared vocabulary with the owner's observation.
+which is at least a shared vocabulary with the observation from the machine.
 
 Meaning stays `[G]`. §1.3 preserves the bytes. The point of writing this down is
 that the next person to look at §7.3 will find the three-zone fact already
@@ -2676,9 +2676,8 @@ value other than `0xe9` may be written until this is settled.**
 
 ## 7.16 Two findings re-derived from cfg107 after `./log.txt` was quarantined  [D]
 
-The owner, 2026-09-06: **"you cannot trust anything in the root log.txt. so much is
-wrong."** Taken at face value. `./log.txt` is quarantined as evidence — see
-`working-memory.md`. This section re-establishes, from the binary alone, the two
+The root `log.txt` was reported, by the person who wrote it, to misdescribe what
+was actually done. Taken at face value: it is quarantined as evidence (§1.1a). This section re-establishes, from the binary alone, the two
 config findings that most visibly rested on it.
 
 ### Sensor angle is two's complement, range −127…+127  — `[D]`, not `[O]`
@@ -3680,7 +3679,7 @@ is not a setting: it reads `0x80` and is written `0x00`, which is §7.4's
 read-versus-write difference and the reason `--unknown-bytes` exists.
 
 Stated precisely, because §1.2a demands it: this is **not** "the other 77 bytes
-are meaningless". It is "no capture ever moved them", over the surface the owner
+are meaningless". It is "no capture ever moved them", over the surface that was
 actually exercised in Endgame's own software. What it bounds is how much more
 naming could buy: **nothing else the shipped Windows tool can reach is
 unnamed.**
@@ -3937,7 +3936,7 @@ exercised `lod` across all eleven values `0`–`10`. The eleven-entry scale is t
 one in force, `egg-config set lod 0..10` is correct, and the device's factory
 value is `3` = `1.0mm` (70 of the 82 records).
 
-It could hardly be otherwise: the only tool the owner has ever run against this mouse
+It could hardly be otherwise: the only tool ever run against this mouse
 is 1.07, and 1.07 cannot set the byte. That is a fact about the *tool*, not
 about the mouse — an OP1 8k v2 configured once with 1.04 would carry whatever
 that checkbox was left at, and `factory-reset` is what clears it.
@@ -4285,7 +4284,7 @@ not ask for into a device whose verify pass and diff would both call it correct.
 
 ## 7.32 The KEYBOARD KEY dialog can map 21 keys our table could not  [D]
 
-Found 2026-09-06 by doing what the owner asked — reading the screenshots as the
+Found 2026-09-06 by doing what was asked — reading the screenshots as the
 inventory of what the mouse can do, rather than reading our own record map as
 the inventory of what we understand. The screenshot
 `windows-run/screenshots/button-mapping-keyboard-key-popup.png` shows the

@@ -1,8 +1,8 @@
 # The firmware flash, on the wire [O]
 
 Every byte here was read out of `windows-run/08-flash.pcapng` and
-`windows-run/09-flash-again.pcapng` — Endgame's own updater 1.10 flashing the owner's
-own mouse, captured with USBPcap on 2026-09-05. Two complete flashes, 1.07→1.10
+`windows-run/09-flash-again.pcapng` — Endgame's own updater 1.10 flashing this
+project's own mouse, captured with USBPcap on 2026-09-05. Two complete flashes, 1.07→1.10
 and then 1.10→1.10 again.
 
 These are `[O]` under §1.2: observed, not derived and not guessed. Where this
@@ -263,7 +263,7 @@ byte-for-byte, and the exception is a response, not a request: the answer to
 already running 1.10. Everything we would send is deterministic, so the golden
 file in §4.3 is viable, and it can be the whole stream rather than a sample.
 
-That also answers the owner's question about flashing twice. The second run really did
+That also answers the question about flashing twice. The second run really did
 erase and rewrite all 65 blocks — it did not detect a matching version and skip.
 There is no second copy of the firmware on the device; the same region was
 written twice with the same bytes.
@@ -356,7 +356,7 @@ file, not over Ghidra's view of it (§1.2b):
    | **140** | **65 / 65** |
 
 So 140 is what this updater sends to **any** device it talks to, not just to
-The owner's. `§1.4`'s compile-time constant is right, and it matches the vendor's.
+this one. `§1.4`'s compile-time constant is right, and it matches the vendor's.
 
 What remains `[G]` is *why* five unreachable images ship — nothing here says the
 OP1 8k v2 is the only product 1.10 was built for, only that 1.10 has exactly one

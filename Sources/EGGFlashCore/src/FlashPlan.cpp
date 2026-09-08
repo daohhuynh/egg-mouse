@@ -139,7 +139,7 @@ std::vector<Frame> plannedFrames(const Image& img) {
     out.push_back(bootloaderComplete());
 
     // A1 13, the vendor's post-flash factory reset. Restored to the plan
-    // 2026-09-05 by the owner, reversing a decision of mine that was aesthetic
+    // 2026-09-05, reversing an earlier decision that was aesthetic
     // ("wiping settings is not part of writing firmware") rather than derived.
     //
     // THREE REASONS IT BELONGS HERE, none of which is "the vendor does it":

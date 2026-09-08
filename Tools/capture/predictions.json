@@ -187,13 +187,13 @@
    "mask": 255,
    "shift": 0,
    "cite": "config-protocol.md §7.11; cfg107 TBM_GETPOS at 0x406207 on member 0xd8, stored raw at 0x406213 to object 0x34",
-   "claim": "the LEFT multiclick slider writes its position raw to record 0x3d, over a range the owner reports as 0..25",
+   "claim": "the LEFT multiclick slider writes its position raw to record 0x3d, over a range reported at the vendor's UI as 0..25",
    "expect_by_line": {
     "3": 0,
     "4": 25,
     "5": 12
    },
-   "refuted_if": "a LEFT multiclick line moves no byte at record 0x3d, or the value stored is not the number shown on the slider (which would mean an offset or scale we have not derived). NOTE the 0..25 range is the owner's observation, not derived: if minimum or maximum turn out to be other numbers, that refutes the RANGE, not the byte."
+   "refuted_if": "a LEFT multiclick line moves no byte at record 0x3d, or the value stored is not the number shown on the slider (which would mean an offset or scale we have not derived). NOTE the 0..25 range is an observation at the vendor's UI, not derived: if minimum or maximum turn out to be other numbers, that refutes the RANGE, not the byte."
   },
   {
    "id": "keyboard-modifier-is-hid",

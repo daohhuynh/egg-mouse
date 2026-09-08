@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Score the 2026-09-06 firmware-1.10 capture run.
 
-Reports what each capture ACTUALLY did rather than asserting a step list: the owner
-worked chronologically while the steps were still being edited, so a section may
+Reports what each capture ACTUALLY did rather than asserting a step list: the
+captures were taken chronologically while the steps were still being edited, so
+a section may
 predate the version of the steps that is now on disk (docs/CAPTURE-STEPS.md).
 
 Every prediction checked here is cited to notes/prediction-capture-1.10.md or to

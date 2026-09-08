@@ -18,7 +18,7 @@ violated by a record the hardware authored.
 ## State going in
 
 The device is at factory defaults, byte-identical to `10-postflash-baseline`.
-The target is the vault, the owner's settings as of 14:51 today. Under BOTH
+The target is the vault, the settings saved at 14:51 today. Under BOTH
 `--unknown-bytes` policies the outgoing frame is identical to the vault
 (`0 of 1024 differ`), because the vault already holds `00 00 00 00` at records
 `0x01`-`0x04`. The policy is a no-op here and cannot be a confound.
@@ -65,7 +65,7 @@ and it tracked whether a capture section opened at defaults. That reading is
 `[G]` and this run tests it two ways at once:
 
 - It is `0x80` now, immediately after a reset. **Consistent.**
-- It was `0x00` before the reset, when the owner had changed settings. **Consistent.**
+- It was `0x00` before the reset, when settings had been changed. **Consistent.**
 - After this write it should be `0x00` -- either because we wrote `0x00`, or
   because the device clears the flag on any host write. Both give `0x00`, so
   this run cannot separate them; it can only refute the reading if `0x80`
@@ -114,8 +114,8 @@ reset first, and it is why this rung is being run second rather than first.
 # SCORED: stage A **21 / 21**, stage B **SETTINGS PERSIST** [O]
 
 Scored 2026-09-05 ~18:25 local, against the commit that fixed this file
-(`c433007`) before either command ran. Observer: the owner at the machine; the byte
-comparison below is mine, mechanical, over his pasted output.
+(`c433007`) before either command ran. Observed at the machine; the byte
+comparison below is mechanical, over the pasted output.
 
 ## Stage A — the first 1041-byte `SET_REPORT` this machine has ever sent
 
@@ -124,7 +124,7 @@ comparison below is mine, mechanical, over his pasted output.
    set from the capture. The length did not upset hidapi; the `REFUTED IF` that
    named `hid_send_feature_report` failing outright did not fire.
 2. **Exactly 21 bytes, every value as predicted.** Scored by parsing the table
-   in this file and the diff in his terminal and comparing them as maps, not by
+   in this file and the diff printed at the machine and comparing them as maps, not by
    eye: 21 predicted rows, 21 observed rows, **0 mismatches, 0 extras**.
    No byte outside the 21 moved, so the device did not edit the record on write.
 3. **The inverse check holds too.** The factory-reset table with its two value
@@ -144,7 +144,7 @@ one-number check that something actually changed.
 **No prediction was offered here on purpose, so nothing is being scored as a
 hit. This is an observation, and it is the one this rung existed to get.**
 
-The post-replug payload was reconstructed from the 64 hexdump rows of his
+The post-replug payload was reconstructed from the 64 hexdump rows of that
 `egg-config read` and compared against the vault byte for byte:
 
 ```
@@ -173,7 +173,7 @@ it was checked before scoring rather than after:
   18:23:55 with `egg-config restore … --yes` as its last line; a new window
   opened at 18:23:57; the unplug follows at 18:24:06; the read output was pasted
   at 18:24:49. The replug sits between the write and the read.
-- **the owner, directly:** *"i actually did unplug and count to 5 and then replug
+- **Reported directly:** *"i actually did unplug and count to 5 and then replug
   before running the second command in a second terminal."*
 
 ### What this does NOT settle, and it is now a bigger question than before

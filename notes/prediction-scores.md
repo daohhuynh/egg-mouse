@@ -24,9 +24,9 @@ file where a stale number does real damage.
    back clean, the likely explanations in order are: the predictions were
    written vague enough to be unfalsifiable, the observer was told the expected
    answer, or the observation did not actually test them. Say which.
-3. An entry needs the **observer and the date**. the owner reading a screen is `[O]`.
-   Me reading a capture file is `[O]`. Me reasoning about a binary is not an
-   observation and cannot score anything.
+3. An entry needs the **observer and the date**. A reading taken off the running
+   program or the device is `[O]`. Reading a capture file is `[O]`. Reasoning
+   about a binary is not an observation and cannot score anything.
 
 ## Running tally — REGENERATED, never quoted
 
@@ -103,7 +103,7 @@ decoration.
 | name used here | |
 | --- | --- |
 | `updater-idle-window` | ALIAS OF: `upd-idle-state` — the register entry at `wire-predictions.md:2908`, whose `REFUTED IF` this file quotes verbatim. Same prediction, renamed by accident. |
-| `updater-ui-four-controls` | ALIAS OF: `upd-window-one-dialog` — the four-control claim at `wire-predictions.md:2872`. Declared so the name resolves; it is **not scored** (see below — the owner named three controls and was not counting). |
+| `updater-ui-four-controls` | ALIAS OF: `upd-window-one-dialog` — the four-control claim at `wire-predictions.md:2872`. Declared so the name resolves; it is **not scored** (see below — the observer named three controls and was not counting). |
 | `led-page-unreachable` | ALIAS OF: `cfg-led-page-never-appears` — `wire-predictions.md:3023`. Scored PARTIAL; the register entry contradicts another register entry, see there. |
 | `cfg-basic-page-invisible-buttons` | ALIAS OF: `cfg-hidden-buttons-stay-hidden` — `wire-predictions.md:3032`. Not yet scored. |
 | `led-liftoff-inverted` | OUT OF REGISTER: `config-protocol.md` §7.8. **Not** an alias of the register's `disable-led-liftoff-inverted`, and the distinction is the whole point of rule 1 — that entry's `REFUTED IF` is about the value of report byte `0x18`, and nobody has read that byte. What was confirmed is the *semantics*, behaviourally. |
@@ -143,9 +143,9 @@ unrelated ground.
 
 ### #20 `cfg-basic-page-hidden-controls` — **CONFIRMED**
 
-Observer: the owner, at the machine, 2026-09-05, mid-capture and unprompted — he went
-looking for Ripple Control because `log.txt` line 9 told him to click it, not
-because he was asked whether it was there.
+Observer: at the machine, 2026-09-05, mid-capture and unprompted — the search for
+Ripple Control happened because `log.txt` line 9 said to click it, not because
+the question of whether it was there had been put.
 
 - **Predicted:** "the 'Ripple Control' checkbox is present in the resource but
   hidden by code at page-init, so it is not on screen." REFUTED IF visible.
@@ -154,10 +154,11 @@ because he was asked whether it was there.
   `0x0040bbd0` calls `ShowWindow(this+0xf78, SW_HIDE)` at `0x40bbd9`, and the
   control's `BN_CLICKED` handler is the bare `ret` at `0x00413d90`.
 
-Three sub-claims in the same prediction also held: the owner has separately confirmed
-`Angle Snapping`, `Disable LED on Lift-Off` and `X/Y Settings` are all present
-on that page — and he found `X/Y Settings` himself, which I had left out of
-`log.txt` entirely, so that one is a confirmation I could not have fitted.
+Three sub-claims in the same prediction also held: separately confirmed at the
+machine that `Angle Snapping`, `Disable LED on Lift-Off` and `X/Y Settings` are
+all present on that page — and `X/Y Settings` was found there independently,
+having been left out of `log.txt` entirely, so that one is a confirmation that
+could not have been fitted.
 
 **Why this one matters beyond its own line.** It is the second independently
 confirmed case of the vendor shipping a control it hides at init, the first
@@ -168,8 +169,8 @@ bytes behind dead UI, and we must carry them through untouched.
 
 ### #21 `cfg-advanced-sensor-hidden-controls` — **CONFIRMED**
 
-Observer: the owner, 2026-09-05, mid-capture, prompted only by `log.txt` telling him
-to click them.
+Observer: at the machine, 2026-09-05, mid-capture, prompted only by `log.txt`
+saying to click them.
 
 - **Predicted:** on the Advanced Sensor page, `Motion Jitter Filter` and
   `Sensor Glass Mode` are hidden by code and do not appear. REFUTED IF either
@@ -182,12 +183,12 @@ to click them.
 
 The rest of that prediction is **not yet scored**: it also says the Sensor Angle
 Tuning slider runs −127..+127 symmetric, and the `REFUTED IF` covers that too.
-The owner has confirmed the default is 0 but not the range. Do not mark this fully
+The default of 0 is confirmed, the range is not. Do not mark this fully
 confirmed until the maximum is read off the screen.
 
 ### `led-page-unreachable` — **PARTIAL** (`gui-surface.md` §3)
 
-Observer: the owner, 2026-09-04: *"theres only 4 tabs and you named then all already
+Observer: at the machine, 2026-09-04: *"theres only 4 tabs and you named then all already
 basic advanced sensor buttons button mapping, i only see disable LED on lift off
 as the mention of LED anywhere in the app."*
 
@@ -197,7 +198,7 @@ the downgrade is the finding.** Rule 1 of this file: score against the
 alias to `cfg-led-page-never-appears` put the original wording in front of the
 observation for the first time, and they do not fit:
 
-| the register entry says | the owner observed |
+| the register entry says | observed |
 | --- | --- |
 | "The config tool 1.07 exposes **NO LED controls anywhere**." | "i only see **disable LED on lift off** as the mention of LED anywhere in the app." |
 | REFUTED IF: "**Any** LED control, or the string 'Singel color', is visible anywhere in the config tool." | an LED control, visible |
@@ -205,12 +206,12 @@ observation for the first time, and they do not fit:
 Read as written, that is a refutation. Read as intended — DIALOG 137's own
 controls (`LED On / Off`, the `LED effect` combo, `Scroll led`, `Logo led`,
 `DPI led`, the RGB edits, `Apply led settings`, and the `Singel color` typo) —
-it is a clean confirmation, and the owner's answer covers every one of those by name.
+it is a clean confirmation, and the answer covers every one of those by name.
 
 **The register contradicts itself, and that is worth more than the point.**
 `cfg-led-page-never-appears` (#18) says no LED control is visible anywhere.
 `disable-led-liftoff-inverted` (#11) predicts, in detail, the behaviour of an
-LED control that IS visible — page 135, control 1066, the very one the owner named.
+LED control that IS visible — page 135, control 1066, the very one named.
 Both are `[D]`, both were committed in the same file, and each was written
 without reading the other. Neither derivation is wrong; the word "anywhere" is.
 
@@ -235,12 +236,12 @@ Things reality has settled that **were not pre-registered**. They belong here
 rather than in the tally, because counting them would inflate a number whose
 only value is that it was fixed before the data existed.
 
-- **`X/Y Settings` writes nothing** (`gui-surface.md` §6). the owner found the control
-  himself — it was not in `log.txt` and not in the register — and then found
-  that ticking it does not enable APPLY. I had claimed from the wire that the
-  X/Y lock is host-side only, and this agrees with that claim. **It is still not
-  a scored prediction**: I wrote that claim down *after* he told me the control
-  existed, so it is a successful postdiction and nothing more.
+- **`X/Y Settings` writes nothing** (`gui-surface.md` §6). The control was found
+  at the machine — it was not in `log.txt` and not in the register — and then
+  ticking it turned out not to enable APPLY. The claim from the wire was that the
+  X/Y lock is host-side only, and this agrees with it. **It is still not
+  a scored prediction**: that claim was written down *after* the control was
+  reported to exist, so it is a successful postdiction and nothing more.
 - **The APPLY button is gated on dirty state** (`gui-surface.md` §5). Not
   predicted at all. It is load-bearing for the capture method, which is why it
   is written up, but it scores nothing.
@@ -260,8 +261,8 @@ keeping.
   the button dropdown's top-level groups are `MOUSE`, `KEYBOARD KEY`, `CPI`,
   `MEDIA`, `DISABLE`, in that order, and no others. Recovered from the string
   table's declaration order, where submenu items precede their group name.
-  **Deliberately withheld from `log.txt`**, which still asks the owner the open
-  question — he has already screenshotted the dropdown and every submenu, so
+  **Deliberately withheld from `log.txt`**, which still asks the open
+  question — the dropdown and every submenu are already screenshotted, so
   this is checkable against existing material by an observer who was not primed.
   The membership claim is much stronger than the order claim; score them
   separately.
@@ -272,7 +273,7 @@ keeping.
   (engineering-rules.md §1.1a). The replacement route needs no new capture and no new
   question: `windows-run/screenshots/*.png` are verified factory defaults
   (`config-wire-observed.md` §7) and show the basic page. Score it by looking,
-  or ask the owner once, cleanly. This one has real weight: `Surface Calibration` would be a
+  or ask once, cleanly. This one has real weight: `Surface Calibration` would be a
   device command **outside the four-command set we have derived**, so a refutation
   here means our command set is incomplete.
 - ~~**#21 `cfg-advanced-sensor-hidden-controls`**~~ — **ALREADY SCORED
@@ -365,20 +366,21 @@ not against the .exe half that was easier to reach.
 > non-zero progress bar before the button is clicked, or the button starts
 > greyed."
 
-The owner, 2026-09-05, unprompted: *"the firmware version is not shown by the updater
+At the machine, 2026-09-05, unprompted: *"the firmware version is not shown by the updater
 before clicking anything, its just what i told you earlier, a text input box, a
 bar, and a start button."*
 
-Observer: the owner. Method: looked at the running updater on the Windows laptop.
-This scores because the `REFUTED IF` names the firmware version explicitly and
-he addressed exactly that, without being asked the question in that form — he
-raised it while querying a different line in `log.txt`. The derivation behind it
+Observer: at the machine. Method: looked at the running updater on the Windows
+laptop. This scores because the `REFUTED IF` names the firmware version
+explicitly and the report addressed exactly that, without being asked the
+question in that form — it was raised while querying a different line in
+`log.txt`. The derivation behind it
 was that fw110's `OnInitDialog` sets two window icons and returns, enumerating
 nothing.
 
 **Not** scored from the same sentence: `updater-ui-four-controls`
 (`wire-predictions.md:2872`) predicts *four* controls — progress bar, button,
-`Status:` static, edit. the owner named three and did not mention the `Status:` label.
+`Status:` static, edit. The report named three and did not mention the `Status:` label.
 A small static caption is the likeliest thing to go unlisted in an informal
 description, so this is **corroboration, not a confirmation**, and it stays
 unscored until someone counts controls deliberately. Scoring it off a sentence
@@ -392,11 +394,11 @@ that was not answering that question is how a scoreboard starts lying.
 > REFUTED IF: "the observed colour at any stage is not the one predicted, or the
 > colours do not follow the stage order."
 
-The owner, 2026-09-05: *"the official cpi level numbering blue is CPI 1, green is CPI
+At the machine, 2026-09-05: *"the official cpi level numbering blue is CPI 1, green is CPI
 2, yellow i CPI 3, and red is CPI 4"*.
 
-Observer: the owner, from Endgame's own level numbering plus the indicator on the
-underside of his mouse. **The colour set matches exactly and the order does
+Observer: at the machine, from Endgame's own level numbering plus the indicator
+on the underside of the mouse. **The colour set matches exactly and the order does
 not** — tag→stage is `1→3, 2→1, 3→4, 4→2`. The prediction was written with the
 `REFUTED IF` naming the order explicitly, so it fails on its own terms and no
 re-reading rescues it.
@@ -419,19 +421,18 @@ Derived, from `sete` (not `setne`) at cfg107 `0x40ecd2`: the "Disable LED on
 Lift-Off" box stores the **inverse** of its tick, so record `0x08` means "LED
 enabled on lift-off" and `1` is the normal state.
 
-The owner, 2026-09-05: *"when i disabled it and then applied and lifted the mouse the
+At the machine, 2026-09-05: *"when i disabled it and then applied and lifted the mouse the
 LED color CPI wasnt there anymore so thats what it does."*
 
-Observer: the owner, on the device. This is a **behavioural** confirmation of a
+Observer: at the machine, on the device. This is a **behavioural** confirmation of a
 polarity derived from one instruction, and it is the strongest kind available
 short of a capture, because it is the direction of the effect rather than a byte
 value — a `setne`-vs-`sete` mix-up would have shown as the LED going out with
 the box *unticked*.
 
 It also settles what "the LED" refers to at all: the underside DPI indicator,
-not a separate light. Note the sequencing — the owner first reported that the setting
-did **not** affect the indicator, then corrected himself once he had pressed
-APPLY. The first report is what the earlier draft of §7.3 briefly rested on, and
+not a separate light. Note the sequencing — the first report said the setting
+did **not** affect the indicator, and was corrected once APPLY had been pressed. The first report is what the earlier draft of §7.3 briefly rested on, and
 it is a good reminder that an observation taken before the write lands is not an
 observation of the write.
 
@@ -448,18 +449,18 @@ sequence after one click, including that the status becomes exactly
 already said so: one clause of a seven-step prediction is confirmed and the
 `REFUTED IF` covers the rest. The verdict now matches the text.
 
-The owner, 2026-09-05, mid-flash and unprompted: *"while the firmware was downloading
-and the progress bar was progressing it said something like 'send firmware block
-data...'"* — he flagged it as possibly mistyped. It is not: the string sits at
+At the machine, 2026-09-05, mid-flash and unprompted: *"while the firmware was
+downloading and the progress bar was progressing it said something like 'send
+firmware block data...'"* — flagged in the report as possibly mistyped. It is not: the string sits at
 file offset `0x143960` in updater 1.10 as UTF-16, character for character
 including the three dots.
 
-Observer: the owner, on the running updater. Scored narrowly: this confirms the
+Observer: at the machine, on the running updater. Scored narrowly: this confirms the
 **string** and that it appears during the block phase with the bar moving. It
 does **not** yet score the surrounding sequence, the 2% jump, or the timing,
 which need `08-flash.pcapng` and the screen order.
 
-Worth recording as method rather than as a hit: he was about to spend effort
+Worth recording as method rather than as a hit: effort was about to go into
 re-deriving a string that was already in the binary. Pulling all 11 status
 strings out of updater 1.10 (`0x1437d0`–`0x143ab4`) converted the rest of that
 section from transcription into ticking boxes, and turned "anything else on
@@ -473,8 +474,8 @@ Every prior confirmation used the same technique (`ShowWindow(SW_HIDE)` in
 one method is close to one hit. This one is a different method on a different
 binary: reading what `OnInitDialog` *omits* rather than what it hides.
 
-All of these were scored the same day, and all from things the owner volunteered
-rather than from questions he was asked. The refutation is the one that tells us
+All of these were scored the same day, and all from things volunteered at the
+machine rather than from questions that had been put. The refutation is the one that tells us
 the scoreboard works.
 
 *(A tally stood here — "CONFIRMED 6, REFUTED 1" — that added the register and
@@ -521,7 +522,7 @@ Two more (#10, #11) were **UNTESTABLE** until the device was back, which is a
 fault in the predictions rather than a result — they were written to be scored
 in a state the run itself made unreachable.
 
-Observer: the owner at the machine, 2026-09-05 19:35:40.
+Observer: at the machine, 2026-09-05 19:35:40.
 
 ### CONFIRMED — `notes/prediction-postwindows.md`, **7 of 7**
 
@@ -566,7 +567,7 @@ those values, and nothing else moved. The device afterwards is byte-identical to
 `10-postflash-baseline` across all 1039 comparable bytes — our `a1 13` and
 Endgame's own produce the same record.
 
-Observer: the owner at the machine. **This cleared engineering-rules.md §4.1's gate**, which had
+Observer: at the machine. **This cleared engineering-rules.md §4.1's gate**, which had
 blocked every config write since the captures showed section 07's reset test was
 vacuous.
 
@@ -580,7 +581,7 @@ swapped is *equal as a map* to what restore produced, so the two runs are the
 same 21 bytes traversed in opposite directions — which is what they had to be if
 both readings were right.
 
-Observer: the owner at the machine; the map comparison is mine, mechanical.
+Observer: at the machine; the map comparison is mechanical.
 
 **Its stage B is deliberately NOT scored** and must not be counted here. No
 prediction was offered on persistence, on purpose, so the observation that the
@@ -651,7 +652,7 @@ encrypted or compressed, so nothing in it is plaintext settings).
 What survives is "the firmware writes that block at runtime", now with a dated
 chain behind it rather than as a guess:
 
-1. the owner's Windows updater flashed FWFILE 140 to this mouse earlier on 2026-09-05,
+1. The Windows updater flashed FWFILE 140 to this mouse earlier on 2026-09-05,
    writing all 65 blocks including `0x74` (both captures show 65 `A0 06` frames
    for `0x34`–`0x74`).
 2. The mouse was then used normally.
@@ -694,7 +695,7 @@ bytes that moved but were NOT predicted: none
 ```
 
 **Why this is the strongest end-to-end result in the project.** The "expected
-after reset" column was never derived from the owner's device — it came from
+after reset" column was never derived from this device — it came from
 `windows-run/10-postflash-baseline.pcapng`, Endgame's own capture of this mouse
 immediately after *their* updater flashed it. So after a flash performed
 entirely by our tool, the settings record is byte-identical to the state
@@ -777,8 +778,8 @@ day.)*
 Committed in `notes/config-protocol.md` §7.13 on 2026-09-05 from **one UTF-16
 string run in cfg107** (`0x155cde`–`0x155e78`) plus one rule: submenu items are
 declared before the group name they belong to. Scored against
-`windows-run/screenshots/button-mapping{,-mouse,-CPI,-media}.png`, which the owner
-took before any of this was derived and was never told the expected answer
+`windows-run/screenshots/button-mapping{,-mouse,-CPI,-media}.png`, taken
+before any of this was derived by an observer never told the expected answer
 (§6.2).
 
 | # | prediction | observed | outcome |

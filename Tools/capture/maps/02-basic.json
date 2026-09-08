@@ -8,7 +8,7 @@
   "and the bytes say 0x0258; line 16 says 1250 and the bytes say 0x04e2), and",
   "line 9 is marked NOT PRESENT there, which is exactly the line that produced",
   "no write. The stale copy asks for 400/800/3200 on those same lines and does",
-  "not fit. the owner used the root log.",
+  "not fit. The root log was the one followed.",
   "",
   "Order note: writes 28 and 29 are lines 18b and 18c, which appear BEFORE the",
   "LOD lines in the log but were applied after them. Harmless -- the map is",

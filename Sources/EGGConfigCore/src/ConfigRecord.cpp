@@ -389,7 +389,7 @@ const Settable kSettable[] = {
     // name taking 0/1 would mean the opposite of what half of all users would
     // assume. Here 1 = the underside DPI indicator stays lit when the mouse is
     // lifted, which is the vendor default; 0 = it goes out, which is the
-    // vendor's box TICKED. Confirmed on the device by the owner, 2026-09-05.
+    // vendor's box TICKED. Confirmed on the device, 2026-09-05.
     {"led-on-liftoff", 0x08, encodeBool,
      "0 or 1 -- 1 = DPI indicator stays lit when lifted (default); "
      "0 = it goes out, i.e. the vendor's \"Disable LED on Lift-Off\" TICKED",

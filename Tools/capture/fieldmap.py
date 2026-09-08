@@ -77,8 +77,8 @@ CMD_READ = 0x12
 # previous attempt already set, and those lines are not errors either.
 #
 # An earlier version of the procedure said to press APPLY anyway with
-# nothing changed, which would have kept the counts equal -- the owner established at
-# the machine on 2026-09-05 that THE VENDOR TOOL GREYS APPLY OUT UNTIL SOMETHING
+# nothing changed, which would have kept the counts equal -- it was established
+# at the machine on 2026-09-05 that THE VENDOR TOOL GREYS APPLY OUT UNTIL SOMETHING
 # CHANGES, so that is not available and the log will genuinely have more lines
 # than the capture has frames.
 #

@@ -1,8 +1,8 @@
 # PRE-REGISTERED: the device state after Endgame's updater recovered it
 
-Committed BEFORE the read-back, 2026-09-05. the owner ran updater 1.10 on a Windows
+Committed BEFORE the read-back, 2026-09-05. Updater 1.10 was run on a Windows
 machine against a mouse presenting only PID `0x1977` (the latched bootloader).
-He reports the update succeeded and that his settings are now at defaults.
+The update succeeded and the settings came back at defaults.
 This pre-registers the BYTE-EXACT form of that, which "looks default" is not.
 
 ## What is already `[O]`, before any read-back
@@ -102,7 +102,7 @@ Method blind spots, stated per §1.2a: an `E8 rel32` sweep cannot see indirect
 calls to the wrapper, nor `E9` tail-jumps into it. Within those limits the set
 is exactly seven.
 
-**Consequence, and it is the answer to a question the owner asked directly:** the only
+**Consequence, and it is the answer to a question asked directly:** the only
 command that writes flash is `A0 06`, and it carries a block index. Nothing in
 the vendor's tool writes a CONFIG bit, selects a boot source, or addresses
 LDROM. The device's non-APROM regions are not reachable by this protocol, so
