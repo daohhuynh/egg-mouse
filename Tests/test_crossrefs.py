@@ -53,11 +53,14 @@ def markdown_files():
             # ctest and the failure looks like a real dangling reference.
             if f.endswith(".md") and not f.startswith("zzz-planted-"):
                 out[f] = os.path.join(notes, f)
-    # docs/ holds engineering-rules.md (the rules, moved out of CLAUDE.md on
-    # 2026-09-07) and CAPTURE-STEPS.md. Scanning the DIRECTORY rather than a
-    # hardcoded list, because a hardcoded list beside the thing it tracks is
-    # how `reconcile` drifted -- a file added to docs/ and never added here
-    # would silently make every reference into it dangle.
+    # docs/ is scanned as a DIRECTORY rather than from a hardcoded list,
+    # because a hardcoded list beside the thing it tracks is how `reconcile`
+    # drifted -- a file added to docs/ and never added here would silently
+    # make every reference into it dangle. Nothing in docs/ is tracked any
+    # more (CAPTURE-STEPS.md was untracked on 2026-09-08 and the rules moved
+    # to the repo root), so on a clone this loop finds nothing and the guard
+    # below is what carries it. Kept so a locally-present file is still
+    # cross-checked, and so re-adding one needs no edit here.
     docs = os.path.join(ROOT, "docs")
     if os.path.isdir(docs):
         for f in sorted(os.listdir(docs)):
@@ -66,7 +69,11 @@ def markdown_files():
     # working-memory.md is NOT committed (2026-09-07). It is still cross-checked
     # when present, because it carries references worth keeping honest locally;
     # its absence in a clone is expected and must not fail.
-    for f in ("README.md", "working-memory.md"):
+    # engineering-rules.md sits at the repo root (moved there 2026-09-08;
+    # CLAUDE.md is a symlink to it). It defines the section numbers that most
+    # references in notes/ resolve against, so losing it from this corpus would
+    # turn every one of them into a false dangle rather than a caught one.
+    for f in ("README.md", "engineering-rules.md", "working-memory.md"):
         p = os.path.join(ROOT, f)
         if os.path.exists(p):
             out[f] = p

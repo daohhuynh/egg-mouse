@@ -132,7 +132,7 @@ the rest did not. Note only the ORDER of sections.
 
 ### Sequencing note that changes the predictions
 
-`docs/CAPTURE-STEPS.md` is the operational file followed at the machine; these predictions are
+The operator's step-by-step file was followed at the machine; these predictions are
 keyed to its section numbers and its exact values. Two things in it move the
 predictions off the first draft:
 

@@ -178,7 +178,10 @@ class TheTrackedSetIsSelfSufficient(unittest.TestCase):
     def test_the_gitignore_entries_added_on_20260907_really_are_ignored(self):
         """Falsifies the premise. If these were tracked after all, the two
         tests above would be asserting nothing interesting."""
-        for p in ("CLAUDE.md", "working-memory.md", "log.txt"):
+        for p in ("CLAUDE.md", "working-memory.md", "log.txt",
+                  # Untracked 2026-09-08. Still on disk here, absent in a clone.
+                  "windows-run/log.txt", "docs/CAPTURE-STEPS.md",
+                  "windows-run/screenshots/basic.png"):
             if os.path.exists(os.path.join(ROOT, p)):
                 self.assertTrue(is_ignored(p), "%s is not ignored" % p)
                 self.assertNotIn(p, self.tracked, "%s is still tracked" % p)

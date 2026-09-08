@@ -1,4 +1,4 @@
-# OP1 8k v2 — macOS config tool + firmware flasher
+# OP1 8k v2: macOS config tool + firmware flasher
 
 Native macOS software for the Endgame Gear OP1 8k v2. Endgame ships Windows-only
 tools. The protocol must be derived independently from their `.exe` files.
@@ -17,7 +17,7 @@ delete in preference to appending.
 Community implementations covering parts of this protocol exist. **None was
 opened, fetched, cited, or reasoned from at any point in this project, and none
 is named here.** The rule still stands: if a question appears to require one,
-say so and stop — the owner decides.
+say so and stop. The owner decides.
 
 The exclusion is not a judgement on anyone's work. It is what makes this
 derivation independent. Every protocol fact here comes from the vendor's own
@@ -29,7 +29,7 @@ established.
 
 There is a licensing reason on top of the methodological one. Protocol facts
 about hardware are not copyrightable, and an independent implementation from
-documented facts is clean — but *code* carries its author's licence, and a
+documented facts is clean, but *code* carries its author's licence, and a
 copyleft one would bind this project. Deriving everything here keeps that
 question from ever arising.
 
@@ -47,32 +47,34 @@ the rule survives the file. It began as an instruction script and accumulated
 answers, attributions and `ANSWERED` / `confirmed` tags over many sessions.
 Nothing in it marked which statements were observations and which were
 inferences written down beside them, so by the third restatement a hedge was
-indistinguishable from a measurement — §7.1's contamination pattern exactly, in
-a file nobody was treating as a claim.
+indistinguishable from a measurement. That is §7.1's contamination pattern
+exactly, in a file nobody was treating as a claim.
 
 **What to use instead**, all of which survive the quarantine:
-- `windows-run/*.pcapng` — bytes. They cannot misdescribe themselves.
-- `windows-run/screenshots/*.png` — **the config screenshots are factory
-  defaults**, and that is verified, not assumed: all 16 visible settings match
-  the post-factory-reset record byte for byte (`config-wire-observed.md` §7).
-  Anchor a capture to the defaults and trace forward.
-- the `.exe` files — every `[D]` in `notes/` cites an address.
+- `windows-run/*.pcapng`, which is bytes. They cannot misdescribe themselves.
+- the `.exe` files. Every `[D]` in `notes/` cites an address.
+- the vendor's config screenshots, which are **factory defaults**, verified
+  rather than assumed: all 16 visible settings match the post-factory-reset
+  record byte for byte (`config-wire-observed.md` §7). Anchor a capture to the
+  defaults and trace forward.
 
-`windows-run/log.txt` is a separate file and a different question: only its
-section 05 was ever filled in. It is not covered by this rule, but it is
-single-sourced, so corroborate anything from it before relying on it.
+The screenshots and `windows-run/log.txt` were untracked on 2026-09-08 and are
+not in this repository, so anything resting on them is checkable here only
+against the captures. That log was the same session's human record; it was
+never covered by the quarantine above, but only its section 05 was ever filled
+in, so it was single-sourced and nothing rests on it alone.
 
 ### 1.2 Provenance tags on every protocol claim
-- **[O] Observed** — read off the physical device. Reading a capture file is
+- **[O] Observed.** Read off the physical device. Reading a capture file is
   `[O]`; the timestamps and bytes in it came off the wire.
-- **[D] Derived** — traced to something in an `.exe` that someone else can go
+- **[D] Derived.** Traced to something in an `.exe` that someone else can go
   and check. **Cite it.** Any of: a virtual address; a resource (`RT_DIALOG
   102`, `FWFILE 140`); a file offset or a hash; a command that reproduces it
   (`rabin2 -i`, `Tools/pe/blobcensus.py`); a verbatim quoted literal; or a
   section of a notes file that itself cites one of these. An address is the
-  usual form, not the only one — a hash is stronger, because it verifies rather
+  usual form, not the only one. A hash is stronger, because it verifies rather
   than points.
-- **[G] Guess** — convention or inference. **Never a basis for a write.**
+- **[G] Guess.** Convention or inference. **Never a basis for a write.**
 
 If it isn't [O] or [D], it does not reach the hardware. Untagged assertions are
 bugs. `Tools/ghidra-export/auditclaims.py --strict` enforces all of this
@@ -91,7 +93,7 @@ wrong, and they are expensive because they *close* lines of enquiry.
 
 Before writing one down:
 
-1. **State the search space and the encoding forms covered — and the ones not.**
+1. **State the search space and the encoding forms covered, and the ones not.**
    A scan for `push imm32` that finds nothing says nothing about `movl $imm32`.
    That exact mistake was made on 2026-09-03.
 2. **Check the user-visible surface before concluding a capability is missing:**
@@ -101,7 +103,7 @@ Before writing one down:
    called reset" does not mean there is no reset. It meant `A1 13`.
 
 A negative claim that cannot meet 1–3 is **[G]**, however exhaustive the scan
-looked. Say "not found by method M, which cannot see form F" — never "does not
+looked. Say "not found by method M, which cannot see form F", never "does not
 exist".
 
 ### 1.2b Ghidra's derived views are evidence, never ground truth
@@ -113,7 +115,7 @@ field reported a live function as uncalled (`0x00404720`, plainly called at
 
 Use them to **find** things. Never to **rule things out**. Any claim that
 something is not called, not reachable, or not present must be recovered from raw
-bytes — `dis.sh`, an exhaustive literal scan, or a call-edge map built from
+bytes: `dis.sh`, an exhaustive literal scan, or a call-edge map built from
 `E8`/`E9` targets.
 
 ### 1.3 Never write a byte whose meaning is [G]
@@ -122,7 +124,7 @@ or normalise unknown bytes.
 
 ### 1.4 Firmware image selection is a compile-time constant
 Whichever firmware resource the official updater loads, it must be a constant in
-our code — never a variable, never selected at runtime, never chosen from a
+our code, never a variable, never selected at runtime, never chosen from a
 list. Other resources in the binary may belong to other products.
 
 ### 1.5 Do not execute any of the vendor binaries
@@ -157,10 +159,10 @@ lose track of which claims were checked while sounding equally confident
 throughout. That is the §7 failure mode. Read it first, update it as you go,
 and trust it over recollection when the two disagree.
 
-Untracking it is a deliberate trade with a cost worth naming: the argument above
-— anything held in one place only dies with that place — was also the argument
-for committing it, and git is no longer the backup. Back it up somewhere, or
-accept that.
+Untracking it is a deliberate trade with a cost worth naming. The argument
+above, that anything held in one place only dies with that place, was also the
+argument for committing it, and git is no longer the backup. Back it up
+somewhere, or accept that.
 
 **Write a gap down the moment you notice it, not once you have resolved it.**
 A count that does not reconcile, a number quoted two different ways, a function
@@ -197,7 +199,7 @@ user error. Those are out of scope by explicit decision.
 - Must work without root. Detect missing macOS permissions and say so rather
   than failing silently.
 - **Assume the device does not validate the image it is given.** Decided
-  2026-09-03, for safety, not because it was derived — whether the bootloader
+  2026-09-03, for safety, not because it was derived. Whether the bootloader
   checks what it receives is `[G]` and untestable without the device. The
   consequence is load-bearing: the vendor's own checksums confirm only that the
   bytes received match the bytes sent, so **nothing downstream of us catches a
@@ -222,12 +224,12 @@ notes/ Tests/
 ```
 
 One repo, because a shared core in a separate repo can drift: correct an opcode,
-bump the core, update one consumer, and the other still holds the stale copy —
+bump the core, update one consumer, and the other still holds the stale copy,
 and the stale one erases flash.
 
 Separate executables, because the two have **contradictory quit semantics**
 (§4). Sharing a process makes "can the user quit now?" a conditional on internal
-state — the exact bug class being designed out.
+state, which is the exact bug class being designed out.
 
 **Language: C++ with `hidapi`.** C++ matches decompiler output idiom, reducing
 transcription errors on bytes where a transcription error is expensive.
@@ -246,7 +248,8 @@ has a close button, a Dock quit item and a force-quit, none of which a
 post-erase write phase may honour. A GUI may drive config freely; it must not
 own the flash write phase. Shell out to `egg-flash` and let it keep being a
 process that cannot be asked to stop.
-Protocol constants live in `EGGCore` **as data tables**, not scattered through code.
+Protocol constants live in `EGGCore` **as data tables**, not scattered through
+code.
 
 ### 3.1 Tooling on this machine
 Ghidra 12.1.3, a Homebrew formula (not a cask). `analyzeHeadless`, `ghidraRun`
@@ -254,7 +257,7 @@ and `pyghidraRun` are on `PATH`. It declares a JDK 21 minimum with no maximum
 and runs on the Java 24 installed here. Also radare2 / `rabin2`, `objdump`,
 `strings`, `xxd`, python3.
 
-`Tools/ghidra-export/` holds the static-analysis toolkit — export, call-edge
+`Tools/ghidra-export/` holds the static-analysis toolkit: export, call-edge
 mapping, literal and command scanning, coverage accounting, resource and dialog
 dumping. **This is the replacement for the script deleted in §7.1, not a return
 to it.** The rule it must keep meeting: a tool here records STRUCTURE and must
@@ -266,7 +269,7 @@ that is the same defect returning.
 
 ## 4. Safety design
 
-### 4.1 Config — near-safe
+### 4.1 Config, near-safe
 - **Read-modify-write always.** Never construct a settings blob from scratch.
 - Validate a read is structurally plausible before acting on it. Never let a
   reported success stand in for verifying the data itself.
@@ -276,9 +279,9 @@ that is the same defect returning.
 - **Implement factory reset first and confirm it works** before any other write
   path. It is the undo for bad config state. *(Gate cleared 2026-09-05: reset
   and restore both scored 21/21 on the device. The rule still governs any NEW
-  write path — an undo comes before the thing it undoes.)*
+  write path: an undo comes before the thing it undoes.)*
 
-### 4.2 Flash — two regimes
+### 4.2 Flash: two regimes
 **Before erase: abort is always correct.** Nothing has changed on the device.
 Any single preflight failure aborts. No path proceeds on a partial pass.
 
@@ -291,8 +294,8 @@ unrecognised.
 query and confirm a structurally plausible response". It was written before the
 vendor's sequence was known, and it directly caused a defect: `preflight()` put
 an `A1 08` on the wire immediately before `A0 03`, a frame the vendor never
-sends, at the moment of maximum cost — found 2026-09-05, by counting what the
-code emitted (134) against what it planned (133). The rule below about byte
+sends, at the moment of maximum cost. It was found 2026-09-05, by counting what
+the code emitted (134) against what it planned (133). The rule below about byte
 streams settles the conflict against it, and `preflight` now takes no link, so
 it *cannot* send rather than merely being told not to. A link that cannot carry
 a frame fails at `A0 03` instead, which is a round trip the vendor actually
@@ -314,14 +317,14 @@ safety is the best kind.
 **Never erase without a saved copy of what is being erased.** No `A0 03` until
 the current application region has been read back block by block, written to
 disk, and the file re-read and checked. Read-back is not merely a way to
-validate address arithmetic — it is how a failed flash stops being permanent,
+validate address arithmetic. It is how a failed flash stops being permanent,
 because a saved image can be rewritten. If read-back does not work on this
 device, that is a finding that changes the plan, not a step to skip.
 
 **The backup is taken in its own run, never inside the flash.** The first
 implementation obeyed the rule above by reading all 65
 blocks immediately before `A0 03`, which put 65 `A0 07` frames in front of the
-erase — something the vendor never does. That is the rule eating itself: a
+erase, something the vendor never does. That is the rule eating itself: a
 safety rule of ours was inserted into the one byte sequence there is a capture
 of, so the flash no longer matched the only evidence we have that any of it
 works.
@@ -333,10 +336,10 @@ flashing between the two runs.
 
 The general rule this is an instance of: **a safety measure that changes the
 byte stream is not free.** Weigh it against the derived sequence, and prefer the
-form that leaves the wire alone. Off-wire guards — refusing, checking a file,
-pinning a hash, requiring a token — cost nothing and are always allowed.
+form that leaves the wire alone. Off-wire guards (refusing, checking a file,
+pinning a hash, requiring a token) cost nothing and are always allowed.
 
-### 4.2a The necessity gate — answer in writing BEFORE proposing any send
+### 4.2a The necessity gate: answer in writing BEFORE proposing any send
 
 Added after a day in which every command sent to the device was byte-perfect
 and two of the three should never have been sent at all. **The frame's contents
@@ -350,8 +353,8 @@ Before ANY byte reaches the device, these are answered in the pre-registration:
 
 1. **What question does this answer?** If it answers none, it is not sent.
 2. **Can that question be answered without touching the device?** Static
-   analysis, a capture, the mock, the kernel log. If yes — **do that instead.**
-3. **Is there a hardware-forced alternative?** If yes — **use it.** A physical
+   analysis, a capture, the mock, the kernel log. If yes, **do that instead.**
+3. **Is there a hardware-forced alternative?** If yes, **use it.** A physical
    action the operator performs cannot latch, cannot misfire, and needs no undo.
 4. **If the effect is unpredictable, what is the recovery, and is that recovery
    still available afterwards?** A recovery path that the command itself might
@@ -368,14 +371,14 @@ That was reactive, and it traded a KNOWN risk for an UNKNOWN one.
 
 **The vendor's flash always begins from an `A1 3A`-entered bootloader.** Both
 captures are that sequence end to end, on this mouse. There is no precedent
-anywhere — not in the captures, not in either code base — for flashing a
+anywhere (not in the captures, not in either code base) for flashing a
 bootloader reached by the buttons. `A1 3A` demonstrably sets persistent state,
 and whether `A0 03` requires it is `[G]`. Entering the vendor's way deletes that
 question instead of carrying it past the point of no return.
 
 So, by risk regime rather than by preference:
 
-**EVERYTHING THAT TOUCHES FIRMWARE ENTERS BY `A1 3A`** — overruling an earlier
+**EVERYTHING THAT TOUCHES FIRMWARE ENTERS BY `A1 3A`**, overruling an earlier
 split in this table that sent read-only work in by the buttons.
 
 | work | entry | why |
@@ -389,7 +392,7 @@ The objection to it is correct: **a test whose result does not transfer is not
 worth its risk.** The flash reads blocks back inside an
 `A1 3A`-entered bootloader. A read-back performed in a button-entered one
 therefore proves nothing about the flash unless the two are identical, and
-whether they are is `[G]` — the only fields we can compare (PID `0x1977`,
+whether they are is `[G]`. The only fields we can compare (PID `0x1977`,
 bcdDevice `0x0006`, product `Bootloader`) are `[O]`-identical, but an internal
 flag set by `A1 3A` would not show in any of them.
 
@@ -410,14 +413,14 @@ Two consequences of putting the read-back on this side of the line:
 1. The latched window now opens at the READ, not at the erase. From the moment
    the read-back begins until a flash completes, the mouse is not a mouse.
 2. The flash that follows finds the device already in the bootloader and
-   **skips its own `A1 3A` — 134 frames, not 135.** Endgame's updater takes
+   **skips its own `A1 3A`: 134 frames, not 135.** Endgame's updater takes
    that same path for a device already at `0x1977` (§5.1a), so it is a
    supported sequence, but it is no longer byte-identical to the capture, and
    the capture was the whole basis for trusting the sequence. Weigh that
    before treating the golden test as covering what actually goes out.
 
 **Therefore: do everything that can fail BEFORE sending `A1 3A`.** Image load,
-hash check, device count, backup validation, approval token — all of it happens
+hash check, device count, backup validation, approval token: all of it happens
 with the mouse in application mode, so the latched window contains only the
 commands that have to be there.
 
@@ -434,7 +437,7 @@ the bootloader that frame is skipped and the other 134 are sent unchanged
 (§4.2b; the vendor's updater does the same, `updater-protocol.md` §5.1a). The
 token is deliberately the same in both cases, because it identifies what is
 being approved and has to be reviewable BEFORE the mouse is in any particular
-mode — a token that changed depending on which mode the device happened to be
+mode. A token that changed depending on which mode the device happened to be
 in could not be printed by a dry run at all. Which case you are in is printed
 by the preflight line, before anything is sent. *(Wording corrected
 2026-09-06: this clause said "the exact byte stream that would be sent", which
@@ -445,8 +448,8 @@ something the approver has not been shown**, including when the approver is
 tired, in a hurry, or has typed the same command four times already.
 
 ### 4.3 What actually protects against the bugs that matter here
-Language safety features do not. The dangerous failures — wrong chunk boundary,
-wrong opcode, trusting a reported success — compile clean in any language.
+Language safety features do not. The dangerous failures (wrong chunk boundary,
+wrong opcode, trusting a reported success) compile clean in any language.
 
 - **Mock bootloader with failure injection.** Adversarial, not cooperative: it
   rejects commands, returns malformed responses, reports false success, goes
@@ -462,48 +465,48 @@ wrong opcode, trusting a reported success — compile clean in any language.
 - **Keep the write phase small and in one file.** ~100 lines in one place can be
   audited by eye. Spread across eight files with clever abstractions, it cannot.
 
-### 4.4 Staged bring-up — ALL FOUR STAGES COMPLETE, 2026-09-05
+### 4.4 Staged bring-up: ALL FOUR STAGES COMPLETE, 2026-09-05
 
 Read-only round trip, bootloader entry/exit, flash read-back, real flash. Both
 tools have been driven end to end against the device. Details belong in the
 commit messages and the working-memory file, not here.
 
-**The rule this leaves behind, which governs every later capability** — the GUI,
+**The rule this leaves behind, which governs every later capability**, the GUI,
 new firmware images, anything that reaches the device:
 
 **Order new work so each step removes untested code from the next one, and make
 the cheapest irreversible step come last.** A read-only round trip before a
 write; a zero-write address check before an erase; a reference to compare
 against before trusting arithmetic. If a step cannot be made to prove something
-the next step depends on, it is ceremony — cut it rather than pay for it (§4.2's
+the next step depends on, it is ceremony. Cut it rather than pay for it (§4.2's
 rule that a safety measure changing the byte stream is not free).
 
-## 5. Device-gated work — what is STILL open
+## 5. Device-gated work: what is STILL open
 
 Everything else on this list was answered on 2026-09-05 and has been removed:
 report descriptors, product IDs, macOS permissions, inter-command timing,
 factory reset, and both bootloader entry mechanisms.
 
 - **Recovery behaviour with the application region blank.** Never observed, and
-  deliberately so — it needs a *failed* flash to produce. Assume it is not
+  deliberately so, because it needs a *failed* flash to produce. Assume it is not
   survivable evidence you have; the button entry (§4.2b) is the only recovery
   that is `[O]`.
 - **Deliberate error states and malformed input.** The device has only ever been
   sent well-formed frames. How it answers a bad one is `[G]`, and the mock's
   hostile behaviours are invented rather than observed. **Do not "verify" this
-  by sending the device something malformed** — §4.2a's gate applies, and there
+  by sending the device something malformed.** §4.2a's gate applies, and there
   is no question here worth the risk.
-- **`restore-firmware` on hardware — CLOSED BY DECISION, NOT BY EVIDENCE.**
+- **`restore-firmware` on hardware: CLOSED BY DECISION, NOT BY EVIDENCE.**
   The device's owner declined to spend a flash cycle proving it, which is the
   right call. It is implemented, and every part of it that can be checked
   without a device is (`Tests/test_flash_restore.sh`, the mock, the mutants,
-  the shared write phase it uses unchanged). What is untested is the only part a test
-  cannot reach: how the device behaves. **Do not propose spending a flash cycle
-  on it, and do not record it as a gap again.** The reason is not squeamishness
-  — the test IS the risk. Exercising it means an erase, and if the restore path
-  is wrong the erase has already happened. So: it stays `[G]` on the device, it
-  is documented as such, and it is used only when it is the best remaining
-  option, which is exactly the situation it exists for.
+  the shared write phase it uses unchanged). What is untested is the only part
+  a test cannot reach: how the device behaves. **Do not propose spending a
+  flash cycle on it, and do not record it as a gap again.** The reason is not
+  squeamishness. The test IS the risk. Exercising it means an erase, and if the
+  restore path is wrong the erase has already happened. So: it stays `[G]` on
+  the device, it is documented as such, and it is used only when it is the best
+  remaining option, which is exactly the situation it exists for.
 - **Anything a new firmware version changes.** The `[O]` facts here span TWO
   firmware versions on the one mouse, not one: everything observed before
   2026-09-05 07:53 local is **1.07**, everything after is **1.10**, because the
@@ -524,7 +527,7 @@ exhaustively, **say so and give the number**. Do not silently sample.
 **State coverage as a partition, never as arithmetic between separately-scoped
 numbers.** `total − (union of every evidence set) == 0`, computed in one place,
 with the residue enumerated. Two pipelines whose scopes overlap will otherwise
-look like a shortfall — that is exactly how a phantom "40 missing functions"
+look like a shortfall, and that is exactly how a phantom "40 missing functions"
 appeared on 2026-09-03 when nothing was unread. And a number written in prose
 survives a context compaction while the computation behind it does not, so it
 returns looking like established fact: regenerate numbers, never quote them.
@@ -540,10 +543,10 @@ the family" stand in for understanding 1.10.
 
 | binary | standard |
 | --- | --- |
-| **updater 1.10** | **Everything is read. Every function, library included** — a cross-binary body match is no longer an alternative to reading it (superseding the earlier "match or read" rule; see below). Plus every byte of the file accounted for, not just `.text`. |
-| updaters 1.06, 1.07 | `.text` is byte-identical to 1.10 (same SHA-256), so 1.10's work covers their code by construction. They still get an exhaustive diff of everything that is *not* code — `.data`, PE headers, all resources. Identical code does not mean identical file. |
+| **updater 1.10** | **Everything is read. Every function, library included.** A cross-binary body match is no longer an alternative to reading it (superseding the earlier "match or read" rule; see below). Plus every byte of the file accounted for, not just `.text`. |
+| updaters 1.06, 1.07 | `.text` is byte-identical to 1.10 (same SHA-256), so 1.10's work covers their code by construction. They still get an exhaustive diff of everything that is *not* code: `.data`, PE headers, all resources. Identical code does not mean identical file. |
 | updater 1.04 | Second code base. Band read. Drive its residue down by the same positive accounting, then read what survives. |
-| config tools | Transport settled for 1.07; §4.1's gate is cleared. Internals still largely unread — the settings record is fully mapped and mostly unnamed, which is why `set` is a short list. |
+| config tools | Transport settled for 1.07; §4.1's gate is cleared. Internals still largely unread; the settings record is fully mapped and mostly unnamed, which is why `set` is a short list. |
 | `FWFILE` blobs | All six names, all four versions. Ranked high: it is the only place a wrong-image guard could come from that works on an updater we have not read. |
 
 The reason for the asymmetry is a `p99` argument, stated plainly: **missing one
@@ -557,14 +560,14 @@ reasoning is still true about the error rate, and it is the wrong conclusion for
 1.10. Two corrections:
 
 1. **The match is a hypothesis, not a proof, until something tests it.**
-   `classify.py`'s premise — that a body appearing in an unrelated product is
-   library — is an assumption. Reading the matched set is how that assumption
+   The premise of `classify.py`, that a body appearing in an unrelated product
+   is library, is an assumption. Reading the matched set is how that assumption
    gets *tested*, and a single vendor function that byte-matches something
    elsewhere would invalidate the same inference in every other binary. So
    reading library code is not wasted effort; it is the only empirical check on
    the classifier the whole accounting rests on.
 2. **The error rate of reading is an engineering problem, not a reason to skip
-   reading.** If a reader is unreliable, do not conclude "read less" — build a
+   reading.** If a reader is unreliable, do not conclude "read less". Build a
    harness that *measures* the reader and makes the safety-critical property
    decidable without trusting it. §6.2.
 
@@ -578,7 +581,7 @@ they think you want. That is a property of the reader, and the answer is to stop
 resting safety on its judgement:
 
 - **Decide the safety-critical question mechanically.** Whether a function can
-  touch the device is answerable by exhaustive literal scan — IAT slots, device
+  touch the device is answerable by exhaustive literal scan: IAT slots, device
   globals, protocol constants, raw call edges. Those are script-computed,
   reproducible by anyone with `objdump` and `grep`, and cannot be faked by a
   reader. Agent reading adds meaning *on top*; it never clears a function the
@@ -591,7 +594,7 @@ resting safety on its judgement:
   device-facing, unlabelled. A batch that calls one of them library is discarded
   and re-run. This measures the false-negative rate instead of assuming it.
 - **Require machine-checkable facts.** Every verdict must carry claims a script
-  can verify against the bytes — size, call targets, referenced literals. Wrong
+  can verify against the bytes: size, call targets, referenced literals. Wrong
   verifiable facts invalidate the judgement that came with them.
 - **A harness that cannot produce a bad result is not evidence.** If the planted
   positives never fail and no verdict is ever rejected, the harness is measuring
@@ -602,7 +605,7 @@ resting safety on its judgement:
 A prior analysis session produced a large body of protocol findings. They are
 withheld deliberately.
 
-That analysis was **wrong at least three times** — each error stated with
+That analysis was **wrong at least three times**, each error stated with
 confidence, each caught only by redoing the work more carefully, never by
 review. Handing those conclusions over as a starting point would propagate the
 errors and turn verification into confirmation.

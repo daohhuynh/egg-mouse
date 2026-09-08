@@ -7,27 +7,27 @@
 > flash may leave a mouse that does not work. See [`NOTICE`](NOTICE) and
 > [`LICENSE`](LICENSE) before running it.
 
-Native macOS software for the **Endgame Gear OP1 8k v2** — a configuration tool
+Native macOS software for the **Endgame Gear OP1 8k v2**: a configuration tool
 and a firmware flasher. Endgame ships Windows-only tools; the USB protocol here
 was derived independently from their `.exe` files by static analysis, and is
 being checked against captures of their software talking to the hardware.
 
 **Status: both tools work, and both have been run end to end on real
 hardware.** On 2026-09-05 `egg-flash` performed a complete firmware update of an
-OP1 8k v2 on macOS — 65 blocks written, 65 verified, zero retries, zero
+OP1 8k v2 on macOS: 65 blocks written, 65 verified, zero retries, zero
 reconnects, the device's own whole-image checksum matching, and the mouse back
 in application mode ~900 ms later.
 
 The outbound byte stream is not merely *similar* to Endgame's. It is the same
-135 frames they send, and the approval token the tool demands before writing —
-`ecfc8f88` — **is the SHA-256 of Endgame's own captured traffic to this mouse**,
+135 frames they send. And the approval token the tool demands before writing,
+`ecfc8f88`, **is the SHA-256 of Endgame's own captured traffic to this mouse**,
 computed by a decoder that shares no code with the flasher. Change one byte of
 the plan and the token changes.
 
 `egg-config` read the settings record, factory-reset it, and wrote a saved
 record back, each against a prediction committed to git beforehand, each scoring
 21 of 21 bytes. After the flash, the post-reset record scored 21/21 against a
-table derived from *Endgame's own post-flash capture* — so this software leaves
+table derived from *Endgame's own post-flash capture*, so this software leaves
 the mouse byte-identical to where theirs does.
 
 One device, no spare. Everything here was derived from static analysis; nothing
@@ -38,10 +38,10 @@ was copied from any third-party implementation.
 | path | what it holds |
 | --- | --- |
 | `Sources/` | the two CLI tools, the three core libraries, and the SwiftUI app |
-| `Tests/` | the whole gate — `ctest` runs every item, including the mutation harness |
+| `Tests/` | the whole gate: `ctest` runs every item, including the mutation harness |
 | `Tools/` | capture decoding, PE/resource inspection, static-analysis tooling |
 | `notes/` | the derivation: what was observed, what was derived, what is still a guess |
-| `docs/` | [`engineering-rules.md`](docs/engineering-rules.md) — the rules the notes cite by section — and [`CAPTURE-STEPS.md`](docs/CAPTURE-STEPS.md) |
+| `engineering-rules.md` | [the rules](engineering-rules.md) the notes and the tests cite by section |
 | `windows-run/`, `windows-capture/` | the vendor's own USB traffic, two runs, two firmware versions |
 
 ### If you clone this, run one command first
@@ -52,19 +52,19 @@ git config core.hooksPath .githooks
 
 `.githooks/pre-commit` refuses any commit that stages a planted mutation-test
 marker. `Tests/mutants.sh` plants a `// MUTANT`, builds, tests and restores, and
-twice on 2026-09-06 one reached a commit — once into the flash write phase.
+twice on 2026-09-06 one reached a commit, once into the flash write phase.
 Hook path is per-clone git config, so a clone does not inherit it and the guard
 is silently off until you run that line. `ctest`'s `tree_clean` catches the same
 thing, but only after the commit.
 
-`docs/engineering-rules.md` is the one to read first if you want to know why any
+`engineering-rules.md` is the one to read first if you want to know why any
 of this is shaped the way it is. Every `[O]`/`[D]`/`[G]` tag in `notes/` means
 what §1.2 there says it means, and the safety argument for the flasher is §4.2.
 
 **The vendor's `.exe` files are deliberately not in this repository.** They are
 Endgame Gear's, not ours to redistribute; `notes/binaries.md` pins the SHA-256
 of each build analysed, and the tools that need one say so and exit. The capture
-files carry the vendor's traffic only — the recording host's own metadata was
+files carry the vendor's traffic only. The recording host's own metadata was
 redacted in place, byte-for-byte the same length, on 2026-09-07.
 
 ---
@@ -76,25 +76,25 @@ Keep holding for a few more seconds, then release.
 
 The mouse re-enumerates as ProductID `0x1977`, Product string `Bootloader`, and
 can be re-flashed from there. This is forced by hardware and **does not depend
-on any firmware being valid** — it is observed behaviour on the device, not an
+on any firmware being valid**. It is observed behaviour on the device, not an
 inference. It is also the single fact that makes the rest of this project
 reasonable to attempt with one mouse and no spare.
 
 **How you got into the bootloader decides whether you can leave it.** A
-*button* entry is not latched — the device sat in the bootloader for four hours
+*button* entry is not latched: the device sat in the bootloader for four hours
 and returned to normal on one replug, no buttons held. A *software* entry
 (`A1 3A`) **is** latched, survives power loss, and is cleared only by completing
-a flash. Two power cycles failed to clear it; a completed flash did, twice —
+a flash. Two power cycles failed to clear it; a completed flash did, twice,
 once by Endgame's updater and once by this one. Identical USB identity does not
 mean identical state (`notes/bootloader-observed.md` §5a, §5b).
 
 **And if it is stuck as `0x1977`, Endgame's own Windows updater will fix it.**
-That is not a hopeful reading of their tool — it is a dedicated path in it. The
+That is not a hopeful reading of their tool. It is a dedicated path in it. The
 updater's device search returns a *mode code*, and on finding ProductID `0x1977`
 it starts a different worker that goes straight to the flash sequence and skips
 the mode-switch entirely. A mouse already in the bootloader is a supported
 starting state for their software, not an error. (Derived from the binary, not
-tested — running the vendor's tools is out of scope here — see
+tested, because running the vendor's tools is out of scope here. See
 `notes/updater-protocol.md` §5.1a.)
 
 ---
@@ -114,8 +114,8 @@ Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
 none of them needs the mouse, and the lot takes about two minutes. For the
 count, ask rather than trust this sentence: `ctest --test-dir build -N | tail
 -1`. It said "thirty" here for a day after the number was thirty-nine, which is
-engineering-rules.md §6's rule about quoting numbers instead of regenerating them, in the
-one file a newcomer reads first.
+engineering-rules.md §6's rule about quoting numbers instead of regenerating
+them, in the one file a newcomer reads first.
 Dropping `-E mutants` adds the mutation run, which takes ~15 minutes because it
 rebuilds the tree once per planted bug.
 
@@ -169,7 +169,7 @@ egg-config multiclick BUTTON MODE [N] --yes   per-button click filter
 ```
 
 `show` is the one to reach for first. `read` prints 1024 bytes of hex; `show`
-prints what the mouse is actually set to — polling in Hz, lift-off distance in
+prints what the mouse is actually set to: polling in Hz, lift-off distance in
 the vendor's own millimetres, which CPI stage is live, what each button is bound
 to, and the firmware version the reading came off. `--from FILE` does the same
 to a record saved earlier with nothing plugged in, and `--machine` emits TSV,
@@ -180,7 +180,7 @@ checked rather than assumed: for every value `set` accepts, the decode must
 lead with the same value, and it must refuse exactly the bytes no legal value
 can produce. A byte outside that set is printed as unrecognised rather than
 rounded to the nearest sensible reading. The whole thing is anchored outside
-the code as well — `Tests/test_show.sh` decodes the device's own captured reply
+the code as well. `Tests/test_show.sh` decodes the device's own captured reply
 and checks all sixteen settings against Endgame's screenshots.
 
 The four verbs in the second group exist because those settings are not single
@@ -193,7 +193,7 @@ any of them with no arguments prints what it accepts.
 where a byte lives is not enough: all 115 record bytes are mapped, and most of
 them are still nameless. `egg-config set` with no arguments prints the list with
 each citation, and a second list of fields that are derived and deliberately
-**withheld**, each with the reason — because "why can I not set this?" deserves
+**withheld**, each with the reason, because "why can I not set this?" deserves
 an answer in the tool, not only in the notes.
 
 `restore` is different in kind: it sends back bytes the *device* produced, so
@@ -208,13 +208,13 @@ enough to audit by eye.
 
 Two flags worth knowing:
 
-`--vault FILE` — the **first** structurally plausible record ever read on this
+`--vault FILE`. The **first** structurally plausible record ever read on this
 machine is saved to `~/.egg-mouse-known-good.bin` automatically, by every
 command that reads, and is never overwritten. It is the undo. You do not have to
 remember to ask for it, because the run where nobody remembered is the run where
 it mattered.
 
-`--unknown-bytes=preserve|vendor` — record bytes `0x01..0x04` are the one place
+`--unknown-bytes=preserve|vendor`. Record bytes `0x01..0x04` are the one place
 where read-modify-write and copying the vendor produce different wire bytes: the
 device reports `80 00 00 00` there and all 73 captured vendor writes carry
 `00 00 00 00`. The default is `vendor`, decided on the evidence and reversible
@@ -223,8 +223,8 @@ against the captures.
 
 **A successful read-back proves what the mouse holds now, not what survives
 later.** Two writes have survived a power cycle intact, both with 0 of 1024
-payload bytes changed: one at **8.6 s** unplugged and one at **1706.8 s — 28.4
-minutes**.
+payload bytes changed: one at **8.6 s** unplugged and one at **1706.8 s (28.4
+minutes)**.
 
 That second test also closed the project's longest-running open question. In the
 capture run the vendor's *own* writes were gone by the next session in five gaps
@@ -253,7 +253,7 @@ egg-flash help
 ```
 
 `restore-firmware` puts a backup back. It is `flash` with a different image and
-inherits every guard — same frames, same write phase, same token rules — rather
+inherits every guard (same frames, same write phase, same token rules) rather
 than becoming a second, less exercised path to the same erase. **It accepts only
 this tool's own backups**: `read-firmware` writes a sidecar `<image>.origin`
 recording the SHA-256 it saved, and `restore-firmware` refuses an image with no
@@ -262,8 +262,9 @@ opens a PE, so there is no resource for a file to suggest.
 
 ### The entry receipt
 
-engineering-rules.md §4.2b requires that everything touching firmware enters the bootloader
-by `A1 3A`, the vendor's own way — and nothing on the wire can tell that entry
+engineering-rules.md §4.2b requires that everything touching firmware enters
+the bootloader by `A1 3A`, the vendor's own way, and nothing on the wire can
+tell that entry
 from a LEFT+RIGHT button entry, because PID, `bcdDevice` and the product string
 are identical either way.
 
@@ -296,8 +297,8 @@ egg-flash flash "...Updater 1.10.exe" --backup backup.bin --confirm ecfc8f88
 egg-config restore ~/.egg-mouse-known-good.bin --yes
 ```
 
-Everything that can fail is checked **before** `A1 3A` goes out — image hash,
-block range, backup file, approval token, settings undo, device count — so the
+Everything that can fail is checked **before** `A1 3A` goes out: image hash,
+block range, backup file, approval token, settings undo, device count. So the
 window in which the mouse is not a mouse contains only the commands that have to
 be there. After the erase the tool does not stop: no cancel, no timeout that
 gives up, and `SIGINT`/`SIGTERM`/`SIGHUP`/`SIGPIPE` are ignored until the image
@@ -306,14 +307,15 @@ bad outcome. `SIGPIPE` is on that list for a reason that has nothing to do with
 anyone typing anything: piping the run into `head`, or closing the `tee` reading
 it, would otherwise kill the process between two blocks.
 
-It reports `block N/65 verified` as it goes, on **stderr** — stdout carries the
-frame stream that gets diffed against the vendor capture, so progress must not
-land there. `N` counts blocks that read back correct, and a block being
-repaired does not advance it.
+It reports `block N/65 verified` as it goes, on **stderr**, because stdout
+carries the frame stream that gets diffed against the vendor capture and
+progress must not land there. `N` counts blocks that read back correct, and a
+block being repaired does not advance it.
 
 The image is always `FWFILE` resource **140** of the vendor `.exe` you name, and
-that is a compile-time constant — there is no way to select a different one. Its
-SHA-256 is pinned, and an image that does not match is refused before any byte
+that is a compile-time constant, and there is no way to select a different one.
+Its SHA-256 is pinned, and an image that does not match is refused before any
+byte
 goes out.
 
 That guard is not decoration. Updaters 1.04, 1.06 and 1.07 each ship their own
@@ -323,12 +325,12 @@ firmware from the wrong one**, because the device is assumed to validate nothing
 it is given.
 
 `egg-flash` also tells you, on **stderr**, whether a settings undo exists. Its
-last command is `A1 13` — byte for byte the config tool's Factory Reset. That
+last command is `A1 13`, byte for byte the config tool's Factory Reset. That
 used to be a guess "not testable without flashing". It has now been tested by
 flashing: the post-flash record scored **21/21** against the same predicted byte
 table, so `A1 13` does mean the same thing in both places. **Flashing wipes your
 settings.** `egg-config restore` puts them back and is verified by read-back, but
-only from a file you already have — so run `egg-config read` first, and `flash`
+only from a file you already have, so run `egg-config read` first. `flash`
 refuses outright if no undo exists.
 
 That message is on stderr and not stdout deliberately: `stream` exists so the
@@ -344,31 +346,31 @@ home screen leading to **Settings**, **Firmware** and **New versions**.
 It **shells out to the two CLIs and owns no write path.** That is not laziness,
 it is the same reason there are two executables rather than one. A window has a
 close button, a Dock quit item and a force-quit, and a flash between the erase
-and a verified image may not honour any of them — so the flash stays a process
+and a verified image may not honour any of them, so the flash stays a process
 that cannot be asked to stop, and the app is only its caller.
 
-If the mouse is in its bootloader when you open the app — which is what an
-interrupted backup or flash leaves behind, and which does **not** clear by
-unplugging — the home screen says so, says nothing is broken, and points at the
+If the mouse is in its bootloader when you open the app, which is what an
+interrupted backup or flash leaves behind and does **not** clear by
+unplugging, the home screen says so, says nothing is broken, and points at the
 one thing that clears it. That state is the most likely bad outcome of using
 this software correctly, so the explanation belongs where the person is, not
 only in this file.
 
-- **Settings** — read the record, change one field at a time, and every change
+- **Settings.** Read the record, change one field at a time, and every change
   is previewed before it is written and read back after. It can save a copy and
   restore one, in two clicks: the preview runs entirely offline (the mouse can
   be unplugged) and the write button arms only if that preview succeeded. There
   is a one-click restore of the automatic known-good copy. Fields the *device*
   reports it cannot accept are disabled with the reason next to them.
-- **Firmware** — back up what is on the mouse now, or write a new image from
+- **Firmware.** Back up what is on the mouse now, or write a new image from
   Endgame's own updater. The backup is a separate run and is required first.
-- **New versions** — hand it an Endgame `.exe` this build has never seen, for
+- **New versions.** Hand it an Endgame `.exe` this build has never seen, for
   either a firmware updater or a config tool, and it re-derives what it needs
   and prints what it found. It refuses rather than guessing.
 
 Every argument list the app can build is a pure function in
 `Sources/EGGApp/Commands.swift`, and `Tests/test_app_commands.swift` runs those
-argument lists against the real CLIs — so a change to a CLI's output that the
+argument lists against the real CLIs, so a change to a CLI's output that the
 app parses shows up as a failing test rather than as a greyed-out button.
 
 ## Tests
@@ -411,7 +413,7 @@ stores, and lies about checksums. None of it needs hardware.
 `test-config` does the same for the config path, against a device that
 acknowledges writes it never performed, corrupts what it stores, changes an
 extra byte of its own accord, returns garbage, returns a short record, and goes
-silent — plus a **cooperative** control, because if the friendly case failed
+silent, plus a **cooperative** control, because if the friendly case failed
 too, none of the hostile ones would prove anything. Its invariants run over
 seeds rather than examples: never-writes-after-a-bad-read over 200 seeds,
 only-sanctioned-bytes-differ over 400 runs, and bit preservation checked
@@ -427,12 +429,13 @@ file cannot tell you the derivation was wrong on day one. This can. Verified it
 can fail: a one-byte change to the plan moves the token and the test catches it.
 
 `test_config_replay.py` is the equivalent on the config side, because the
-reference is again not something we produced: the captures give 33 pairs of (record
-before, record after) where exactly one setting changed and we know which. Our
+reference is again not something we produced: the captures give 33 pairs of
+(record before, record after) where exactly one setting changed and we know
+which. Our
 own composition code is handed the before-record and the same change, and must
 reproduce the vendor's after-record.
 
-Under `--unknown-bytes=vendor` it matches all 33 **whole frames** — all 1041
+Under `--unknown-bytes=vendor` it matches all 33 **whole frames**: all 1041
 bytes, header included, byte for byte against what Endgame's tool actually put
 on the wire. That last part is new and it checks something nothing else could:
 the 16-byte header was *derived* from `FUN_00404180` and had never been compared
@@ -442,12 +445,12 @@ payload. `egg-config dryrun` emits the real frame, so now it can be.
 `mutants.sh` exists because `test-flash` passed 47/47 on its first run, and a
 suite that has never failed has not been shown to work. `test-config` then
 passed on *its* first run too, for the same reason. So the harness plants known
-bugs in both — several of them the vendor's own — and requires the relevant
+bugs in both, several of them the vendor's own, and requires the relevant
 suite to notice. The two counts it declares are at the top of `Tests/mutants.sh`
-(`grep DECLARED_ Tests/mutants.sh`) — read them from there rather than from
+(`grep DECLARED_ Tests/mutants.sh`). Read them from there rather than from
 prose, because they have been stale in prose three times.
 **If either number moves, suspect the
-harness before the tests** — it has now been wrong seven times, and every one of
+harness before the tests.** It has now been wrong seven times, and every one of
 those bugs made it misreport its own reliability, which is the only thing it
 exists to measure. The most recent (a mutated file left out of the restore list)
 graded every later mutant against an already-failing suite and reported a clean
@@ -460,7 +463,7 @@ nothing reached the "wrote, and cannot say what the device holds" branch; a
 policy that zeroed one byte too many was invisible because record `0x00` is
 `0x00` in all nine captured reads and all 73 captured writes; and a redundant
 `set` would have put a frame on the wire just to normalise four bytes. Two are
-now tested. The third — the pre-send self-check — is labelled *equivalent*
+now tested. The third, the pre-send self-check, is labelled *equivalent*
 rather than fixed, because no reachable input can make the frame differ from
 what was intended, so a test that "caught" it would be asserting something
 untrue. It guards against a future bug in the frame builder, and the four
@@ -484,7 +487,7 @@ in every block, so 64 exact matches against a reference never sent to the device
 is what proved the addressing before anything was erased.
 
 The 65th block (device index `0x74`, the last) differs, stably, and the
-pre-registered guess that it holds settings was **refuted** — the settings record
+pre-registered guess that it holds settings was **refuted**: the settings record
 is nowhere in it, and the whole firmware image is encrypted or compressed
 (entropy 7.80 bits/byte across every block). What it is: the firmware writes that
 block at runtime. The vendor's own flash overwrites it and the device rebuilds
@@ -520,22 +523,15 @@ notes/                  the derivation, with provenance tags on every claim
 
 Every protocol claim in `notes/` carries one of:
 
-- **[O] Observed** — read off the physical device.
-- **[D] Derived** — traced to a specific address in a vendor `.exe`, cited.
-- **[G] Guess** — convention or inference.
+- **[O] Observed.** Read off the physical device.
+- **[D] Derived.** Traced to a specific address in a vendor `.exe`, cited.
+- **[G] Guess.** Convention or inference.
 
 **A [G] never reaches the hardware.** Read-modify-write preserves bytes we do
 not understand rather than normalising them.
 
 The vendor binaries are not in this repository and never will be. `notes/` cites
 addresses; reproducing any of it needs your own copy.
-
-## Licence
-
-Not yet chosen. The vendor binaries are Endgame Gear's and are not redistributed
-here. Protocol facts about hardware are not copyrightable, and this is an
-independent implementation from documented facts.
-
 
 ## Changing one setting
 
@@ -545,34 +541,34 @@ egg-config set polling 1000         # dry run: says what it would write
 egg-config set polling 1000 --yes   # read, change one byte, write, verify
 ```
 
-**The list is short on purpose.** `engineering-rules.md` §1.3 forbids writing a byte whose
-meaning is a guess, so a field is settable only when its meaning was derived
-from the vendor's own binary and can be cited to an address — the tool prints
-that citation next to every field. The 115-byte settings record is fully
+**The list is short on purpose.** `engineering-rules.md` §1.3 forbids writing a
+byte whose meaning is a guess, so a field is settable only when its meaning was
+derived from the vendor's own binary and can be cited to an address. The tool
+prints that citation next to every field. The 115-byte settings record is fully
 *mapped* (`notes/config-protocol.md` §7.3) and mostly not *named*, and mapped is
 not good enough to write.
 
 **And the list has stopped growing, which is a result rather than a pause.**
 Every route from Endgame's own Windows software to a new writable field has now
 been walked: every byte that ever changed across the captured settings records
-is named or inside the CPI or button blocks — 108 of them now, across both
+is named or inside the CPI or button blocks, 108 of them now, across both
 capture runs, and `Tests/test_defaults.py` fails if a future capture moves a
 byte nothing names; the routine that writes the factory defaults introduces
 nothing new; every control the older config tools have and 1.07 dropped
 resolves to a field already named or already refused; and the LED page, the last
-candidate, turns out to be inert in all four tools — **dialog 137 is never
-created**, so nothing Endgame ships can move those bytes either. What is left is
-the firmware image itself.
+candidate, turns out to be inert in all four tools, because **dialog 137 is
+never created**, so nothing Endgame ships can move those bytes either. What is
+left is the firmware image itself.
 
 That last clause used to read "its controls have no message-map handler in any
 of them". **That half was retracted on 2026-09-06** as a §1.2b failure: control
 1043, `Apply led settings`, does have a `BN_CLICKED` handler in all four tools
-(cfg107 `0x405940`). The conclusion stands on its other leg — a handler on a
-dialog that is never created runs never — and stating the retracted leg as the
+(cfg107 `0x405940`). The conclusion stands on its other leg, since a handler on a
+dialog that is never created runs never, and stating the retracted leg as the
 reason is the kind of thing `config-protocol.md` §12 exists to stop.
 
 Everything else is still reachable, through `egg-config restore`, which sends
-back bytes the device itself produced — so no byte in it is a guess even where
+back bytes the device itself produced, so no byte in it is a guess even where
 we cannot say what it means.
 
 Each `set` reads first and refuses to write after a failed or implausible read,
@@ -584,7 +580,7 @@ device than the one it sent, it says so.
 
 ## Licence
 
-**Apache License 2.0** — the full text is in [`LICENSE`](LICENSE), and
+**Apache License 2.0.** The full text is in [`LICENSE`](LICENSE), and
 [`NOTICE`](NOTICE) carries the copyright line and the disclaimers that
 redistributors have to keep with it.
 
@@ -601,7 +597,7 @@ project rather than general preference:
   tool erases flash on hardware that may have no spare. That is the clause that
   actually matters here, and MIT covers it in one sentence.
 
-It is permissive, so nothing about it binds anyone — including this project,
+It is permissive, so nothing about it binds anyone, including this project,
 which is deliberately kept free of copyleft obligations it has not accepted
 (see `engineering-rules.md` §1.1: every fact here was derived from the vendor's
 own binaries and captures, and no other implementation was read).

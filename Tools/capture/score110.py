@@ -4,7 +4,7 @@
 Reports what each capture ACTUALLY did rather than asserting a step list: the
 captures were taken chronologically while the steps were still being edited, so
 a section may
-predate the version of the steps that is now on disk (docs/CAPTURE-STEPS.md).
+predate the version of the operator's steps that was on disk at the time.
 
 Every prediction checked here is cited to notes/prediction-capture-1.10.md or to
 notes/config-protocol.md 7.17.  Nothing in this file encodes a belief about what
