@@ -19,8 +19,13 @@ ghidra_projects/
 # Build output
 build/
 build-san/
+build-release/
+build-brewcheck/
 .build/
 cmake-build-*/
+# Release artefacts from Tools/make-release.sh. Reproducible from a tag, and a
+# .dmg in git is a binary nobody can review.
+dist/
 compile_commands.json
 *.o
 *.a

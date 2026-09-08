@@ -33,6 +33,37 @@ the mouse byte-identical to where theirs does.
 One device, no spare. Everything here was derived from static analysis; nothing
 was copied from any third-party implementation.
 
+## Install
+
+**With Homebrew, and no security warning at all:**
+
+```sh
+brew install daohhuynh/egg-mouse/egg-mouse
+```
+
+That builds everything on your own machine, which is why macOS raises nothing:
+the quarantine flag that triggers Gatekeeper is attached by the browser that
+downloads a file, and Homebrew does not use one. You get `egg-config` and
+`egg-flash` on your `PATH`, and the app under `$(brew --prefix)/opt/egg-mouse`.
+
+**Without Homebrew:** download the `.dmg` from
+[Releases](https://github.com/daohhuynh/egg-mouse/releases/latest) and drag
+`EGG Mouse` to Applications. It is universal, runs on Apple Silicon and Intel,
+and carries both command-line tools inside the bundle, so there is nothing else
+to install.
+
+**macOS will warn you the first time, and the warning is accurate.** This app is
+signed only ad-hoc, not with an Apple Developer certificate, because that costs
+99 USD a year and this is a free project. macOS genuinely cannot verify who
+built it. To allow it: double-click, click Done on the warning, then open
+System Settings, Privacy & Security, scroll to Security, and click **Open
+Anyway** next to the message about EGG Mouse. Once only. The Homebrew line
+above avoids this entirely.
+
+Neither route needs `brew install hidapi` any more. The HID backend is compiled
+in from pinned upstream sources (`third_party/hidapi/`), so a released binary
+depends on nothing outside `/System` and `/usr/lib`.
+
 ### What is where
 
 | path | what it holds |
@@ -101,13 +132,32 @@ tested, because running the vendor's tools is out of scope here. See
 
 ## Build
 
-Needs CMake ≥ 3.20, a C++20 compiler, and `hidapi`:
+Needs CMake ≥ 3.20 and a C++20 compiler. **`hidapi` is no longer a
+prerequisite**: the macOS HID backend is compiled from the pinned upstream
+sources in `third_party/hidapi/`, which is what lets a release be universal and
+run on a Mac that has never seen Homebrew.
 
 ```sh
-brew install hidapi cmake
+brew install cmake
 cmake -S . -B build
 cmake --build build
 ```
+
+`-DEGG_VENDORED_HIDAPI=OFF` links Homebrew's `libhidapi` instead, exactly as
+this project did until 2026-09-08. It is kept as the fallback if the vendored
+backend is ever suspected on the device path. Both were checked against the
+attached mouse on the day of the switch and enumerated it identically;
+`third_party/hidapi/README.md` records why 0.15.0 specifically is pinned.
+
+To build the downloadable disk image:
+
+```sh
+./Tools/make-release.sh 1.0.0        # -> dist/EGG-Mouse-1.0.0.dmg
+```
+
+It builds both architectures, puts the two CLIs inside the app bundle, and
+refuses to package the result unless every executable is universal, carries no
+dependency outside `/System` and `/usr/lib`, and has a valid signature.
 
 Produces `build/egg-config`, `build/egg-flash`, `build/test-flash` and
 `build/test-config`. `ctest --test-dir build -E mutants` runs the fast suites --

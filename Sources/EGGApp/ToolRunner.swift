@@ -98,11 +98,25 @@ final class ToolRunner: ObservableObject {
     /// cannot change what is sent.
     @Published var verbose = false
 
-    /// Where the executables are. Searched next to the app, then in ./build,
-    /// then on PATH -- so a developer running from the repo and a user running
-    /// a copied bundle both work without configuration.
+    /// Where the executables are. Searched INSIDE the bundle first, then next
+    /// to the app, then in ./build, then on PATH -- so a downloaded release, a
+    /// Homebrew install and a developer running from the repo all work with no
+    /// configuration.
     static func locate(_ name: String) -> URL? {
         var candidates: [URL] = []
+        // Contents/MacOS/, i.e. beside this app's own executable. FIRST on
+        // purpose: a release .dmg ships egg-config and egg-flash inside the
+        // bundle so the download is one self-contained thing, and a bundle
+        // that carries its own tools must never prefer a stray copy it found
+        // in some working directory. Bundle.main.bundleURL is ".../Foo.app",
+        // which is why this cannot be derived from it by appending a name --
+        // the old first candidate resolved to a SIBLING of the .app, and so
+        // nothing inside the bundle was ever searched at all.
+        if let inBundle = Bundle.main.executableURL?
+                            .deletingLastPathComponent()
+                            .appendingPathComponent(name) {
+            candidates.append(inBundle)
+        }
         let bundleDir = Bundle.main.bundleURL.deletingLastPathComponent()
         candidates.append(bundleDir.appendingPathComponent(name))
         candidates.append(bundleDir.appendingPathComponent("build/\(name)"))

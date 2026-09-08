@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(egg-mouse CXX)
+# C as well as C++: third_party/hidapi/mac/hid.c is the vendored HID backend.
+project(egg-mouse CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,8 +17,40 @@ add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
 # -Wall already warns; only -Werror stops it being ignorable.
 add_compile_options(-Werror=format -Werror=format-security -Werror=format-extra-args)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi)
+# HID BACKEND. Two ways to get one, and the default is the vendored source.
+#
+# Homebrew's libhidapi is arm64-only and lives at an absolute path
+# (/opt/homebrew/opt/hidapi/lib/libhidapi.0.dylib, per `otool -L`), so a binary
+# linked against it cannot be universal and cannot run on a Mac without
+# Homebrew. Both of those matter only for people downloading a release, which
+# is exactly who a released binary is for. third_party/hidapi/ holds the same
+# upstream 0.15.0 sources, unmodified and hash-pinned, and compiling that one
+# file in leaves the executables with no non-system dependency at all.
+#
+# 0.15.0 is the version whose Homebrew build was linked into the egg-flash that
+# did the real firmware update on 2026-09-05, so this changes the compiler
+# flags and the architecture list and nothing else. See third_party/hidapi/.
+#
+# -DEGG_VENDORED_HIDAPI=OFF restores the Homebrew link exactly as it was, which
+# is the fallback if the vendored backend is ever suspected on the device path.
+option(EGG_VENDORED_HIDAPI
+       "Compile the pinned hidapi source in third_party/ instead of linking Homebrew's" ON)
+
+if(EGG_VENDORED_HIDAPI)
+  add_library(egg_hidapi STATIC third_party/hidapi/mac/hid.c)
+  target_include_directories(egg_hidapi PUBLIC
+    third_party/hidapi/hidapi
+    third_party/hidapi/mac)
+  target_link_libraries(egg_hidapi PUBLIC "-framework IOKit" "-framework CoreFoundation")
+  # Third-party C is not held to this project's warning flags. Ours stay on for
+  # our own code; -w here only stops upstream's style choices failing our build.
+  target_compile_options(egg_hidapi PRIVATE -w)
+  set(EGG_HIDAPI_TARGET egg_hidapi)
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi)
+  set(EGG_HIDAPI_TARGET PkgConfig::HIDAPI)
+endif()
 
 add_library(EGGCore STATIC
   Sources/EGGCore/src/Protocol.cpp
@@ -26,7 +59,7 @@ add_library(EGGCore STATIC
   Sources/EGGCore/src/Log.cpp
 )
 target_include_directories(EGGCore PUBLIC Sources/EGGCore/include)
-target_link_libraries(EGGCore PUBLIC PkgConfig::HIDAPI)
+target_link_libraries(EGGCore PUBLIC ${EGG_HIDAPI_TARGET})
 
 # engineering-rules.md §3: two executables, never one. Config and flash have contradictory
 # quit semantics (§4.2) and sharing a process makes "can the user quit now?" a
@@ -97,7 +130,7 @@ set_tests_properties(config PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   # unittest-based.
-  foreach(t actionset adoption button_map citations config_replay coverage cpi crossrefs defaults freshclone gui_state handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest recmap undo_loadable usbpcap)
+  foreach(t actionset adoption button_map citations config_replay coverage cpi crossrefs defaults freshclone gui_state handedness fwfile_set golden_vendor golden_config_cmds ingest_config ingest_errors ingest_row keymap lineage lod manifest prose_style recmap undo_loadable usbpcap vendored_hidapi)
     add_test(NAME ${t}
              COMMAND ${Python3_EXECUTABLE} -m unittest -v Tests.test_${t})
     set_tests_properties(${t} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
