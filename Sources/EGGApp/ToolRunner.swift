@@ -167,37 +167,82 @@ final class ToolRunner: ObservableObject {
         p.standardOutput = outPipe
         p.standardError = errPipe
 
-        // Stream stdout so a 65-block flash shows progress rather than a beach
-        // ball. The handler runs off the main actor, so the hop is explicit.
-        let collected = OutputCollector()
-        outPipe.fileHandleForReading.readabilityHandler = { h in
-            let d = h.availableData
-            guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
-            Task { @MainActor [weak self] in
-                await collected.append(s)
-                self?.liveOutput += s
-            }
-        }
-
         do {
             try p.run()
         } catch {
-            outPipe.fileHandleForReading.readabilityHandler = nil
             throw ToolError.launchFailed(tool, error.localizedDescription)
         }
 
+        // BOTH pipes are drained to EOF, on their own threads, BEFORE the exit
+        // status is collected. Three separate defects live in the order of
+        // those three things, and this function has had all three.
+        //
+        //  1. TRUNCATION, which is what sent us here (2026-09-08). The previous
+        //     version streamed stdout through a `readabilityHandler` that
+        //     hopped to `Task { @MainActor }` to append, then read the buffer
+        //     the instant `terminationHandler` fired. Nothing sequenced the
+        //     hops against that read, so a chunk still queued on the main actor
+        //     was simply missing from the result. It never showed up in a
+        //     harness, because a test binary's main actor is idle and the hops
+        //     always won the race; in a launching app, which is exactly when
+        //     ConfigView's `.task` runs, it is not idle. Under artificial main
+        //     actor load the old code returned ZERO bytes of a 5,016-byte
+        //     listing about once in forty runs, and `egg-config set` returning
+        //     nothing is a Settings screen with an empty field menu.
+        //
+        //     Correctness no longer depends on the main actor at all: the
+        //     reader appends bytes synchronously on its own thread, and the
+        //     hop to the main actor is now display-only. It publishes the whole
+        //     buffer rather than its own chunk, so an out-of-order hop can show
+        //     stale text for an instant but cannot show WRONG text.
+        //
+        //  2. DEADLOCK on a big log. Waiting for exit before reading a pipe
+        //     hangs as soon as a tool writes more than the pipe buffer holds
+        //     (64 KiB), because the child blocks in write() and never exits.
+        //     `egg-flash` writing 65 blocks of progress is the case that would
+        //     have found it. Read first, wait after.
+        //
+        //  3. A DROPPED CHUNK on a split character. The old handler did
+        //     `guard let s = String(data: d, encoding: .utf8) else { return }`,
+        //     so a chunk boundary landing inside a multi-byte character threw
+        //     that chunk away. Bytes are accumulated as Data and decoded once,
+        //     at the end, where no boundary can fall inside a character.
+        //
         // NOTE: there is deliberately no timeout and no cancellation path here.
         // A flash that is taking a long time is not a flash to abandon.
+        let outBuf = OutputBuffer(), errBuf = OutputBuffer()
+        let outHandle = outPipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            p.terminationHandler = { _ in c.resume() }
+            let group = DispatchGroup()
+            let q = DispatchQueue.global(qos: .userInitiated)
+            q.async(group: group) {
+                // Stream stdout so a 65-block flash shows progress rather than
+                // a beach ball. `availableData` blocks until there is data or
+                // the writer closes, and returns empty exactly at EOF.
+                while true {
+                    let d = outHandle.availableData
+                    if d.isEmpty { break }
+                    outBuf.append(d)
+                    Task { @MainActor [weak self] in self?.liveOutput = outBuf.text }
+                }
+            }
+            q.async(group: group) {
+                while true {
+                    let d = errHandle.availableData
+                    if d.isEmpty { break }
+                    errBuf.append(d)
+                }
+            }
+            group.notify(queue: q) {
+                p.waitUntilExit()
+                c.resume()
+            }
         }
-        outPipe.fileHandleForReading.readabilityHandler = nil
 
-        let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                         encoding: .utf8) ?? ""
         return ToolResult(status: p.terminationStatus,
-                          stdout: await collected.text,
-                          stderr: err)
+                          stdout: outBuf.text,
+                          stderr: errBuf.text)
     }
 
     /// Run a helper script through python3. Used only for the update pipeline,
@@ -225,9 +270,27 @@ final class ToolRunner: ObservableObject {
     }
 }
 
-/// Accumulates streamed output off the main actor.
-actor OutputCollector {
-    private var buf = ""
-    func append(_ s: String) { buf += s }
-    var text: String { buf }
+/// Accumulates a tool's output off the main actor.
+///
+/// A lock rather than an actor, deliberately. An actor can only be appended to
+/// from an async context, which is what forced the old code to hop to the main
+/// actor to record a chunk and is the whole reason output could go missing
+/// (see `run`). Appending has to be synchronous so that it happens on the
+/// reader thread, in order, whether or not anything else is scheduled.
+final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buf = Data()
+
+    func append(_ d: Data) {
+        lock.lock(); defer { lock.unlock() }
+        buf.append(d)
+    }
+
+    /// Decoded once, over whole bytes, so no chunk boundary can fall inside a
+    /// multi-byte character. Invalid bytes become U+FFFD rather than throwing
+    /// the output away: a tool that emits one bad byte still has things to say.
+    var text: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: buf, as: UTF8.self)
+    }
 }

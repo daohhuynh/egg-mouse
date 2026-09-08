@@ -588,8 +588,30 @@ enum Commands {
         var actions: [String] = []
         /// Action name -> the argument it needs: "cpi", "key", or "none".
         var actionArg: [String: String] = [:]
+        /// Action name -> the group the CLI files it under: "mouse", "cpi",
+        /// "media", "keyboard", "disable".
+        ///
+        /// The vendor's own menu is two levels deep -- MOUSE, KEYBOARD KEY,
+        /// CPI and MEDIA each open a submenu -- and this column is where that
+        /// structure comes from. It is READ, not invented here: `map
+        /// --machine` prints the group as the third field of every ACTION row,
+        /// and `egg-config map`'s human listing prints the same groups as
+        /// headings. Grouping the nineteen actions in the app by any other
+        /// rule would be a second opinion about the CLI's own table, which is
+        /// the defect this file exists to avoid.
+        var actionCategory: [String: String] = [:]
         var keyNames: [String] = []
     }
+
+    /// The order the vendor's menu puts the groups in, from
+    /// windows-run/screenshots/button-mapping(all-same).png: MOUSE, KEYBOARD
+    /// KEY, CPI, MEDIA, DISABLE.
+    ///
+    /// ORDER ONLY. Membership always comes from `actionCategory`, so a group
+    /// the CLI stops emitting simply disappears and one it adds still shows up
+    /// (appended after these). Nothing here decides what an action IS.
+    static let actionCategoryOrder = ["mouse", "keyboard", "cpi", "media",
+                                      "disable"]
 
     static func parseButtonTables(_ text: String) -> ButtonTables {
         var t = ButtonTables()
@@ -600,7 +622,9 @@ enum Commands {
             case ("BUTTON", 3):
                 if f[2] == "1" { t.buttons.append(f[1]) }
             case ("ACTION", 4):
-                t.actions.append(f[1]); t.actionArg[f[1]] = f[3]
+                t.actions.append(f[1])
+                t.actionArg[f[1]] = f[3]
+                t.actionCategory[f[1]] = f[2]
             case ("KEY", 2):
                 t.keyNames.append(f[1])
             default:
@@ -733,6 +757,86 @@ enum Commands {
     }
 
     /// The choices a field offers, or nil when it takes free text.
+    /// The value `set` would take for a field, read off `show --machine`.
+    ///
+    /// Every FIELD row's `text` begins with the settable value and then
+    /// explains it: "1000 Hz", "0  (off)", "3  (stage 4 is the active one)",
+    /// `1  ("Force Off", item 1 of 4, stored as 2)`. Taking the first token is
+    /// therefore reading the CLI's own answer rather than re-deriving one from
+    /// the byte -- which matters, because for the remapped fields the byte and
+    /// the settable value are DIFFERENT numbers. `cpi-downshift` stores 2 for
+    /// item 1; a GUI that fed the byte back into `set` would move the setting.
+    ///
+    /// Tests/test_app_commands.swift drives this against the CLI's real output
+    /// for every field, so it cannot quietly stop agreeing with `accepts`.
+    static func settableValue(of f: Shown.FieldValue) -> String {
+        f.text.split(separator: " ").first.map(String.init) ?? ""
+    }
+
+    /// The bounds of a field whose `accepts` is a range rather than a list.
+    ///
+    /// "0 to 10 -- lift-off distance ...", "-127 to 127 (degrees, two's
+    /// complement)", "1 to 4, the dropdown item ...". Everything after the
+    /// first "--", "(" or "," is prose; the bounds are the two integers around
+    /// " to ". Returns nil for anything that does not have exactly that shape,
+    /// so a wording change makes a control fall back to a plain text box
+    /// rather than inventing a range.
+    static func range(for accepts: String) -> ClosedRange<Int>? {
+        var head = accepts
+        for stop in ["--", "(", ","] {
+            if let r = head.range(of: stop) { head = String(head[..<r.lowerBound]) }
+        }
+        let parts = head.components(separatedBy: " to ")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let lo = Int(parts[0]), let hi = Int(parts[1]),
+              lo < hi else { return nil }
+        return lo...hi
+    }
+
+    /// Labels for a ranged field whose `accepts` names both endpoints in a
+    /// unit, keyed by value.
+    ///
+    /// `lod` is the one that matters. Its sentence is "0 to 10 -- lift-off
+    /// distance, 0 = 0.7mm up to 10 = 1.7mm in 0.1mm steps", the vendor's own
+    /// dropdown reads "1.0mm", and a dropdown reading 0..10 would be worse
+    /// than either. So the two endpoints are READ out of the CLI's sentence
+    /// and the rest interpolated, rather than the scale being written down a
+    /// second time here -- a second copy of a protocol fact is exactly what
+    /// this app is built not to keep. If the wording changes this returns nil
+    /// and the control falls back to bare numbers, never to a wrong label.
+    static func rangeLabels(for accepts: String) -> [Int: String]? {
+        let re = try? NSRegularExpression(
+            pattern: "(-?[0-9]+) = ([0-9.]+)mm up to (-?[0-9]+) = ([0-9.]+)mm")
+        let ns = accepts as NSString
+        guard let m = re?.firstMatch(in: accepts, range: NSRange(location: 0,
+                                                                length: ns.length)),
+              m.numberOfRanges == 5,
+              let lo = Int(ns.substring(with: m.range(at: 1))),
+              let a = Double(ns.substring(with: m.range(at: 2))),
+              let hi = Int(ns.substring(with: m.range(at: 3))),
+              let b = Double(ns.substring(with: m.range(at: 4))),
+              lo < hi else { return nil }
+        var out: [Int: String] = [:]
+        for v in lo...hi {
+            let t = Double(v - lo) / Double(hi - lo)
+            out[v] = String(format: "%.1f mm", a + (b - a) * t)
+        }
+        return out
+    }
+
+    /// The unit a list of choices is in, when `accepts` ends by naming one:
+    /// "125, 250, ... or 8000 (Hz)" -> "Hz". Nil for a parenthetical that is
+    /// prose rather than a unit, which is every other field's.
+    static func unitSuffix(for accepts: String) -> String? {
+        guard let open = accepts.lastIndex(of: "("),
+              accepts.hasSuffix(")") else { return nil }
+        let inner = accepts[accepts.index(after: open)..<accepts.index(before: accepts.endIndex)]
+        let t = inner.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t.count <= 4,
+              t.allSatisfy({ $0.isLetter }) else { return nil }
+        return t
+    }
+
     static func choices(for accepts: String) -> [String]? {
         if accepts.hasPrefix("0 or 1") { return ["0", "1"] }
         guard accepts.contains(",") || accepts.contains(" or ") else { return nil }

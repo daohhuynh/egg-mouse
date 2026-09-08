@@ -397,6 +397,53 @@ check(Commands.choices(for: "-127 to 127 (degrees, two's complement)") == nil,
 check(Commands.choices(for: "0 to 10 (eleven lift-off distance steps)") == nil,
       "an N-to-M range must not be turned into a picker")
 
+// --------------------------------------------------------------------------
+// The three readers that turn an `accepts` sentence into a control
+// --------------------------------------------------------------------------
+// Each one exists so a protocol fact is READ from the CLI's own wording rather
+// than written down a second time in the view. That only holds if a wording
+// change makes them return nil -- a fallback to a plain number box -- instead
+// of returning something confident and wrong. So every check below has its
+// negative twin.
+check(Commands.range(for: "0 to 10 -- lift-off distance, 0 = 0.7mm up to "
+                        + "10 = 1.7mm in 0.1mm steps") == 0...10,
+      "lod's bounds come out of its own sentence")
+check(Commands.range(for: "-127 to 127 (degrees, two's complement)") == -127...127,
+      "a signed range parses, sign and all")
+check(Commands.range(for: "1 to 4, the dropdown item counting from the top "
+                        + "(stored remapped: 1->2, 2->3, 3->1, 4->0)") == 1...4,
+      "the remapped fields expose the ITEM range, not the stored bytes")
+check(Commands.range(for: "125, 250, 500, 1000, 2000, 4000 or 8000 (Hz)") == nil,
+      "a list is not a range")
+check(Commands.range(for: "0 or 1") == nil, "a flag is not a range")
+check(Commands.range(for: "10 to 4") == nil, "a backwards range is refused")
+
+let lodLabels = Commands.rangeLabels(
+    for: "0 to 10 -- lift-off distance, 0 = 0.7mm up to 10 = 1.7mm in 0.1mm steps")
+check(lodLabels?[0] == "0.7 mm", "lod 0 is labelled 0.7 mm",
+      lodLabels?[0] ?? "nil")
+check(lodLabels?[10] == "1.7 mm", "lod 10 is labelled 1.7 mm",
+      lodLabels?[10] ?? "nil")
+check(lodLabels?[3] == "1.0 mm",
+      "lod 3 interpolates to 1.0 mm, which is what the vendor's dropdown shows "
+      + "on the same record (basic.png)", lodLabels?[3] ?? "nil")
+equal(lodLabels?.count, 11, "one label per step, no more")
+// The twin. Change the wording and the labels must disappear, not degrade.
+check(Commands.rangeLabels(for: "0 to 10 -- lift-off distance in steps") == nil,
+      "a sentence that names no endpoints yields no labels")
+check(Commands.rangeLabels(for: "-127 to 127 (degrees, two's complement)") == nil,
+      "a range with no millimetres in it yields no labels")
+
+equal(Commands.unitSuffix(for: "125, 250, 500, 1000, 2000, 4000 or 8000 (Hz)"),
+      "Hz", "the polling picker can say Hz because the CLI does")
+check(Commands.unitSuffix(for: "-127 to 127 (degrees, two's complement)") == nil,
+      "a parenthetical that is prose is not a unit")
+check(Commands.unitSuffix(for: "0 or 1") == nil, "no parenthetical, no unit")
+check(Commands.unitSuffix(for: "1 to 4, the dropdown item counting from the "
+                             + "top (stored remapped: 1->2, 2->3, 3->1, 4->0)")
+        == nil,
+      "a long parenthetical is not a unit")
+
 check(Commands.confirmToken(in: "--confirm zzzzzzzz") == nil,
       "a non-hex token must be rejected")
 check(Commands.confirmToken(in: "--confirm abc") == nil,
@@ -919,6 +966,94 @@ do {
         check(c.fields.allSatisfy { $0.gate.isEmpty },
               "no field is gated on this record (0x6f is 0)")
         equal(c.raw["glass-mode"], "00", "glass-mode is off, so `lod` is the 11-step scale")
+
+        // ------------------------------------------------------------------
+        // settableValue: the number the Settings screen puts in a control
+        // ------------------------------------------------------------------
+        // THE PROPERTY THAT MATTERS, and it is not "the parse looks sane".
+        // Every control on the Settings screen is seeded from `show
+        // --machine` and writes back through `set`, so the value read out of
+        // a reading has to be the SAME value `set` would take -- and for the
+        // remapped fields the byte and that value are different numbers
+        // (`cpi-downshift` stores 2 for item 1). A GUI that fed the byte back
+        // would move the setting while showing the user nothing changed.
+        //
+        // Proved end to end, offline: for each field, take what the app would
+        // show, hand it to `egg-config dryrun` against the SAME record, and
+        // require the tool to say the field's own byte did not move.
+        //
+        // ON THE TOOL'S OWN SENTENCE, not on a byte count. The first version
+        // of this asserted "0 of 1024 payload bytes differ" and failed all
+        // thirteen fields, which looked like a real defect for a few minutes.
+        // It was not: `dryrun` zeroes record 0x01-0x04 as the vendor does, so
+        // a no-op write still moves one POLICY byte and the count is never 0.
+        // The CLI already distinguishes the two and prints "it already holds
+        // the value asked for" when the field's own byte is absent from the
+        // diff. That sentence is the property; the count is not.
+        var roundTripped = 0
+        for f in c.fields {
+            let v = Commands.settableValue(of: f)
+            check(!v.isEmpty, "settableValue found nothing for \(f.name)", f.text)
+            let (drc, dOut) = run("egg-config",
+                                  Commands.dryRunField(record: tmp.path,
+                                                       field: f.name, value: v))
+            if drc == -1 { continue }
+            check(drc == 0,
+                  "egg-config refused \(f.name)=\(v), the value the Settings "
+                  + "screen would show for it", String(dOut.prefix(300)))
+            check(dOut.contains("it already holds the value asked for"),
+                  "\(f.name)=\(v) is legal but is NOT what the record holds; "
+                  + "the control would silently move the setting",
+                  String(dOut.split(separator: "\n")
+                             .filter { $0.contains("wire 0x") }
+                             .joined(separator: "; ")))
+            roundTripped += 1
+        }
+        // Without this the loop above proves nothing when the CLI is missing.
+        check(roundTripped >= 13,
+              "only \(roundTripped) of 13 fields were round-tripped through "
+              + "dryrun; the check above was mostly skipped")
+
+        // The positive control. The same assertion has to FAIL on a value that
+        // is legal but wrong, or it is measuring nothing (a passing check that
+        // cannot fail is this repo's characteristic bug).
+        do {
+            let real = Commands.settableValue(
+                of: c.fields.first { $0.name == "polling" }!)
+            let other = real == "1000" ? "500" : "1000"
+            let (orc, oOut) = run("egg-config",
+                                  Commands.dryRunField(record: tmp.path,
+                                                       field: "polling",
+                                                       value: other))
+            if orc != -1 {
+                check(orc == 0, "the control value must itself be accepted")
+                check(!oOut.contains("it already holds the value asked for"),
+                      "polling=\(other) reported no change against a record "
+                      + "holding \(real); the round-trip check above cannot "
+                      + "fail and proves nothing")
+            }
+        }
+
+        // And the accepts/reading agreement, which needs no CLI at all: a
+        // value the screen would show must be one the field's own `accepts`
+        // sentence allows.
+        let (sc2, setText2) = run("egg-config", ["set"])
+        if sc2 != -1 {
+            for decl in Commands.parseFields(setText2).fields {
+                guard let read = c.fields.first(where: { $0.name == decl.name })
+                else { continue }
+                let v = Commands.settableValue(of: read)
+                if let choices = Commands.choices(for: decl.accepts) {
+                    check(choices.contains(v),
+                          "\(decl.name) reads as \(v), which is not one of the "
+                          + "choices the picker would offer", decl.accepts)
+                } else if let r = Commands.range(for: decl.accepts) {
+                    check(Int(v).map { r.contains($0) } == true,
+                          "\(decl.name) reads as \(v), outside the range the "
+                          + "control would allow", decl.accepts)
+                }
+            }
+        }
 
         let active = c.cpi.filter { $0.active }
         equal(active.count, 1, "exactly one CPI stage is active")
