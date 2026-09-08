@@ -32,6 +32,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Said here rather than left to swiftc's own error, because this script is run
+# by a Homebrew formula on other people's machines. The Command Line Tools are
+# enough; full Xcode is not required.
+command -v swiftc >/dev/null 2>&1 || {
+  echo "build-app.sh: swiftc not found. The SwiftUI front end needs Apple's" >&2
+  echo "  Swift compiler, which comes with the Command Line Tools:" >&2
+  echo "      xcode-select --install" >&2
+  echo "  The two command line tools build without it (cmake --build build)." >&2
+  exit 1
+}
+
 BIN="$APP/Contents/MacOS/EGG Mouse"
 
 rm -rf "$APP"

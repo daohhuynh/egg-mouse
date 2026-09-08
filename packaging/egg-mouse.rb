@@ -17,8 +17,14 @@ class EggMouse < Formula
   license "Apache-2.0"
 
   depends_on "cmake" => :build
-  depends_on xcode: :build          # swiftc, for the SwiftUI front end
   depends_on macos: :sonoma         # the app's LSMinimumSystemVersion is 14.0
+
+  # No `depends_on xcode: :build`, deliberately. It makes Homebrew police the
+  # Xcode VERSION, which failed here on a machine with Xcode 16.4 because
+  # Homebrew wanted 26.3, and it would also exclude anyone who has only the
+  # Command Line Tools. The CLT ship swiftc and the macOS SDK, which is all the
+  # SwiftUI front end needs. build-app.sh checks for swiftc itself and says so
+  # plainly if it is missing.
 
   # No hidapi dependency on purpose. The macOS HID backend is compiled from the
   # pinned upstream sources in third_party/hidapi/, so the binaries depend on
@@ -28,16 +34,22 @@ class EggMouse < Formula
     system "cmake", "-S", ".", "-B", "build", *std_cmake_args,
                     "-DEGG_VENDORED_HIDAPI=ON"
     system "cmake", "--build", "build", "--target", "egg-config", "egg-flash"
-    bin.install "build/egg-config", "build/egg-flash"
 
+    # ORDER MATTERS AND THIS IS NOT STYLISTIC. `bin.install` MOVES the files it
+    # is given rather than copying them, so doing it before this line leaves
+    # build/egg-config gone and build-app.sh fails with "not found". That is
+    # exactly how the first attempt at this formula broke.
+    #
     # The GUI shells out to the two CLIs and owns no write path; see
     # engineering-rules.md 3. Bundling them inside the .app keeps it working
     # even if the Homebrew bin directory is not on a GUI process's PATH, which
-    # it usually is not for an app launched from Finder.
+    # for an app launched from Finder it usually is not.
     system "./Tools/build-app.sh", "--with-tools", "build",
                                    "--version", version.to_s,
                                    "--out", "EGG Mouse.app"
     prefix.install "EGG Mouse.app"
+
+    bin.install "build/egg-config", "build/egg-flash"
   end
 
   def caveats
