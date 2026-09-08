@@ -50,27 +50,70 @@ final class ConfigModel: ObservableObject {
     @Published var busy = false
     @Published var loadError: String?
 
-    /// What the mouse is set to, decoded. Nil until someone asks -- reading it
-    /// puts an A1 12 on the wire and this screen never does that unprompted.
+    /// What the MOUSE is set to, decoded. Nil until it has been read.
+    ///
+    /// DEVICE ONLY. Never a file, and the distinction is now load-bearing in a
+    /// way it was not before 2026-09-08: every editable control on this screen
+    /// reads its value from here and every Preview and Apply writes to the
+    /// mouse. When this could also hold a decoded FILE, "Decode a saved
+    /// record..." silently repointed the whole form at that file while the
+    /// buttons still targeted the hardware -- so a stage showing 400x400 from
+    /// a file, edited in one axis, would have sent 400 to a mouse holding
+    /// 3200. A file reading lives in `fileReading` and is shown, never edited.
     @Published var current: Commands.Shown?
-    /// Where `current` came from, for the pane's own heading: the device, or a
-    /// file. A decoded table with no provenance is the kind of thing someone
-    /// acts on believing it came off the mouse.
+    /// Where `current` came from, for the pane's own heading. A decoded table
+    /// with no provenance is the kind of thing someone acts on believing it
+    /// came off the mouse.
     @Published var currentFrom = ""
+    /// A record decoded from a FILE, for looking at. Drives no control.
+    @Published var fileReading: Commands.Shown?
+    @Published var fileReadingFrom = ""
+    @Published var fileReadingError: String?
     /// Set when a write succeeds after `current` was read. The values on
     /// screen are then older than the mouse, and saying so is free -- whereas
     /// re-reading automatically would send a frame nobody asked for (§4.2a).
     @Published var currentStale = false
     @Published var currentError: String?
 
-    /// Load the decoded table. `from` nil means the device.
-    func loadCurrent(_ runner: ToolRunner, from path: String? = nil) async {
+    /// Decode a record from a FILE, for viewing only.
+    ///
+    /// Deliberately a separate store and a separate function from
+    /// `loadCurrent`. It opens no device, and it must not touch `current` or
+    /// `gates`: a gate derived from a saved file describes that file's record,
+    /// and the controls it would gate write to the mouse.
+    func loadFileReading(_ runner: ToolRunner, path: String) async {
+        busy = true
+        defer { busy = false }
+        fileReadingError = nil
+        do {
+            let r = try await runner.run(
+                "egg-config", Commands.showSettingsMachine(from: path))
+            guard r.ok else {
+                fileReadingError = r.text.isEmpty
+                    ? "egg-config show exited non-zero." : r.text
+                return
+            }
+            let parsed = Commands.parseShow(r.text)
+            guard !parsed.isEmpty else {
+                fileReadingError = "egg-config show returned nothing this app "
+                                 + "could parse from that file."
+                return
+            }
+            fileReading = parsed
+            fileReadingFrom = URL(fileURLWithPath: path).lastPathComponent
+        } catch {
+            fileReadingError = error.localizedDescription
+        }
+    }
+
+    /// Load what the MOUSE is set to. One A1 12.
+    func loadCurrent(_ runner: ToolRunner) async {
         busy = true
         defer { busy = false }
         currentError = nil
         do {
             let r = try await runner.run(
-                "egg-config", Commands.showSettingsMachine(from: path))
+                "egg-config", Commands.showSettingsMachine())
             guard r.ok else {
                 currentError = r.text.isEmpty
                     ? "egg-config show exited non-zero." : r.text
@@ -84,8 +127,7 @@ final class ConfigModel: ObservableObject {
                 return
             }
             current = parsed
-            currentFrom = path.map { URL(fileURLWithPath: $0).lastPathComponent }
-                       ?? "the mouse"
+            currentFrom = "the mouse"
             currentStale = false
 
             // §7.25's gates, FROM THIS COMMAND TOO (added 2026-09-07).
@@ -101,15 +143,12 @@ final class ConfigModel: ObservableObject {
             // carries the reason as the 6th column of every FIELD row and
             // `parseShow` has always kept it in `FieldValue.gate`.
             //
-            // Only when the reading came off the DEVICE. A gate derived from a
-            // saved file describes that file's record, and Preview and Apply
-            // write to the mouse, so adopting it would gate the wrong thing.
-            if path == nil {
-                gates = Dictionary(
-                    parsed.fields.filter { !$0.gate.isEmpty }
-                                 .map { ($0.name, $0.gate) },
-                    uniquingKeysWith: { first, _ in first })
-            }
+            // This function only ever reads the DEVICE now, so the guard that
+            // used to say "only when path == nil" is the function signature.
+            gates = Dictionary(
+                parsed.fields.filter { !$0.gate.isEmpty }
+                             .map { ($0.name, $0.gate) },
+                uniquingKeysWith: { first, _ in first })
         } catch {
             currentError = error.localizedDescription
         }
@@ -247,6 +286,17 @@ struct ConfigView: View {
         /// disabled and this is shown instead, rather than sending a command
         /// whose rejection the user did not cause.
         var problem: String?
+        /// The two CPI boxes, kept SEPARATELY rather than encoded into `to`.
+        ///
+        /// They used to live in `to` as "400x800" and be recovered with
+        /// `split(separator: "x")`, which omits empty subsequences -- so an
+        /// emptied X box round-tripped to the Y value and the box refilled
+        /// itself with the wrong axis's number. Worse, that resurrected number
+        /// was then what the next edit sent: clearing X on a 400x1600 stage
+        /// and typing a new Y would have written X=1600. Two fields cannot
+        /// lose a value the way one string can.
+        var xText: String?
+        var yText: String?
     }
     @State private var pending: Pending?
     @State private var previewed = false
@@ -592,14 +642,16 @@ struct ConfigView: View {
     @ViewBuilder
     private func labelled<C: View>(_ text: String, note: String? = nil,
                                    gate: String? = nil,
+                                   disabled: Bool = false,
                                    help: String = "",
                                    @ViewBuilder control: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let off = disabled || gate != nil
+        return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(text)
                     .frame(width: 180, alignment: .trailing)
-                    .foregroundStyle(gate == nil ? Color.primary : Color.secondary)
-                control().disabled(gate != nil)
+                    .foregroundStyle(off ? Color.secondary : Color.primary)
+                control().disabled(off)
                 Spacer(minLength: 0)
             }
             if let g = gate {
@@ -628,7 +680,12 @@ struct ConfigView: View {
                      // Showing only the second kind keeps the page readable
                      // without deciding for ourselves what is worth saying.
                      note: f.accepts.contains("--") ? f.accepts : nil,
-                     gate: model.gates[name],
+                     // The per-row reason, EXCEPT the one that is true of the
+                     // whole page. "Not read yet" printed under all thirteen
+                     // rows is thirteen copies of a sentence the banner above
+                     // already says once; the row still greys out.
+                     gate: model.current == nil ? nil : blockedReason(name),
+                     disabled: blockedReason(name) != nil,
                      help: f.record + "\n" + f.cite) {
                 control(for: f)
             }
@@ -687,11 +744,41 @@ struct ConfigView: View {
 
     // -------------------------------------------------------------- bindings
 
-    /// What the mouse says this field is, as a value `set` would take.
+    private func deviceField(_ name: String) -> Commands.Shown.FieldValue? {
+        model.current?.fields.first { $0.name == name }
+    }
+
+    /// What the mouse says this field is, as a value `set` would take. Empty
+    /// when there is no reading, or when the byte did not decode -- and every
+    /// caller has to treat empty as "unknown", never as a value.
     private func deviceValue(_ name: String) -> String {
-        guard let f = model.current?.fields.first(where: { $0.name == name })
-        else { return "" }
+        guard let f = deviceField(name), f.ok else { return "" }
         return Commands.settableValue(of: f)
+    }
+
+    /// Why this row cannot be edited, or nil if it can.
+    ///
+    /// ONE PLACE, and it has to cover more than the §7.25 gate. Every control
+    /// is seeded from the device reading, so with no reading `deviceValue` is
+    /// "" -- and an empty string renders as a Toggle that is OFF and a Picker
+    /// that is blank. Those are not "unknown", they are ASSERTIONS, and until
+    /// 2026-09-08 they were live assertions a user could edit and send. A
+    /// field the CLI itself flags `undecodable` was worse: its `text` starts
+    /// with the word "raw", so the Toggle read it as off and offered to write
+    /// a byte nobody had decoded. engineering-rules.md §1.2a -- an absence
+    /// shown as a blank is a claim.
+    private func blockedReason(_ name: String) -> String? {
+        if model.current == nil {
+            return "Not read yet, so this shows nothing and cannot be changed."
+        }
+        guard let f = deviceField(name) else {
+            return "This reading does not include \(name)."
+        }
+        if !f.ok {
+            return "The byte here did not decode, so this tool will not offer "
+                 + "to change it: \(f.text)"
+        }
+        return model.gates[name]
     }
 
     /// A control's value: the pending change if this row owns it, otherwise
@@ -707,7 +794,19 @@ struct ConfigView: View {
             set: { v in
                 previewed = false
                 let from = deviceValue(name)
-                guard v != from, !v.isEmpty else { pending = nil; return }
+                if v == from { pending = nil; return }
+                // An EMPTY box is a pending change with a problem, not a
+                // cleared one. Clearing it made the getter fall back to the
+                // device value, so the box refilled itself on the next render
+                // and a text field could not be emptied to retype it.
+                guard !v.isEmpty else {
+                    pending = Pending(key: "field:" + name,
+                                      label: caption(name),
+                                      from: from, to: "",
+                                      preview: [], apply: [],
+                                      problem: "This needs a value.")
+                    return
+                }
                 pending = Pending(
                     key: "field:" + name,
                     label: caption(name),
@@ -737,10 +836,22 @@ struct ConfigView: View {
     /// stage past it is shown greyed with the CLI's own word for it.
     @ViewBuilder private var cpiSection: some View {
         Text("CPI stages").font(.headline)
+        // FOUR ROWS ALWAYS, read or not. When this rendered `c.cpi` only, a
+        // failed or absent read made the whole section -- and with it the
+        // active-stage radio, the ONLY control for `cpi-stage` -- disappear
+        // rather than grey out. A control that vanishes tells the user the
+        // setting does not exist.
         if let c = model.current, !c.cpi.isEmpty {
             ForEach(c.cpi, id: \.index) { s in cpiRow(s) }
         } else {
-            Text("Not read yet.").font(.caption).foregroundStyle(.secondary)
+            ForEach(1...4, id: \.self) { i in
+                cpiRow(Commands.Shown.Stage(index: i, x: 0, y: 0,
+                                            active: false, inUse: true),
+                       readable: false)
+            }
+            Text("Not read yet, so these show nothing and cannot be changed.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.leading, 192)
         }
         Text("10 to 10000 in steps of 10, then 10050 to 30000 in steps of 50. "
            + "The X\u{2260}Y flag byte is computed, never typed.")
@@ -762,7 +873,8 @@ struct ConfigView: View {
         }
     }
 
-    @ViewBuilder private func cpiRow(_ s: Commands.Shown.Stage) -> some View {
+    @ViewBuilder private func cpiRow(_ s: Commands.Shown.Stage,
+                                     readable: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             // The active-stage radio. `cpi-stage` counts from 0 and the CLI
             // says so in its own accepts line ("0 to 3 -- which CPI stage is
@@ -770,11 +882,16 @@ struct ConfigView: View {
             Toggle("", isOn: activeStageBinding(s.index))
                 .toggleStyle(.checkbox)
                 .labelsHidden()
-                .disabled(model.fields.first { $0.name == "cpi-stage" } == nil
-                          || model.gates["cpi-stage"] != nil)
+                .disabled(!readable
+                          || model.fields.first { $0.name == "cpi-stage" } == nil
+                          || blockedReason("cpi-stage") != nil)
             Text("CPI \(s.index)").frame(width: 60, alignment: .leading)
-            TextField("X", text: cpiBinding(s, axis: .x)).frame(width: 74)
-            TextField("Y", text: cpiBinding(s, axis: .y)).frame(width: 74)
+            TextField("X", text: readable ? cpiBinding(s, axis: .x)
+                                          : .constant(""))
+                .frame(width: 74).disabled(!readable)
+            TextField("Y", text: readable ? cpiBinding(s, axis: .y)
+                                          : .constant(""))
+                .frame(width: 74).disabled(!readable)
             if !s.inUse {
                 Text("beyond CPI Levels; not selectable")
                     .font(.caption).foregroundStyle(.secondary)
@@ -795,16 +912,20 @@ struct ConfigView: View {
         return Binding(
             get: {
                 if let p = pending, p.key == key {
-                    let parts = p.to.split(separator: "x").map(String.init)
-                    if axis == .x { return parts.first ?? "" }
-                    return parts.count > 1 ? parts[1] : (parts.first ?? "")
+                    return (axis == .x ? p.xText : p.yText) ?? ""
                 }
                 return String(axis == .x ? s.x : s.y)
             },
             set: { v in
                 previewed = false
-                let x = axis == .x ? v : cpiBinding(s, axis: .x).wrappedValue
-                let y = axis == .y ? v : cpiBinding(s, axis: .y).wrappedValue
+                // The OTHER box comes from the pending pair if this stage owns
+                // it, and from the device otherwise. Read straight out of the
+                // pending rather than back through this binding: the old code
+                // called `cpiBinding(...).wrappedValue` recursively, which is
+                // the path that resurrected an emptied box.
+                let mine = pending?.key == key ? pending : nil
+                let x = axis == .x ? v : (mine?.xText ?? String(s.x))
+                let y = axis == .y ? v : (mine?.yText ?? String(s.y))
                 setPendingCpi(stage: s.index, was: (s.x, s.y), x: x, y: y)
             })
     }
@@ -812,12 +933,14 @@ struct ConfigView: View {
     private func setPendingCpi(stage: Int, was: (x: Int, y: Int),
                                x: String, y: String) {
         let key = "cpi:\(stage)"
+        let wasText = was.x == was.y ? "\(was.x)" : "\(was.x) x \(was.y)"
         guard let xi = Int(x.trimmingCharacters(in: .whitespaces)),
               let yi = Int(y.trimmingCharacters(in: .whitespaces)) else {
             pending = Pending(key: key, label: "CPI \(stage)",
-                              from: "\(was.x)x\(was.y)", to: "\(x)x\(y)",
+                              from: wasText, to: "\(x) x \(y)",
                               preview: [], apply: [],
-                              problem: "Both boxes have to be numbers.")
+                              problem: "Both boxes have to be numbers.",
+                              xText: x, yText: y)
             return
         }
         if xi == was.x && yi == was.y { pending = nil; return }
@@ -834,11 +957,12 @@ struct ConfigView: View {
         }
         pending = Pending(
             key: key, label: "CPI \(stage)",
-            from: was.x == was.y ? "\(was.x)" : "\(was.x)x\(was.y)",
-            to: xi == yi ? "\(xi)" : "\(xi)x\(yi)",
+            from: wasText,
+            to: xi == yi ? "\(xi)" : "\(xi) x \(yi)",
             preview: Commands.previewCpi(stage: stage, x: xi, y: yi),
             apply: Commands.applyCpi(stage: stage, x: xi, y: yi),
-            problem: problem)
+            problem: problem,
+            xText: x, yText: y)
     }
 
     /// The radio beside a CPI row. Ticking it sets `cpi-stage`; there is no
@@ -892,13 +1016,32 @@ struct ConfigView: View {
     }
 
     @ViewBuilder private func multiclickRow(_ button: String) -> some View {
-        let state = mcState(button)
         let modes = Commands.multiclickModes(for: button)
         let unknown = mcDevice(button).mode == "unknown"
+        // WHAT THE CONTROL SHOWS WHEN THE BYTE DID NOT DECODE: "off" with an
+        // empty box, so the row offers the repair.
+        //
+        // It used to show the undecodable state and then `.disabled` the whole
+        // row -- which froze it in the one condition the control exists to get
+        // out of. `egg-config multiclick left off 5 --yes` works on that byte;
+        // it inspects nothing first. So the GUI was refusing a write the CLI
+        // accepts, which is the one thing this screen must never do. Worse for
+        // middle/forward/back: with no SPDT picker and mode != "off", the row
+        // rendered no control at all, so dropping `.disabled` alone would have
+        // fixed nothing.
+        //
+        // The box starts EMPTY rather than carrying the raw byte across,
+        // because `show --machine` puts the undecoded byte in the value column
+        // and 200 is not a filter value -- prefilling it would stage a change
+        // the CLI refuses and make the user clear it first.
+        let shown: (mode: String, value: String) =
+            (pending?.key == "mc:" + button) ? mcState(button)
+            : (unknown ? ("off", "") : mcDevice(button))
         labelled(button.prefix(1).uppercased() + button.dropFirst() + " Button",
                  note: unknown
                      ? "The byte here is neither a filter value nor a GX mode, "
-                     + "so this tool will not guess what it means."
+                     + "so nothing is shown for it. Setting a filter value "
+                     + "below replaces it."
                      : nil,
                  help: "record 0x3d + 7n, shared with the SPDT mode") {
             HStack(spacing: 8) {
@@ -908,22 +1051,22 @@ struct ConfigView: View {
                 if modes.count == 1 { Color.clear.frame(width: 120, height: 1) }
                 if modes.count > 1 {
                     Picker("", selection: Binding(
-                        get: { state.mode },
+                        get: { shown.mode },
                         set: { setPendingMulticlick(button, mode: $0,
-                                                    value: state.value) })) {
+                                                    value: shown.value) })) {
                         ForEach(modes, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden().frame(width: 120)
                 }
-                if state.mode == "off" {
+                if shown.mode == "off" {
                     TextField("0-25", text: Binding(
-                        get: { state.value },
+                        get: { shown.value },
                         set: { setPendingMulticlick(button, mode: "off",
                                                     value: $0) }))
                         .frame(width: 64)
                 }
             }
-            .disabled(unknown)
+            .disabled(model.current == nil)
         }
     }
 
@@ -1121,6 +1264,19 @@ struct ConfigView: View {
     /// field, reads it back and verifies it, so a bar that said APPLY over five
     /// queued edits would be claiming an atomicity the protocol has not got.
     /// What is on screen is exactly what the next command will do.
+    /// Why the change sitting in the bar cannot be sent, asked again at the
+    /// moment of sending.
+    ///
+    /// The row's own control is disabled while a field is gated, so a gated
+    /// change normally cannot be staged at all. But `gates` is filled BY a
+    /// device read, and a read can land after the change is already in the
+    /// bar -- so the bar asks again rather than trusting that the row asked
+    /// once. §7.25: the GUI must not present a choice the tool will reject.
+    private var pendingGate: String? {
+        guard let p = pending, p.key.hasPrefix("field:") else { return nil }
+        return blockedReason(String(p.key.dropFirst("field:".count)))
+    }
+
     @ViewBuilder private var pendingBar: some View {
         if let p = pending {
             VStack(spacing: 0) {
@@ -1131,18 +1287,24 @@ struct ConfigView: View {
                         Text(p.from.isEmpty ? p.to
                                             : p.from + "  \u{2192}  " + p.to)
                             .font(.caption).foregroundStyle(.secondary)
-                        if let why = p.problem {
+                        if let why = p.problem ?? pendingGate {
                             Text(why).font(.caption).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer()
                     Button("Preview") {
-                        previewed = true
+                        // ARMED BY A DRY RUN THAT SUCCEEDED, not by the click.
+                        // `run`'s completion fires only on exit 0, which is
+                        // how the restore flow beside it has always worked;
+                        // this button used to set the flag first and arm Apply
+                        // even when the CLI had refused the change.
+                        previewed = false
                         showOutput = true
-                        run(p.preview)
+                        run(p.preview) { previewed = true }
                     }
-                    .disabled(p.problem != nil || p.preview.isEmpty)
+                    .disabled(p.problem != nil || p.preview.isEmpty
+                              || pendingGate != nil)
                     .help("A dry run. Prints the exact byte that would move, "
                         + "and sends nothing.")
                     Button("Apply") {
@@ -1157,7 +1319,8 @@ struct ConfigView: View {
                             Task { await model.loadCurrent(runner) }
                         }
                     }
-                    .disabled(!previewed || p.problem != nil || p.apply.isEmpty)
+                    .disabled(!previewed || p.problem != nil || p.apply.isEmpty
+                              || pendingGate != nil)
                     .help(previewed ? "Write it, read it back, verify."
                                     : "Preview it first.")
                     Button("Discard") { pending = nil; previewed = false }
@@ -1219,15 +1382,33 @@ struct ConfigView: View {
     /// gives up on the whole thing in one body. That is a real constraint, not
     /// a style choice, and it is worth a line here so nobody merges them back.
     @ViewBuilder private var rawReading: some View {
-        if let c = model.current {
+        if model.current != nil || model.fileReading != nil
+            || model.fileReadingError != nil {
             DisclosureGroup("Everything the mouse reported",
                             isExpanded: $showReading) {
                 VStack(alignment: .leading, spacing: 14) {
-                    shownFields(c.fields)
-                    shownCpi(c.cpi)
-                    shownButtons(c)
-                    shownClicks(c.clicks)
-                    shownRaw(c.raw)
+                    if let c = model.current {
+                        Text("From \(model.currentFrom).")
+                            .font(.caption).foregroundStyle(.secondary)
+                        decoded(c)
+                    }
+                    // A FILE, kept visibly apart from the mouse's own reading
+                    // and driving no control on this page. Two decoded tables
+                    // on one screen is exactly the situation where someone
+                    // acts on the wrong one, so each says where it came from.
+                    if let e = model.fileReadingError {
+                        Divider()
+                        Text(e).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let f = model.fileReading {
+                        Divider()
+                        Text("From the file \(model.fileReadingFrom). This is "
+                           + "shown only; the controls above are the mouse.")
+                            .font(.caption).bold()
+                            .fixedSize(horizontal: false, vertical: true)
+                        decoded(f)
+                    }
                 }
                 .padding(.top, 6)
             }
@@ -1235,10 +1416,29 @@ struct ConfigView: View {
         }
     }
 
+    @ViewBuilder private func decoded(_ c: Commands.Shown) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            shownFields(c.fields)
+            shownCpi(c.cpi)
+            shownButtons(c)
+            shownClicks(c.clicks)
+            shownRaw(c.raw)
+        }
+    }
+
     @ViewBuilder private var outputDisclosure: some View {
         DisclosureGroup("Tool output", isExpanded: $showOutput) {
-            OutputPane(text: runner.liveOutput.isEmpty ? model.output
-                                                       : runner.liveOutput)
+            // `liveOutput` ONLY WHILE SOMETHING IS RUNNING. It is the live
+            // stream of the command in flight, and this pane used to prefer it
+            // whenever it was non-empty -- which meant the automatic re-read
+            // after a successful Apply replaced the write's own read-back and
+            // diff-verify output with a screen of machine-readable TSV. The
+            // evidence that the write landed correctly is the whole reason
+            // this pane exists, and it was being thrown away a moment after it
+            // arrived. When nothing is running, `model.output` holds the last
+            // command a person actually asked for.
+            OutputPane(text: runner.running != nil && !runner.liveOutput.isEmpty
+                             ? runner.liveOutput : model.output)
                 .frame(height: 220)
                 .padding(.top, 6)
         }
@@ -1382,7 +1582,7 @@ struct ConfigView: View {
         p.message = "Choose a settings record saved earlier"
         guard p.runModal() == .OK, let u = p.url else { return }
         showReading = true
-        Task { await model.loadCurrent(runner, from: u.path) }
+        Task { await model.loadFileReading(runner, path: u.path) }
     }
 
     /// Two clicks, never one. The first is offline (`dryrun`) and shows the

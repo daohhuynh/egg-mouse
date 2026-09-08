@@ -138,6 +138,11 @@ final class ToolRunner: ObservableObject {
              _ args: [String],
              workingDirectory: URL? = nil,
              isWritePhase: Bool = false) async throws -> ToolResult {
+        // CLEARED BEFORE THE THROW, not after it. `liveOutput` is read by
+        // every screen's output pane and this runner is a singleton, so
+        // returning early here used to leave the PREVIOUS command's output on
+        // screen underneath a "not found" error about a different one.
+        liveOutput = ""
         guard let exe = Self.locate(tool) else { throw ToolError.notFound(tool) }
 
         // See `verbose`. Prepended, because both tools' parsers take flags
@@ -261,12 +266,42 @@ final class ToolRunner: ObservableObject {
         do { try p.run() } catch {
             throw ToolError.launchFailed("python3", error.localizedDescription)
         }
-        let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(),
-                         encoding: .utf8) ?? ""
-        let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                         encoding: .utf8) ?? ""
-        p.waitUntilExit()
-        return ToolResult(status: p.terminationStatus, stdout: out, stderr: err)
+
+        // THE SAME DRAIN AS `run`, and it belongs here for the same two
+        // reasons. Reading stdout to EOF and only then starting on stderr
+        // deadlocks the moment a script writes more than the pipe buffer holds
+        // (64 KiB) to the one not being read -- and the update pipeline's
+        // scripts dump resource tables, which is exactly the shape that gets
+        // there. Doing it with synchronous reads on an @MainActor function
+        // also froze the window for the whole run. Both pipes, both on their
+        // own threads, and the await keeps the main actor free.
+        let outBuf = OutputBuffer(), errBuf = OutputBuffer()
+        let outHandle = outPipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            let group = DispatchGroup()
+            let q = DispatchQueue.global(qos: .userInitiated)
+            q.async(group: group) {
+                while true {
+                    let d = outHandle.availableData
+                    if d.isEmpty { break }
+                    outBuf.append(d)
+                }
+            }
+            q.async(group: group) {
+                while true {
+                    let d = errHandle.availableData
+                    if d.isEmpty { break }
+                    errBuf.append(d)
+                }
+            }
+            group.notify(queue: q) {
+                p.waitUntilExit()
+                c.resume()
+            }
+        }
+        return ToolResult(status: p.terminationStatus,
+                          stdout: outBuf.text, stderr: errBuf.text)
     }
 }
 
