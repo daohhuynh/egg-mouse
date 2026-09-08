@@ -6,6 +6,23 @@
 import SwiftUI
 
 struct HomeView: View {
+
+    /// Exactly the marker `UpdatesView.repoRoot()` looks for. Kept beside the
+    /// card that depends on it: a card enabled by one rule and a screen gated by
+    /// another is how "it does nothing when I click it" happens.
+    private var repoAvailable: Bool {
+        var d = Bundle.main.bundleURL.deletingLastPathComponent()
+        for _ in 0..<6 {
+            if FileManager.default.fileExists(
+                    atPath: d.appendingPathComponent("Tools/pe/ingest.py").path) {
+                return true
+            }
+            d = d.deletingLastPathComponent()
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        return FileManager.default.fileExists(
+            atPath: cwd.appendingPathComponent("Tools/pe/ingest.py").path)
+    }
     @Binding var screen: Screen
     @EnvironmentObject var runner: ToolRunner
     @State private var toolsFound = ToolRunner.locate("egg-config") != nil
@@ -83,17 +100,37 @@ struct HomeView: View {
                         + "There is one mouse and no spare.",
                     action: { screen = .firmware })
 
+                // SAY SO WHEN IT CANNOT WORK, RATHER THAN AFTER THE CLICK.
+                //
+                // This screen shells out to the repository's own ingest
+                // scripts, found by walking up from the bundle for
+                // Tools/pe/ingest.py. A .dmg install puts the app in
+                // /Applications with a working directory of "/", and the
+                // Homebrew formula installs no part of Tools/, so for everyone
+                // who did not clone the repo the marker is not there and the
+                // screen can only print a refusal. Advertising it identically
+                // in both cases sent a downloader through choosing a file and
+                // typing a version label to be told to open the app from inside
+                // a checkout they do not have. Found 2026-09-08.
                 HomeCard(
                     title: "New versions",
                     systemImage: "shippingbox",
                     tint: .teal,
-                    blurb: "Point this at a firmware updater or configuration "
+                    blurb: repoAvailable
+                         ? "Point this at a firmware updater or configuration "
                          + "tool that this build has never seen. It reads the "
                          + "file and reports whether the settings layout and "
-                         + "the firmware image can be identified — or refuses, "
-                         + "and says exactly what it could not work out.",
-                    risk: "Reads files only. Sends nothing to the mouse.",
+                         + "the firmware image can be identified, or refuses, "
+                         + "and says exactly what it could not work out."
+                         : "Needs the egg-mouse source checkout, because it "
+                         + "runs the repository's own ingest scripts. It is not "
+                         + "part of a downloaded or Homebrew install, so there "
+                         + "is nothing for it to run from here.",
+                    risk: repoAvailable
+                        ? "Reads files only. Sends nothing to the mouse."
+                        : "Unavailable in this install.",
                     action: { screen = .updates })
+                    .disabled(!repoAvailable)
 
                 HomeCard(
                     title: "Advanced",

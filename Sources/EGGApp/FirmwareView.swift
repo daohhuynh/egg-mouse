@@ -70,6 +70,22 @@ struct FirmwareView: View {
     @EnvironmentObject var runner: ToolRunner
     @StateObject private var m = FirmwareModel()
 
+    /// THE BUSY GATE MUST NOT LIVE ONLY IN THIS VIEW'S MODEL.
+    ///
+    /// `RootView` switches screens with a `switch`, so leaving Firmware tears
+    /// down this view and its `@StateObject`. The running `Task` retains `m`
+    /// and keeps the subprocess alive, but coming back builds a FRESH
+    /// `FirmwareModel` whose `busy` is false, and the second press of
+    /// "Back up firmware" then launched a second `egg-flash` against the same
+    /// bootloader, writing the same output path. `Device.cpp` opens
+    /// non-exclusively, so the two interleave and the saved backup can be
+    /// silently wrong while still passing its own sha256 sidecar.
+    ///
+    /// `runner` is one object for the app's lifetime, so asking it survives the
+    /// round trip. Home stays enabled on purpose: the fix is to make the guard
+    /// outlive navigation, not to trap someone on this screen. Found 2026-09-08.
+    private var busy: Bool { m.busy || runner.running != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ScreenHeader(title: "Firmware",
@@ -94,8 +110,14 @@ struct FirmwareView: View {
                 }
                 .frame(width: 340)
 
-                OutputPane(text: runner.liveOutput.isEmpty ? m.output
-                                                           : runner.liveOutput)
+                // A finished run's evidence must outlive the live stream. `liveOutput`
+                // holds stdout only and is never cleared on completion, so preferring
+                // it whenever it is non-empty made `m.output` -- which is stdout AND
+                // stderr, the whole record of what happened -- unreachable from the
+                // first command onward. ConfigView was fixed this way in 4aeac83; this
+                // screen and AdvancedView kept the broken form.
+                OutputPane(text: runner.running != nil && !runner.liveOutput.isEmpty
+                                 ? runner.liveOutput : m.output)
             }
             .padding([.horizontal, .bottom])
         }
@@ -126,11 +148,11 @@ struct FirmwareView: View {
                 Button("Put the mouse into update mode") {
                     run(Commands.enterBootloader())
                 }
-                .disabled(runner.writePhaseInProgress || m.busy)
+                .disabled(runner.writePhaseInProgress || busy)
                 Button("Try to leave update mode") {
                     run(Commands.leaveBootloader())
                 }
-                .disabled(runner.writePhaseInProgress || m.busy)
+                .disabled(runner.writePhaseInProgress || busy)
             }
             Text("Leaving works if the mouse has firmware to go back to. If it "
                  + "was already mid-update it will come straight back into "
@@ -168,12 +190,12 @@ struct FirmwareView: View {
             HStack {
                 TextField("Where to save", text: $m.backupPath)
                 Button("Choose…") { chooseSave() }
-                    .disabled(m.busy)
+                    .disabled(busy)
             }
             Button("Back up firmware") {
                 run(Commands.backupFirmware(to: effectiveBackup))
             }
-            .disabled(runner.writePhaseInProgress || m.busy)
+            .disabled(runner.writePhaseInProgress || busy)
         }
     }
 
@@ -189,7 +211,7 @@ struct FirmwareView: View {
             HStack {
                 TextField("Updater .exe", text: $m.updaterPath)
                 Button("Choose…") { chooseUpdater() }
-                    .disabled(m.busy)
+                    .disabled(busy)
             }
             Picker("Version", selection: $m.version) {
                 ForEach(m.versions, id: \.self) { Text($0).tag($0) }
@@ -214,7 +236,7 @@ struct FirmwareView: View {
             Button("Check the image") {
                 run(Commands.checkImage(updater: m.updaterPath, version: m.version))
             }
-                .disabled(m.updaterPath.isEmpty || m.busy)
+                .disabled(m.updaterPath.isEmpty || busy)
         }
     }
 
@@ -233,7 +255,7 @@ struct FirmwareView: View {
 
             Button("Preview the exact bytes") { preview() }
                 .disabled(m.updaterPath.isEmpty || runner.writePhaseInProgress
-                          || m.busy)
+                          || busy)
 
             if !m.token.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
@@ -314,7 +336,7 @@ struct FirmwareView: View {
 
             Button("Preview the restore") { previewRestore() }
                 .disabled(m.restoreFrom.isEmpty || m.restoreCurrent.isEmpty
-                          || runner.writePhaseInProgress || m.busy)
+                          || runner.writePhaseInProgress || busy)
 
             if !m.restoreToken.isEmpty {
                 Text("Confirmation code: \(m.restoreToken)")
@@ -343,7 +365,7 @@ struct FirmwareView: View {
     /// firmware version, so sharing the function would mean passing empty
     /// strings through checks that exist for a different command.
     private var restoreBlocked: String? {
-        if m.busy { return kSomethingRunning }
+        if busy { return kSomethingRunning }
         if runner.writePhaseInProgress {
             return "A firmware write is already running. It cannot be "
                  + "interrupted, and starting a second one is not possible."
@@ -408,7 +430,7 @@ struct FirmwareView: View {
     /// Nil when a flash is allowed; otherwise the reason, shown to the user.
     /// One function decides this and Tests/test_app_commands.swift drives it.
     private var blocked: String? {
-        if m.busy { return kSomethingRunning }
+        if busy { return kSomethingRunning }
         return Commands.flashBlockedReason(
             updater: m.updaterPath,
             backup: effectiveBackup,

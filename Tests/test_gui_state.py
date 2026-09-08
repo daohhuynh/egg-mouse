@@ -225,15 +225,34 @@ class NoPublishedStateIsWriteOnly(unittest.TestCase):
 
     def test_the_firmware_screen_disables_on_its_own_busy_flag(self):
         """The specific instance, pinned by name. The general check above would
-        pass if `busy` were merely mentioned in a comment."""
+        pass if `busy` were merely mentioned in a comment.
+
+        The gate is `FirmwareView.busy`, NOT `m.busy`, and the difference is the
+        whole point. `RootView` switches screens with a `switch`, so leaving the
+        screen tears down the view and its `@StateObject`; returning builds a
+        fresh `FirmwareModel` with `busy == false` while the subprocess it was
+        guarding is still running, and a second `egg-flash` could then be
+        launched against the same bootloader and the same output file. The
+        computed property ORs in `runner.running`, which is one object for the
+        app's lifetime and therefore survives the round trip. Asserting on
+        `m.busy` here would pin the defect in place."""
         fv = strip_comments_and_strings(
             self.src.get("Sources/EGGApp/FirmwareView.swift", ""))
         self.assertIn("@Published var busy", fv)
+        self.assertRegex(
+            fv, r"private var busy: Bool \{[^}]*\bm\.busy\b[^}]*"
+                r"\brunner\.running\b",
+            "the Firmware screen's busy gate must outlive navigation: it has to "
+            "consult the app-lifetime ToolRunner, not only this view's model, "
+            "or leaving and returning mid-operation resets it")
         self.assertGreaterEqual(
-            len(re.findall(r"\.disabled\([^)]*\bm\.busy\b", fv)), 5,
+            len(re.findall(r"\.disabled\([^)]*(?<!\.)\bbusy\b", fv)), 5,
             "the Firmware screen has five operations and every button that "
             "starts one must be disabled while another is running")
-        self.assertIn("if m.busy { return kSomethingRunning }", fv,
+        self.assertNotIn(".disabled(m.busy", fv,
+                         "a gate that reads the view-scoped flag directly does "
+                         "not survive leaving and re-entering the screen")
+        self.assertIn("if busy { return kSomethingRunning }", fv,
                       "the two blocked-reason computations must say WHY, not "
                       "just grey the button out")
 

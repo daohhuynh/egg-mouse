@@ -97,8 +97,14 @@ struct AdvancedView: View {
                 }
                 .frame(width: 330)
 
-                OutputPane(text: runner.liveOutput.isEmpty ? model.output
-                                                           : runner.liveOutput)
+                // A finished run's evidence must outlive the live stream. `liveOutput`
+                // holds stdout only and is never cleared on completion, so preferring
+                // it whenever it is non-empty made `model.output` -- which is stdout AND
+                // stderr, the whole record of what happened -- unreachable from the
+                // first command onward. ConfigView was fixed this way in 4aeac83; this
+                // screen and AdvancedView kept the broken form.
+                OutputPane(text: runner.running != nil && !runner.liveOutput.isEmpty
+                                 ? runner.liveOutput : model.output)
             }
             .padding(.horizontal)
             .padding(.bottom)
