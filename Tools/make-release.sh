@@ -85,7 +85,11 @@ FIRST LAUNCH: macOS WILL WARN YOU, AND HERE IS WHY
      Click "Open Anyway", and authenticate.
   4. Launch it again and click Open.
 
-  You only do this once.
+  If the app then says "egg-config" could not be verified, macOS is assessing
+  the two command line tools inside the bundle separately from the app that
+  runs them. Clear the download flag from the whole bundle in one go:
+
+      xattr -dr com.apple.quarantine "/Applications/EGG Mouse.app"
 
   If you would rather not, and you have Homebrew, this installs the same
   software with no warning at all, because software Homebrew compiles on your
@@ -93,17 +97,45 @@ FIRST LAUNCH: macOS WILL WARN YOU, AND HERE IS WHY
 
       brew install daohhuynh/egg-mouse/egg-mouse
 
+GRANT INPUT MONITORING, OR NOTHING WORKS
+  macOS does not hand over the vendor HID interface without it, and the failure
+  looks like a broken app rather than a permission: every setting reads as
+  unavailable and the tools report that the interface was found but could not
+  be opened.
+
+  System Settings > Privacy & Security > Input Monitoring, add "EGG Mouse",
+  then quit the app fully and reopen it. A running process does not pick up a
+  new grant.
+
 WHAT IT DOES
   Settings   reads and changes your mouse's configuration.
-  Firmware   backs up the installed firmware, and writes a new one.
+  Firmware   backs up the installed firmware, and writes a new one. It needs
+             Endgame's own Windows updater .exe, which you download yourself:
+             the firmware image is read out of their file, not shipped here.
 
   egg-flash REWRITES FIRMWARE. It is provided AS IS, without warranty of any
   kind, and a failed flash may leave a mouse that does not work. Read the
   LICENSE and NOTICE files in the repository before using the Firmware screen.
 
-  If your mouse ever stops responding: hold the LEFT and RIGHT buttons
-  together, plug the cable in while still holding, keep holding a few more
-  seconds, then release. It comes back as a re-flashable bootloader.
+  Everything here was derived from ONE mouse, on firmware 1.07 and 1.10. Those
+  are the only versions any of it has been tested against. egg-flash refuses a
+  mouse reporting anything else unless you explicitly override it.
+
+  IF YOUR MOUSE STOPS RESPONDING: hold the LEFT and RIGHT buttons together,
+  plug the cable in while still holding, keep holding a few more seconds, then
+  release. It comes back as a bootloader that can be written again.
+
+  In the bootloader the DPI light underneath blinks green, at a shade and
+  interval no CPI stage uses, so you can see the state without any software. To
+  find out whether a replug will fix it, unplug and plug back in holding
+  nothing: back to a working mouse means you are fine; still blinking green
+  means only a completed flash will clear it.
+
+  Honest limit: the button entry has worked every time it has been tried, but
+  every trial was on a HEALTHY mouse. Whether it still works with the firmware
+  blank or half-written has never been tested, and nothing has ever been
+  written to a bootloader reached that way. Both are reasoned guesses, not
+  measurements.
 
 SOURCE
   https://github.com/daohhuynh/egg-mouse
